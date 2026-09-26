@@ -1,0 +1,75 @@
+[
+  {
+    "description": "No CSP header expects CSP-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": ["CSP-001"],
+    "notExpectedRuleIds": ["CSP-002", "CSP-003", "CSP-004", "CSP-005", "CSP-006", "CSP-007"]
+  },
+  {
+    "description": "CSP with unsafe-inline in script-src expects CSP-002, CSP-005, CSP-006, CSP-007 and NOT CSP-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'"
+      }
+    },
+    "expectedRuleIds": ["CSP-002", "CSP-005", "CSP-006", "CSP-007"],
+    "notExpectedRuleIds": ["CSP-001"]
+  },
+  {
+    "description": "CSP with unsafe-eval in script-src expects CSP-003",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-eval'"
+      }
+    },
+    "expectedRuleIds": ["CSP-003"],
+    "notExpectedRuleIds": ["CSP-001"]
+  },
+  {
+    "description": "Strong CSP with nonce, object-src none, base-uri, frame-ancestors produces no high findings",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-security-policy": "script-src 'nonce-abc123'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["CSP-001", "CSP-002", "CSP-003", "CSP-004"]
+  },
+  {
+    "description": "CSP with wildcard in script-src expects CSP-004",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-security-policy": "default-src 'self'; script-src *"
+      }
+    },
+    "expectedRuleIds": ["CSP-004"],
+    "notExpectedRuleIds": ["CSP-001"]
+  },
+  {
+    "description": "CSP with frame-ancestors directive means XFO-001 should NOT fire",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-security-policy": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["XFO-001", "CSP-001"]
+  }
+]

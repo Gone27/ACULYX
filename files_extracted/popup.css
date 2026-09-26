@@ -1,0 +1,456 @@
+/* =============================================================
+   SecCheck Popup — Dark-themed security checker popup styles
+   Width: fixed 350px | Max-height: 600px with scroll
+   ============================================================= */
+
+/* ── CSS variables ─────────────────────────────────────────── */
+:root {
+  --color-critical: #c0392b;
+  --color-high: #e74c3c;
+  --color-medium: #f39c12;
+  --color-low: #2980b9;
+  --color-info: #7f8c8d;
+  --color-pass: #27ae60;
+  --bg: #1a1a2e;
+  --bg-card: #16213e;
+  --bg-hover: #0f3460;
+  --text: #e0e0e0;
+  --text-muted: #7f8c8d;
+  --border: #2c3e50;
+  --radius: 6px;
+}
+
+/* ── Reset / base ───────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 350px;
+  max-height: 600px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── Scrollbar (Webkit) ─────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.popup-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.settings-icon {
+  font-size: 18px;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+  line-height: 1;
+}
+
+.settings-icon:hover,
+.settings-icon:focus {
+  color: var(--text);
+  outline: none;
+}
+
+/* ── Grade section ──────────────────────────────────────────── */
+.grade-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.grade-badge {
+  /* Size and shape */
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  /* Content */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+
+  /* Default unknown state */
+  background: #7f8c8d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition: background 0.3s ease;
+}
+
+.grade-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0; /* allow text truncation */
+}
+
+.score {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.origin {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+/* ── Coverage bar ───────────────────────────────────────────── */
+.coverage-bar {
+  padding: 6px 16px;
+  background: #1e2a3a;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--color-medium);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* hidden attribute support */
+.coverage-bar[hidden] {
+  display: none;
+}
+
+/* ── State message ──────────────────────────────────────────── */
+.state-message {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  min-height: 36px;
+}
+
+.state-message:empty {
+  display: none;
+}
+
+/* ── Monitor section ────────────────────────────────────────── */
+.monitor-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.monitor-section[hidden] {
+  display: none;
+}
+
+.btn-primary {
+  width: 100%;
+  max-width: 240px;
+  padding: 10px 20px;
+  background: #0f3460;
+  color: #fff;
+  border: 1px solid #1a5276;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  background: #154882;
+  border-color: #2471a3;
+  outline: none;
+}
+
+.btn-primary:active {
+  background: #0a2647;
+}
+
+.monitor-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 280px;
+}
+
+/* ── Findings section ───────────────────────────────────────── */
+.findings-section {
+  padding: 12px 16px;
+}
+
+.findings-section[hidden] {
+  display: none;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+/* ── Findings list ──────────────────────────────────────────── */
+.findings-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.finding-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  border-left: 4px solid var(--border); /* overridden by severity modifier */
+  transition: background 0.15s ease;
+}
+
+.finding-item:hover {
+  background: var(--bg-hover);
+}
+
+/* Severity-specific left-border colours */
+.finding-item.severity-critical { border-left-color: var(--color-critical); }
+.finding-item.severity-high     { border-left-color: var(--color-high); }
+.finding-item.severity-medium   { border-left-color: var(--color-medium); }
+.finding-item.severity-low      { border-left-color: var(--color-low); }
+.finding-item.severity-info     { border-left-color: var(--color-info); }
+.finding-item.severity-pass     { border-left-color: var(--color-pass); }
+
+.finding-severity {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Severity badge background colours */
+.severity-critical .finding-severity { background: var(--color-critical); color: #fff; }
+.severity-high     .finding-severity { background: var(--color-high);     color: #fff; }
+.severity-medium   .finding-severity { background: var(--color-medium);   color: #fff; }
+.severity-low      .finding-severity { background: var(--color-low);      color: #fff; }
+.severity-info     .finding-severity { background: var(--color-info);     color: #fff; }
+.severity-pass     .finding-severity { background: var(--color-pass);     color: #fff; }
+
+.finding-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.finding-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.finding-evidence {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.finding-reference {
+  font-size: 10px;
+  color: var(--color-low);
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.finding-reference:hover,
+.finding-reference:focus {
+  text-decoration: underline;
+  outline: none;
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+.popup-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.privacy-note {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  flex: 1;
+}
+
+/* ── C: Stop-monitoring button ─────────────────────────────── */
+.stop-monitoring-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.stop-monitoring-btn:hover {
+  color: var(--color-high);
+}
+
+/* ── B: Score breakdown ────────────────────────────────────── */
+.breakdown-section {
+  margin: 0 16px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.breakdown-summary {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.breakdown-summary::-webkit-details-marker { display: none; }
+
+.breakdown-summary::before {
+  content: '▶ ';
+  font-size: 9px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+details[open] > .breakdown-summary::before {
+  content: '▼ ';
+}
+
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.breakdown-table thead th {
+  padding: 4px 8px;
+  text-align: left;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+
+.breakdown-table tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.breakdown-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.breakdown-table td {
+  padding: 5px 8px;
+  color: var(--text);
+}
+
+.col-rule {
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  width: 72px;
+}
+
+.col-title {
+  font-size: 11px;
+}
+
+.col-pts {
+  text-align: right;
+  font-weight: 600;
+  color: var(--color-high);
+  white-space: nowrap;
+  width: 40px;
+}
+
+/* ── D: Export button ──────────────────────────────────────── */
+.export-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.export-btn:hover {
+  border-color: var(--color-pass);
+  color: var(--color-pass);
+}

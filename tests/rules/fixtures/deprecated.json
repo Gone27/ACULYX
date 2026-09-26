@@ -1,0 +1,26 @@
+[
+  {
+    "description": "x-xss-protection: 1; mode=block present expects DEP-001 (info severity)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-xss-protection": "1; mode=block"
+      }
+    },
+    "expectedRuleIds": ["DEP-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "No x-xss-protection header expects no DEP-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["DEP-001"]
+  }
+]

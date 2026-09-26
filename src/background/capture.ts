@@ -1,0 +1,250 @@
+/**
+ * capture.ts
+ *
+ * Registers chrome.webRequest listeners that intercept HTTP response headers
+ * at two distinct pipeline stages:
+ *
+ *   1. onHeadersReceived  — headers as the browser first sees them (may differ
+ *                           from final values if extensions modify them).
+ *   2. onResponseStarted  — final headers after all modifications.
+ *
+ * Comparing the two snapshots lets us detect header mutations by other
+ * extensions or intermediaries (headersDiffer flag on the Hop).
+ *
+ * Only `main_frame` requests are processed to avoid noise from sub-resources.
+ * A host-permission check guards against restricted URLs the extension is not
+ * allowed to observe.
+ */
+
+import { normalizeHeaders, headersDiffer } from '../rules/utils';
+import type { Hop } from '../shared/types';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Intermediate capture state accumulated across the two WebRequest events
+ * for a single requestId.
+ */
+export interface PartialCapture {
+  /** The tab that owns this request. */
+  tabId: number;
+  /** Final URL after any server-side rewrites. */
+  url: string;
+  /** HTTP status code (populated on onResponseStarted). */
+  status: number;
+  /** Normalised headers from onHeadersReceived. */
+  headersReceived: Record<string, string> | null;
+  /** Raw header array from onHeadersReceived. */
+  rawHeadersReceived: Array<{ name: string; value: string }>;
+  /** Normalised headers from onResponseStarted. */
+  headersStarted: Record<string, string> | null;
+  /** Raw header array from onResponseStarted. */
+  rawHeadersStarted: Array<{ name: string; value: string }>;
+  /** Whether the response was served from cache. */
+  fromCache: boolean;
+  /** Whether a redirect was detected before the final response. */
+  wasRedirected: boolean;
+  /** Timestamp of the first event. */
+  timestamp: number;
+  /** Number of redirects observed for this request. */
+  redirectCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// In-flight capture store
+// ---------------------------------------------------------------------------
+
+/**
+ * Keyed by Chrome's `requestId`.  Entries are created on onHeadersReceived
+ * and deleted after onResponseStarted finishes processing.
+ */
+export const captureMap: Map<string, PartialCapture> = new Map();
+
+
+// ---------------------------------------------------------------------------
+// Hop builder helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect the Non-Authoritative-Reason: HSTS header (case-insensitive name)
+ * which indicates the browser silently upgraded the request from HTTP→HTTPS.
+ */
+function detectHstsUpgrade(raw: Array<{ name: string; value: string }>): boolean {
+  return raw.some(
+    (h) =>
+      h.name.toLowerCase() === 'non-authoritative-reason' &&
+      h.value.toUpperCase() === 'HSTS',
+  );
+}
+
+/**
+ * Convert a chrome.webRequest.HttpHeader array to the project's raw-header
+ * format, ensuring the value is always a string.
+ */
+function toRawHeaders(
+  headers: chrome.webRequest.HttpHeader[],
+): Array<{ name: string; value: string }> {
+  return headers.map((h) => ({ name: h.name, value: h.value ?? '' }));
+}
+
+// ---------------------------------------------------------------------------
+// Public registration function
+// ---------------------------------------------------------------------------
+
+/**
+ * Registers all WebRequest listeners needed to capture response hops.
+ *
+ * @param onHopComplete - Callback invoked once both capture stages have
+ *   fired for the same request.  Receives the completed Hop and the tabId.
+ */
+export function registerCaptureListeners(
+  onHopComplete: (tabId: number, hop: Hop) => void,
+): void {
+  const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
+  const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
+
+  // -------------------------------------------------------------------------
+  // Stage 1 — onHeadersReceived
+  // -------------------------------------------------------------------------
+  chrome.webRequest.onHeadersReceived.addListener(
+    (details: chrome.webRequest.WebResponseHeadersDetails): void => {
+      // Only track top-level navigation frames.
+      if (details.type !== 'main_frame' || details.tabId < 0) return;
+
+      const raw = details.responseHeaders ?? [];
+      const partial: PartialCapture = {
+        tabId: details.tabId,
+        url: details.url,
+        status: details.statusCode,
+        headersReceived: normalizeHeaders(raw),
+        rawHeadersReceived: toRawHeaders(raw),
+        headersStarted: null,
+        rawHeadersStarted: [],
+        fromCache: false, // not available at this stage
+        wasRedirected: false,
+        timestamp: details.timeStamp,
+        redirectCount: 0,
+      };
+
+      captureMap.set(details.requestId, partial);
+    },
+    filter,
+    extraInfoSpec,
+  );
+
+  // -------------------------------------------------------------------------
+  // Stage 2 — onResponseStarted
+  // -------------------------------------------------------------------------
+  chrome.webRequest.onResponseStarted.addListener(
+    (details: chrome.webRequest.WebResponseCacheDetails): void => {
+      if (details.type !== 'main_frame' || details.tabId < 0) return;
+
+      const raw = details.responseHeaders ?? [];
+      const normalised = normalizeHeaders(raw);
+      const rawHeaders = toRawHeaders(raw);
+
+      // Retrieve (or lazily create) the partial capture started in stage 1.
+      let partial = captureMap.get(details.requestId);
+      if (!partial) {
+        // onHeadersReceived was missed (e.g. very fast cached response).
+        // Build a minimal partial so we can still emit a hop.
+        partial = {
+          tabId: details.tabId,
+          url: details.url,
+          status: details.statusCode,
+          headersReceived: null,
+          rawHeadersReceived: [],
+          headersStarted: null,
+          rawHeadersStarted: [],
+          fromCache: details.fromCache ?? false,
+          wasRedirected: false,
+          timestamp: details.timeStamp,
+          redirectCount: 0,
+        };
+      }
+
+      // Fill in stage-2 data.
+      partial.headersStarted = normalised;
+      partial.rawHeadersStarted = rawHeaders;
+      partial.fromCache = details.fromCache ?? false;
+      partial.status = details.statusCode;
+      partial.url = details.url;
+
+      // Decide which raw-header snapshot to expose as the canonical one.
+      // We prefer the stage-2 (onResponseStarted) snapshot as the final truth.
+      const canonicalRaw = rawHeaders;
+      const canonicalNormalised = normalised;
+
+      // Compare the two snapshots (if both exist) to detect mutations.
+      const differ =
+        partial.headersReceived !== null
+          ? headersDiffer(partial.headersReceived, canonicalNormalised)
+          : false;
+
+      // Construct the completed Hop.
+      const hop: Hop = {
+        requestId: details.requestId,
+        url: details.url,
+        status: details.statusCode,
+        headers: canonicalNormalised,
+        rawHeaders: canonicalRaw,
+        fromCache: partial.fromCache,
+        isHstsUpgrade: detectHstsUpgrade(canonicalRaw),
+        capturedAt: 'onResponseStarted',
+        headersDiffer: differ,
+        timestamp: partial.timestamp,
+        redirectCount: partial.redirectCount,
+      };
+
+      // Clean up in-flight state.
+      captureMap.delete(details.requestId);
+
+      // Notify the orchestrator.
+      void onHopComplete(details.tabId, hop);
+    },
+    filter,
+    extraInfoSpec,
+  );
+
+  // -------------------------------------------------------------------------
+  // Redirect tracking — onBeforeRedirect
+  // -------------------------------------------------------------------------
+  // Redirects produce a response (3xx) before the final response, so we record
+  // them in captureMap and mark the capture as having been redirected.
+  // The correlate/rule engine can inspect the hop chain if desired.
+  chrome.webRequest.onBeforeRedirect.addListener(
+    (details: chrome.webRequest.WebRedirectionResponseDetails): void => {
+      if (details.type !== 'main_frame' || details.tabId < 0) return;
+
+      const existing = captureMap.get(details.requestId);
+      if (existing) {
+        // Update the in-flight record to reflect the redirect.
+        existing.wasRedirected = true;
+        existing.redirectCount += 1;
+        existing.status = details.statusCode;
+        existing.url = details.redirectUrl;
+        captureMap.set(details.requestId, existing);
+      } else {
+        // First time we see this request (missed onHeadersReceived for redirect).
+        const raw = details.responseHeaders ?? [];
+        captureMap.set(details.requestId, {
+          tabId: details.tabId,
+          url: details.redirectUrl,
+          status: details.statusCode,
+          headersReceived: normalizeHeaders(raw),
+          rawHeadersReceived: toRawHeaders(raw),
+          headersStarted: null,
+          rawHeadersStarted: [],
+          fromCache: false,
+          wasRedirected: true,
+          timestamp: details.timeStamp,
+          redirectCount: 1,
+        });
+      }
+    },
+    filter,
+    extraInfoSpec,
+  );
+}

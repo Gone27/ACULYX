@@ -1,0 +1,62 @@
+[
+  {
+    "description": "server: Apache/2.4.51 (has version) expects LEAK-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "server": "Apache/2.4.51"
+      }
+    },
+    "expectedRuleIds": ["LEAK-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "x-powered-by: PHP/8.1.0 (has version) expects LEAK-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-powered-by": "PHP/8.1.0"
+      }
+    },
+    "expectedRuleIds": ["LEAK-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "server: nginx (no version string) expects no LEAK-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "server": "nginx"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["LEAK-001"]
+  },
+  {
+    "description": "x-powered-by: Express (no version string) expects no LEAK-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-powered-by": "Express"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["LEAK-001"]
+  },
+  {
+    "description": "server: Microsoft-IIS/10.0 (has version) expects LEAK-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "server": "Microsoft-IIS/10.0"
+      }
+    },
+    "expectedRuleIds": ["LEAK-001"],
+    "notExpectedRuleIds": []
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "description": "Response sets Set-Cookie with no cache-control header expects CACHE-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "set-cookie": "session=abc123; Path=/; HttpOnly"
+      }
+    },
+    "expectedRuleIds": ["CACHE-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "Response sets Set-Cookie with cache-control: no-store expects no CACHE-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "set-cookie": "session=abc123; Path=/; HttpOnly",
+        "cache-control": "no-store"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["CACHE-001"]
+  },
+  {
+    "description": "Response sets Set-Cookie with cache-control: max-age=3600 (no no-store) expects CACHE-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "set-cookie": "session=abc123; Path=/; HttpOnly",
+        "cache-control": "max-age=3600"
+      }
+    },
+    "expectedRuleIds": ["CACHE-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "Response with no Set-Cookie header expects no CACHE-001 (rule only fires when cookies are set)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["CACHE-001"]
+  }
+]

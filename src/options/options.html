@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecCheck — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+
+  <!-- ══ Page header ════════════════════════════════════════════ -->
+  <header class="page-header">
+    <h1 class="page-title">
+      <span class="brand">SecCheck</span>
+      <span class="subtitle">Settings</span>
+    </h1>
+  </header>
+
+  <main class="options-main">
+
+    <!-- ── Monitoring mode ─────────────────────────────────────── -->
+    <section class="options-section" id="section-monitoring-mode">
+      <h2 class="section-heading">Monitoring mode</h2>
+      <p class="section-desc">
+        Choose which sites SecCheck actively inspects HTTP headers and cookies on.
+      </p>
+      <fieldset class="radio-group" id="monitoring-mode-group">
+        <legend class="sr-only">Monitoring mode</legend>
+
+        <label class="radio-label">
+          <input type="radio" name="monitoringMode" value="per-site" id="mode-per-site">
+          <span class="radio-title">Per-site opt-in</span>
+          <span class="radio-desc">Only sites you explicitly grant access to.</span>
+        </label>
+
+        <label class="radio-label">
+          <input type="radio" name="monitoringMode" value="all-sites" id="mode-all-sites">
+          <span class="radio-title">Monitor all sites</span>
+          <span class="radio-desc">Requires broad host permission (granted on first use).</span>
+        </label>
+
+        <label class="radio-label">
+          <input type="radio" name="monitoringMode" value="off" id="mode-off">
+          <span class="radio-title">Off</span>
+          <span class="radio-desc">Disable all header/cookie capture.</span>
+        </label>
+
+      </fieldset>
+    </section>
+
+    <!-- ── Per-site allowlist ───────────────────────────────────── -->
+    <section class="options-section" id="section-allowlist">
+      <h2 class="section-heading">Per-site allowlist</h2>
+      <p class="section-desc">
+        Origins you have already granted access to. Click <em>Remove</em> to revoke.
+      </p>
+      <!-- Origins injected here by options.ts via createElement -->
+      <ul class="allowlist" id="allowlist"></ul>
+      <p class="allowlist-empty-msg" id="allowlist-empty" hidden>
+        No origins in the allowlist. Use <strong>Monitor this site</strong> in the popup.
+      </p>
+    </section>
+
+    <!-- ── Severity filter ─────────────────────────────────────── -->
+    <section class="options-section" id="section-severity">
+      <h2 class="section-heading">Severity filter</h2>
+      <p class="section-desc">
+        Only findings at or above these severities appear in the popup.
+      </p>
+      <fieldset class="checkbox-group" id="severity-group">
+        <legend class="sr-only">Severity filter</legend>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="severity" value="critical" id="sev-critical">
+          <span class="sev-pill sev-critical">Critical</span>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="severity" value="high" id="sev-high">
+          <span class="sev-pill sev-high">High</span>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="severity" value="medium" id="sev-medium">
+          <span class="sev-pill sev-medium">Medium</span>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="severity" value="low" id="sev-low">
+          <span class="sev-pill sev-low">Low</span>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="severity" value="info" id="sev-info">
+          <span class="sev-pill sev-info">Info</span>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="severity" value="pass" id="sev-pass">
+          <span class="sev-pill sev-pass">Pass</span>
+        </label>
+
+      </fieldset>
+    </section>
+
+    <!-- ── History retention ───────────────────────────────────── -->
+    <section class="options-section" id="section-history">
+      <h2 class="section-heading">History</h2>
+      <p class="section-desc">
+        How many days of scan history to keep in local storage.
+      </p>
+      <label class="field-label" for="retain-history-days">
+        Retain history for
+        <input
+          type="number"
+          id="retain-history-days"
+          name="retainHistoryDays"
+          min="0"
+          max="365"
+          step="1"
+          class="number-input"
+        >
+        days &nbsp;<span class="field-hint">(0 = keep forever)</span>
+      </label>
+    </section>
+
+    <!-- ── Privacy ─────────────────────────────────────────────── -->
+    <section class="options-section" id="section-privacy">
+      <h2 class="section-heading">Privacy</h2>
+      <p class="section-desc">
+        All analysis is performed <strong>entirely on your device</strong>. No header
+        values, cookie names, URLs, or findings are ever transmitted to any server.
+        The extension has <code>connect-src 'none'</code> in its CSP — it is physically
+        incapable of making network requests.
+      </p>
+      <p class="section-desc">
+        Source code and issue tracker:
+        <a
+          id="github-link"
+          href="https://github.com/example/header-cookie-security-checker"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-link"
+        >GitHub ↗</a>
+      </p>
+    </section>
+
+    <!-- ── Save controls ───────────────────────────────────────── -->
+    <div class="save-row">
+      <button class="btn-primary" id="save-btn">Save settings</button>
+      <!-- Status message injected here by options.ts via textContent -->
+      <span class="save-status" id="save-status" role="status" aria-live="polite"></span>
+    </div>
+
+  </main>
+
+  <!-- No inline scripts — CSP requires type="module" in separate file -->
+  <script type="module" src="options.ts"></script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Checker</title>
+  <script type="module" crossorigin src="/chunks/popup.html-lBuj0v5m.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-DaKOjhqt.js">
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-IbeZtfR1.js">
+  <link rel="stylesheet" crossorigin href="/assets/popup-Eti1rq0z.css">
+</head>
+<body>
+  <!-- Header bar -->
+  <header class="popup-header" role="banner">
+    <span class="popup-title">SecCheck</span>
+    <a href="" id="settings-link" class="settings-icon" title="Settings" aria-label="Extension Settings">⚙</a>
+  </header>
+
+  <!-- 5. Onboarding Card (first-time visitors) -->
+  <div class="onboarding-card" id="onboarding-card" hidden role="region" aria-label="Welcome to SecCheck">
+    <div class="onboarding-header">
+      <span class="onboarding-title">🛡️ Welcome to SecCheck</span>
+      <button class="onboarding-close-btn" id="onboarding-close-btn" title="Dismiss" aria-label="Dismiss onboarding">✕</button>
+    </div>
+    <p class="onboarding-text">
+      Instant, passive security analysis for HTTP response headers &amp; cookies.
+    </p>
+    <div class="onboarding-highlights">
+      <span class="onboarding-pill">🔒 100% Local &amp; Private</span>
+      <span class="onboarding-pill">⚡ Zero Tracking</span>
+    </div>
+    <button class="onboarding-action-btn" id="onboarding-action-btn">Got it — let's inspect</button>
+  </div>
+
+  <!-- Special condition notice (localhost, PDF, zero cookies, etc.) -->
+  <div class="special-notice" id="special-notice" hidden role="note"></div>
+
+  <!-- Grade display -->
+  <div class="grade-section" id="grade-section" role="region" aria-label="Security Grade">
+    <div class="grade-badge" id="grade-badge" aria-label="Security rating" role="img">?</div>
+    <div class="grade-details">
+      <div class="score" id="score-text"></div>
+      <div class="origin" id="origin-text"></div>
+      <!-- 3. Historical trend over time -->
+      <div class="trend-indicator" id="trend-indicator" hidden role="status"></div>
+      <!-- C: Stop monitoring link — shown when site is monitored -->
+      <button class="stop-monitoring-btn" id="stop-monitoring-btn" hidden aria-label="Stop monitoring this site">Stop monitoring</button>
+    </div>
+  </div>
+
+  <!-- Coverage indicator -->
+  <div class="coverage-bar" id="coverage-bar" hidden role="status"></div>
+
+  <!-- State messages (no permission / restricted / loading) -->
+  <div class="state-message" id="state-message" role="status" aria-live="polite"></div>
+
+  <!-- Monitor this site button -->
+  <div class="monitor-section" id="monitor-section" hidden>
+    <button class="btn-primary" id="monitor-btn" aria-label="Monitor this site">Monitor this site</button>
+    <p class="monitor-hint">Grant read-only access to headers on this origin.</p>
+  </div>
+
+  <!-- Top findings list (max 5) -->
+  <div class="findings-section" id="findings-section" hidden role="region" aria-label="Security Findings">
+    <h2 class="section-title">Top findings</h2>
+    <ul class="findings-list" id="findings-list" role="list"></ul>
+  </div>
+
+  <!-- B: Score breakdown (collapsible) -->
+  <details class="breakdown-section" id="breakdown-section" hidden>
+    <summary class="breakdown-summary">Score breakdown</summary>
+    <table class="breakdown-table" id="breakdown-table">
+      <thead>
+        <tr>
+          <th class="col-rule">Rule</th>
+          <th class="col-title">Finding</th>
+          <th class="col-pts">Pts</th>
+        </tr>
+      </thead>
+      <tbody id="breakdown-body"></tbody>
+    </table>
+  </details>
+
+  <!-- E: Subdomain Trust Analysis (collapsible) -->
+  <details class="subdomain-section" id="subdomain-section" hidden>
+    <summary class="subdomain-summary">
+      Subdomain trust analysis
+      <span class="subdomain-badge" id="subdomain-badge"></span>
+    </summary>
+    <ul class="vector-list" id="vector-list" role="list"></ul>
+  </details>
+
+  <!-- Footer with export actions -->
+  <footer class="popup-footer" role="contentinfo">
+    <span class="privacy-note">Analysis is local — nothing leaves your device.</span>
+    <div class="export-actions" id="export-actions">
+      <!-- 4. Export JSON & Copy Markdown report buttons -->
+      <button class="export-btn" id="export-btn" hidden aria-label="Export findings as JSON">Export JSON</button>
+      <button class="export-btn export-btn-secondary" id="copy-report-btn" hidden aria-label="Copy Markdown Audit Report">📋 Copy Report</button>
+    </div>
+  </footer>
+
+</body>
+</html>

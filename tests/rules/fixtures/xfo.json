@@ -1,0 +1,62 @@
+[
+  {
+    "description": "No x-frame-options and no CSP frame-ancestors expects XFO-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": ["XFO-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "x-frame-options: DENY expects no XFO finding",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-frame-options": "DENY"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["XFO-001"]
+  },
+  {
+    "description": "x-frame-options: SAMEORIGIN expects no XFO finding",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-frame-options": "SAMEORIGIN"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["XFO-001"]
+  },
+  {
+    "description": "x-frame-options: ALLOWALL (invalid value) expects XFO-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-frame-options": "ALLOWALL"
+      }
+    },
+    "expectedRuleIds": ["XFO-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "CSP has frame-ancestors directive, no x-frame-options — XFO-001 must NOT fire (CSP takes precedence)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-security-policy": "default-src 'self'; frame-ancestors 'none'"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["XFO-001"]
+  }
+]

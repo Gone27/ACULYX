@@ -1,0 +1,62 @@
+[
+  {
+    "description": "No x-content-type-options header expects XCTO-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": ["XCTO-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "x-content-type-options: nosniff (lowercase) expects no finding",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-content-type-options": "nosniff"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["XCTO-001"]
+  },
+  {
+    "description": "x-content-type-options: NOSNIFF (uppercase) expects no finding (case-insensitive match)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-content-type-options": "NOSNIFF"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["XCTO-001"]
+  },
+  {
+    "description": "x-content-type-options: sniff (wrong value) expects XCTO-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-content-type-options": "sniff"
+      }
+    },
+    "expectedRuleIds": ["XCTO-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "Giant x-content-type-options value (500+ chars) expects XCTO-001 with truncated evidence",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "x-content-type-options": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    "expectedRuleIds": ["XCTO-001"],
+    "notExpectedRuleIds": []
+  }
+]

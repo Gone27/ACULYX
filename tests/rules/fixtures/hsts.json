@@ -1,0 +1,62 @@
+[
+  {
+    "description": "HTTPS URL with no HSTS header expects HSTS-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": ["HSTS-001"],
+    "notExpectedRuleIds": ["HSTS-002", "HSTS-003"]
+  },
+  {
+    "description": "HTTPS URL with short max-age expects HSTS-002 and HSTS-003 (no includeSubDomains)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "strict-transport-security": "max-age=86400"
+      }
+    },
+    "expectedRuleIds": ["HSTS-002", "HSTS-003"],
+    "notExpectedRuleIds": ["HSTS-001"]
+  },
+  {
+    "description": "HTTPS URL with valid max-age and includeSubDomains produces no HSTS findings",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "strict-transport-security": "max-age=31536000; includeSubDomains"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["HSTS-001", "HSTS-002", "HSTS-003"]
+  },
+  {
+    "description": "HTTP URL with no HSTS header produces no HSTS findings (rule only applies to HTTPS)",
+    "hop": {
+      "url": "http://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["HSTS-001", "HSTS-002", "HSTS-003"]
+  },
+  {
+    "description": "HSTS header with XSS payload in value — parser must not crash; max-age parse fails so HSTS-002 fires",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "strict-transport-security": "max-age=<img src=x onerror=alert(1)>"
+      }
+    },
+    "expectedRuleIds": ["HSTS-002"],
+    "notExpectedRuleIds": ["HSTS-001"]
+  }
+]

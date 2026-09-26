@@ -1,0 +1,62 @@
+[
+  {
+    "description": "No referrer-policy header expects REF-001",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      }
+    },
+    "expectedRuleIds": ["REF-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "referrer-policy: unsafe-url expects REF-001 (explicitly weak policy)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "referrer-policy": "unsafe-url"
+      }
+    },
+    "expectedRuleIds": ["REF-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "referrer-policy: no-referrer-when-downgrade expects REF-001 (effectively absent / weak)",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "referrer-policy": "no-referrer-when-downgrade"
+      }
+    },
+    "expectedRuleIds": ["REF-001"],
+    "notExpectedRuleIds": []
+  },
+  {
+    "description": "referrer-policy: strict-origin-when-cross-origin expects no finding",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "referrer-policy": "strict-origin-when-cross-origin"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["REF-001"]
+  },
+  {
+    "description": "referrer-policy: no-referrer expects no finding",
+    "hop": {
+      "url": "https://example.com/",
+      "status": 200,
+      "headers": {
+        "referrer-policy": "no-referrer"
+      }
+    },
+    "expectedRuleIds": [],
+    "notExpectedRuleIds": ["REF-001"]
+  }
+]
