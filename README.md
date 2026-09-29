@@ -14,6 +14,13 @@ Since analysis observes the browser's own responses, it can inspect pages you re
 - **CLI & CI Integrations**: Export findings to JSON, Markdown, or GitHub-compatible SARIF 2.1.0 formats. Supports offline HAR file analysis and CI severity thresholds (`--fail-on high`).
 - **Zero-Telemetry Privacy**: Analysis is completely local. The extension uses `connect-src 'none'` to guarantee no data leaves the browser.
 
+
+- **Cache Checks**: Ensures responses setting cookies enforce Cache-Control: no-store.
+- **Coverage Indicator**: Tracks expected vs captured hops to show if service workers or caches intercepted traffic.
+- **Configuration-Quality Sub-Score**: Separates security risks from best-practice hygiene in the UI.
+- **Audit Exports & HAR Import**: Export findings to JSON, Markdown, or SARIF. Import offline HAR files with Set-Cookie redaction.
+- **CSP Host Heuristics**: Warns on allowlisted hosts known to host JSONP endpoints or angular libraries.
+
 ## Main Rules Evaluated
 
 The engine evaluates responses against over a dozen targeted security rules. Key checks include:

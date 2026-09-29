@@ -551,7 +551,7 @@ void (async (): Promise<void> => {
 
       if (state.apiEndpoints.size > 50) {
         const firstKey = state.apiEndpoints.keys().next().value;
-        if (firstKey) {
+        if (firstKey !== undefined) {
           state.apiEndpoints.delete(firstKey);
         }
       }
