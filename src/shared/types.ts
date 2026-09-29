@@ -172,6 +172,7 @@ export interface TabState {
   subdomainTrust: SubdomainTrustAnalysis;
   /** True when the user explicitly granted permission for this origin. */
   monitoredByUser: boolean;
+  apiEndpoints?: Map<string, ApiEndpointState>;
   updatedAt: number;
 }
 
@@ -185,4 +186,24 @@ export interface Settings {
   retainHistoryDays: number;
   alwaysSensitiveCookies: string[];
   alwaysIgnoreCookies: string[];
+}
+
+export interface ApiHop {
+  requestId: string;
+  tabId: number;
+  url: string;
+  normalizedPath: string; // origin + pathname (no query params)
+  method: string;
+  status: number;
+  requestOrigin?: string; // from request headers
+  headers: Record<string, string>;
+  rawHeaders: Array<{ name: string; value: string }>;
+  isThirdParty?: boolean; // computed after capture
+}
+
+export interface ApiEndpointState {
+  normalizedPath: string;
+  lastHop: ApiHop;
+  findings: Finding[];
+  isFirstParty: boolean;
 }

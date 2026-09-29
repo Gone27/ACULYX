@@ -2,70 +2,330 @@
   "version": 1,
   "notice": "Examples only. Review each change against the application's requirements before applying; SecCheck never edits server files.",
   "rules": {
-    "HSTS-001": { "summary": "Enable HSTS for HTTPS responses.", "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains", "note": "Add includeSubDomains only when every subdomain supports HTTPS." },
-    "HSTS-002": { "summary": "Raise HSTS max-age to at least one year.", "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains", "note": "Add includeSubDomains only when every subdomain supports HTTPS." },
-    "HSTS-003": { "summary": "Protect eligible subdomains with HSTS.", "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains", "note": "Verify HTTPS is available on all subdomains before enabling includeSubDomains." },
-    "HSTS-004": { "summary": "Meet basic HSTS preload header prerequisites if preload is intended.", "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload", "note": "This does not establish preload-list eligibility or membership. Verify all hstspreload.org requirements before submission." },
-    "HSTS-005": { "summary": "Review HSTS preload if broad HTTPS enforcement is appropriate.", "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload", "note": "SecCheck checks basic response directives only and does not check the public preload list." },
-    "CSP-001": { "summary": "Start with a restrictive Content Security Policy.", "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'", "note": "A production policy must explicitly allow the application's required scripts, styles, images, and connections." },
-    "CSP-002": { "summary": "Replace unsafe inline script permission with nonces or hashes.", "snippet": "script-src 'self' 'nonce-<random-per-response>'", "note": "Generate a cryptographically random nonce for each response and attach it to approved script elements." },
-    "CSP-003": { "summary": "Remove unsafe-eval and refactor dynamic code evaluation.", "snippet": "script-src 'self'", "note": "Merge this directive into the existing policy; do not replace other required directives blindly." },
-    "CSP-004": { "summary": "Replace wildcard script sources with an explicit host allowlist.", "snippet": "script-src 'self' https://static.example.com", "note": "Use only origins that the application actually requires." },
-    "CSP-005": { "summary": "Restrict which origins can frame this page.", "snippet": "frame-ancestors 'self'", "note": "This directive must be delivered as an HTTP response header; meta CSP cannot enforce it." },
-    "CSP-006": { "summary": "Disable plugin object loading unless it is required.", "snippet": "object-src 'none'" },
-    "CSP-007": { "summary": "Restrict base URL changes from injected markup.", "snippet": "base-uri 'self'" },
-    "CSP-008": { "summary": "Send CSP as a response header and review the meta policy separately.", "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'", "note": "The detected meta policy contents are not evaluated by SecCheck." },
-    "CSP-009": { "summary": "Review bypass-prone script hosts and remove any that are not required.", "snippet": "script-src 'self' 'nonce-<random-per-response>'", "note": "The domain match is only a heuristic; inspect the specific endpoint, path, and library version before changing policy." },
-    "CSP-010": { "summary": "Add a default-src or explicit script-src fallback to the CSP.", "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'", "note": "A policy without default-src or script-src provides no baseline script restriction." },
-    "CSP-REPORT-001": { "summary": "Configure a CSP report-to group if violation telemetry is desired.", "snippet": "Reporting-Endpoints: csp=\"https://reports.example.com/csp\"\nContent-Security-Policy: default-src 'self'; report-to csp", "note": "Use a privacy-reviewed endpoint and retain report-uri only as a compatibility fallback where needed." },
-    "COEP-001": { "summary": "Enable cross-origin isolation only if the app requires it.", "snippet": "Cross-Origin-Opener-Policy: same-origin\nCross-Origin-Embedder-Policy: require-corp", "note": "Audit all cross-origin resources before rollout; this can break embeds and third-party assets." },
-    "COEP-002": { "summary": "Use a supported COEP value if cross-origin isolation is required.", "snippet": "Cross-Origin-Embedder-Policy: require-corp", "note": "credentialless is another supported mode where its cookie behavior is appropriate." },
-    "CORP-001": { "summary": "Restrict cross-origin embedding when the resource is not intended to be shared.", "snippet": "Cross-Origin-Resource-Policy: same-origin", "note": "Select same-site or cross-origin if required by how this resource is embedded." },
-    "CORP-002": { "summary": "Use a supported CORP value.", "snippet": "Cross-Origin-Resource-Policy: same-origin", "note": "Supported values are same-origin, same-site, and cross-origin." },
-    "CORP-003": { "summary": "Review whether cross-origin embedding is intended.", "snippet": "Cross-Origin-Resource-Policy: same-origin", "note": "Use same-site or cross-origin only when the resource sharing model requires it." },
-    "CORS-001": { "summary": "Replace the CORS wildcard with an explicit origin allowlist.", "snippet": "Access-Control-Allow-Origin: https://trusted.example.com", "note": "Validate the request Origin header server-side against a fixed allowlist; do not reflect arbitrary origins." },
-    "PERMPOLICY-001": { "summary": "Restrict sensitive browser features to explicit origins.", "snippet": "Permissions-Policy: camera=(), microphone=(), geolocation=(self)" },
-    "REPORT-001": { "summary": "Configure browser reporting endpoints if reports are operationally useful.", "snippet": "Reporting-Endpoints: default=\"https://reports.example.com/browser\"", "note": "Reporting is optional; choose an endpoint and retention policy consistent with user privacy." },
-    "REPORT-002": { "summary": "Align NEL report_to with a declared Reporting-Endpoints group.", "snippet": "Reporting-Endpoints: network=\"https://reports.example.com/nel\"\nNEL: {\"report_to\":\"network\",\"max_age\":86400}" },
-    "REPORT-003": { "summary": "Provide a valid NEL JSON object.", "snippet": "NEL: {\"report_to\":\"network\",\"max_age\":86400}" },
-    "XCTO-001": { "summary": "Disable MIME type sniffing.", "snippet": "X-Content-Type-Options: nosniff" },
-    "XFO-001": { "summary": "Prevent untrusted framing.", "snippet": "X-Frame-Options: DENY", "note": "Use SAMEORIGIN if same-origin framing is required; CSP frame-ancestors is the modern control." },
-    "REF-001": { "summary": "Limit referrer data sent to other origins.", "snippet": "Referrer-Policy: strict-origin-when-cross-origin" },
-    "DEP-001": { "summary": "Remove the obsolete X-XSS-Protection header.", "snippet": "# Remove X-XSS-Protection from the response", "note": "Use a properly configured Content-Security-Policy instead." },
-    "DEP-002": { "summary": "Remove the obsolete Public-Key-Pins header.", "snippet": "# Remove Public-Key-Pins from the response", "note": "Use certificate transparency monitoring and managed certificate lifecycle controls instead." },
-    "DEP-003": { "summary": "Remove the obsolete P3P header.", "snippet": "# Remove P3P from the response", "note": "Modern browser privacy controls do not use P3P." },
-    "DEP-004": { "summary": "Replace legacy Feature-Policy with Permissions-Policy.", "snippet": "Permissions-Policy: camera=(), microphone=()" },
-    "DEP-005": { "summary": "Remove X-UA-Compatible if legacy IE document modes are not supported.", "snippet": "# Remove X-UA-Compatible from the response" },
-    "DEP-006": { "summary": "Remove the obsolete Expect-CT header.", "snippet": "# Remove Expect-CT from the response", "note": "Modern browser certificate transparency policy is built in." },
-    "DEP-007": { "summary": "Replace X-Content-Security-Policy with the standardized header.", "snippet": "Content-Security-Policy: default-src 'self'", "note": "Test the policy against application resources before enforcing." },
-    "DEP-008": { "summary": "Replace X-WebKit-CSP with the standardized header.", "snippet": "Content-Security-Policy: default-src 'self'", "note": "Test the policy against application resources before enforcing." },
-    "DEP-009": { "summary": "Remove the obsolete Public-Key-Pins-Report-Only header.", "snippet": "# Remove Public-Key-Pins-Report-Only from the response", "note": "HPKP is deprecated; use certificate transparency monitoring instead." },
-    "DEP-010": { "summary": "Replace X-Content-Security-Policy-Report-Only with the standardized header.", "snippet": "Content-Security-Policy-Report-Only: default-src 'self'", "note": "Test the policy against application resources before promoting to enforcement." },
-    "DEP-011": { "summary": "Replace X-WebKit-CSP-Report-Only with the standardized header.", "snippet": "Content-Security-Policy-Report-Only: default-src 'self'", "note": "Test the policy against application resources before promoting to enforcement." },
-    "DEP-012": { "summary": "Remove the X-Download-Options header.", "snippet": "# Remove X-Download-Options from the response", "note": "This header is a legacy IE-specific directive and has no effect in modern browsers." },
-    "DOC-001": { "summary": "Consider a Document-Policy for features the application does not need.", "snippet": "Document-Policy: js-profiling=?0", "note": "Document-Policy support and directives vary; choose only directives implemented by target browsers." },
-    "DUP-001": { "summary": "Remove duplicate response headers and send each security header exactly once.", "snippet": "# Remove the duplicate header at your web server or reverse proxy configuration", "note": "Duplicate headers can cause browsers to apply only the first or last value, depending on the header; the effective policy may differ from what was intended." },
-    "INTEGRITY-001": { "summary": "Consider Integrity-Policy for enforcing integrity metadata on scripts.", "snippet": "Integrity-Policy: blocked-destinations=(script)", "note": "Inventory scripts and browser support before enforcing; this policy can block resources without integrity metadata." },
-    "INTEGRITY-002": { "summary": "Promote Integrity-Policy-Report-Only after reviewing reports.", "snippet": "Integrity-Policy: blocked-destinations=(script)", "note": "Validate application resources before enforcement." },
-    "LEAK-001": { "summary": "Disable server version disclosure where supported.", "snippet": "# Nginx: server_tokens off;\n# Express: app.disable('x-powered-by');", "note": "Framework and proxy settings vary; verify the final response headers." },
-    "CACHE-001": { "summary": "Prevent shared caching of sensitive cookie-setting responses.", "snippet": "Cache-Control: no-store, private", "note": "Confirm this matches the endpoint's caching requirements." },
-    "COOK-001": { "summary": "Set Secure on the cookie.", "snippet": "Set-Cookie: <name>=<existing-value>; Path=/; Secure", "note": "Preserve the application's existing cookie value and scope." },
-    "COOK-002": { "summary": "Set HttpOnly on server-managed cookies.", "snippet": "Set-Cookie: <name>=<existing-value>; Path=/; HttpOnly", "note": "JavaScript-created cookies cannot use HttpOnly." },
-    "COOK-003": { "summary": "Add Secure when SameSite=None is required.", "snippet": "Set-Cookie: <name>=<existing-value>; SameSite=None; Secure", "note": "Use a stricter SameSite value if cross-site cookie use is unnecessary." },
-    "COOK-004": { "summary": "Choose an explicit SameSite policy.", "snippet": "Set-Cookie: <name>=<existing-value>; SameSite=Lax", "note": "Use Strict or None only when the application's cross-site flow requires it." },
-    "COOK-005": { "summary": "Use the __Host- prefix for eligible session cookies.", "snippet": "Set-Cookie: __Host-session=<existing-value>; Path=/; Secure; HttpOnly; SameSite=Lax", "note": "A __Host- cookie must omit Domain and use Path=/." },
-    "COOK-006": { "summary": "Set Secure on the __Secure- cookie.", "snippet": "Set-Cookie: __Secure-session=<existing-value>; Path=/; Secure", "note": "The cookie must be set over HTTPS." },
-    "COOK-007": { "summary": "Fix the cookie attributes to match what its name prefix requires.", "snippet": "Set-Cookie: __Host-session=<value>; Path=/; Secure; HttpOnly\nSet-Cookie: __Secure-session=<value>; Secure", "note": "__Host- requires Secure, HttpOnly, Path=/, and no Domain attribute. __Secure- requires Secure. Browser will reject the cookie if requirements are not met." },
-    "SRI-001": { "summary": "Add Subresource Integrity attributes to external scripts.", "snippet": "<script src=\"https://cdn.example.com/lib.js\"\n        integrity=\"sha384-<hash>\"\n        crossorigin=\"anonymous\"></script>", "note": "Generate integrity hashes with 'openssl dgst -sha384 -binary lib.js | openssl base64 -A'. Self-hosted scripts do not need SRI." },
-    "SUB-001": { "summary": "Limit sensitive cookies to the host that needs them.", "snippet": "Set-Cookie: <name>=<existing-value>; Path=/; Secure; HttpOnly; SameSite=Lax", "note": "Omit Domain to create a host-only cookie." },
-    "SUB-002": { "summary": "Remove broad subdomain trust from script-src.", "snippet": "script-src 'self' 'nonce-<random-per-response>'", "note": "Replace wildcard subdomain sources with specific trusted origins or nonces." },
-    "SUB-003": { "summary": "Use an explicit CORS origin allowlist.", "snippet": "Access-Control-Allow-Origin: https://app.example.com", "note": "Validate the request Origin against a server-side allowlist; do not reflect arbitrary origins." },
-    "SUB-003H": { "summary": "Ensure dynamic CORS reflection is intentional and secure.", "snippet": "Access-Control-Allow-Origin: https://app.example.com", "note": "Vary: Origin indicates the server might reflect origins dynamically. Ensure it relies on an explicit allowlist, not arbitrary reflection." },
-    "SUB-004": { "summary": "Restrict embedding to the same origin.", "snippet": "Content-Security-Policy: frame-ancestors 'self'", "note": "Deliver as an HTTP response header." },
-    "SUB-005": { "summary": "Prefix sensitive cookies with __Host- where compatible.", "snippet": "Set-Cookie: __Host-session=<existing-value>; Path=/; Secure; HttpOnly; SameSite=Lax", "note": "Omit Domain; the prefix prevents subdomains from setting a competing cookie." },
-    "SUB-006": { "summary": "Isolate the top-level browsing context.", "snippet": "Cross-Origin-Opener-Policy: same-origin", "note": "Test popup, OAuth, and cross-origin window workflows before rollout." },
-    "SUB-007": { "summary": "Opt into origin-keyed agent clustering.", "snippet": "Origin-Agent-Cluster: ?1", "note": "Check compatibility with any intentional document.domain usage." },
-    "SUB-008": { "summary": "No change indicated by this informational finding.", "note": "The analyzed subdomain has no detected trust bridge to its registrable domain." },
-    "REDIR-001": { "summary": "Review security headers across each redirect destination.", "snippet": "# Configure required headers on the final destination response", "note": "A redirecting response's policies do not automatically apply to the destination response." }
+    "HSTS-001": {
+      "summary": "Enable HSTS for HTTPS responses.",
+      "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains",
+      "note": "Add includeSubDomains only when every subdomain supports HTTPS."
+    },
+    "HSTS-002": {
+      "summary": "Raise HSTS max-age to at least one year.",
+      "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains",
+      "note": "Add includeSubDomains only when every subdomain supports HTTPS."
+    },
+    "HSTS-003": {
+      "summary": "Protect eligible subdomains with HSTS.",
+      "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains",
+      "note": "Verify HTTPS is available on all subdomains before enabling includeSubDomains."
+    },
+    "HSTS-004": {
+      "summary": "Meet basic HSTS preload header prerequisites if preload is intended.",
+      "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
+      "note": "This does not establish preload-list eligibility or membership. Verify all hstspreload.org requirements before submission."
+    },
+    "HSTS-005": {
+      "summary": "Review HSTS preload if broad HTTPS enforcement is appropriate.",
+      "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
+      "note": "SecCheck checks basic response directives only and does not check the public preload list."
+    },
+    "CSP-001": {
+      "summary": "Start with a restrictive Content Security Policy.",
+      "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+      "note": "A production policy must explicitly allow the application's required scripts, styles, images, and connections."
+    },
+    "CSP-002": {
+      "summary": "Replace unsafe inline script permission with nonces or hashes.",
+      "snippet": "script-src 'self' 'nonce-<random-per-response>'",
+      "note": "Generate a cryptographically random nonce for each response and attach it to approved script elements."
+    },
+    "CSP-003": {
+      "summary": "Remove unsafe-eval and refactor dynamic code evaluation.",
+      "snippet": "script-src 'self'",
+      "note": "Merge this directive into the existing policy; do not replace other required directives blindly."
+    },
+    "CSP-004": {
+      "summary": "Replace wildcard script sources with an explicit host allowlist.",
+      "snippet": "script-src 'self' https://static.example.com",
+      "note": "Use only origins that the application actually requires."
+    },
+    "CSP-005": {
+      "summary": "Restrict which origins can frame this page.",
+      "snippet": "frame-ancestors 'self'",
+      "note": "This directive must be delivered as an HTTP response header; meta CSP cannot enforce it."
+    },
+    "CSP-006": {
+      "summary": "Disable plugin object loading unless it is required.",
+      "snippet": "object-src 'none'"
+    },
+    "CSP-007": {
+      "summary": "Restrict base URL changes from injected markup.",
+      "snippet": "base-uri 'self'"
+    },
+    "CSP-008": {
+      "summary": "Send CSP as a response header and review the meta policy separately.",
+      "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'",
+      "note": "The detected meta policy contents are not evaluated by SecCheck."
+    },
+    "CSP-009": {
+      "summary": "Review bypass-prone script hosts and remove any that are not required.",
+      "snippet": "script-src 'self' 'nonce-<random-per-response>'",
+      "note": "The domain match is only a heuristic; inspect the specific endpoint, path, and library version before changing policy."
+    },
+    "CSP-010": {
+      "summary": "Add a default-src or explicit script-src fallback to the CSP.",
+      "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'",
+      "note": "A policy without default-src or script-src provides no baseline script restriction."
+    },
+    "CSP-REPORT-001": {
+      "summary": "Configure a CSP report-to group if violation telemetry is desired.",
+      "snippet": "Reporting-Endpoints: csp=\"https://reports.example.com/csp\"\nContent-Security-Policy: default-src 'self'; report-to csp",
+      "note": "Use a privacy-reviewed endpoint and retain report-uri only as a compatibility fallback where needed."
+    },
+    "COEP-001": {
+      "summary": "Enable cross-origin isolation only if the app requires it.",
+      "snippet": "Cross-Origin-Opener-Policy: same-origin\nCross-Origin-Embedder-Policy: require-corp",
+      "note": "Audit all cross-origin resources before rollout; this can break embeds and third-party assets."
+    },
+    "COEP-002": {
+      "summary": "Use a supported COEP value if cross-origin isolation is required.",
+      "snippet": "Cross-Origin-Embedder-Policy: require-corp",
+      "note": "credentialless is another supported mode where its cookie behavior is appropriate."
+    },
+    "CORP-001": {
+      "summary": "Restrict cross-origin embedding when the resource is not intended to be shared.",
+      "snippet": "Cross-Origin-Resource-Policy: same-origin",
+      "note": "Select same-site or cross-origin if required by how this resource is embedded."
+    },
+    "CORP-002": {
+      "summary": "Use a supported CORP value.",
+      "snippet": "Cross-Origin-Resource-Policy: same-origin",
+      "note": "Supported values are same-origin, same-site, and cross-origin."
+    },
+    "CORP-003": {
+      "summary": "Review whether cross-origin embedding is intended.",
+      "snippet": "Cross-Origin-Resource-Policy: same-origin",
+      "note": "Use same-site or cross-origin only when the resource sharing model requires it."
+    },
+    "CORS-001": {
+      "summary": "Replace the CORS wildcard with an explicit origin allowlist.",
+      "snippet": "Access-Control-Allow-Origin: https://trusted.example.com",
+      "note": "Validate the request Origin header server-side against a fixed allowlist; do not reflect arbitrary origins."
+    },
+    "PERMPOLICY-001": {
+      "summary": "Restrict sensitive browser features to explicit origins.",
+      "snippet": "Permissions-Policy: camera=(), microphone=(), geolocation=(self)"
+    },
+    "REPORT-001": {
+      "summary": "Configure browser reporting endpoints if reports are operationally useful.",
+      "snippet": "Reporting-Endpoints: default=\"https://reports.example.com/browser\"",
+      "note": "Reporting is optional; choose an endpoint and retention policy consistent with user privacy."
+    },
+    "REPORT-002": {
+      "summary": "Align NEL report_to with a declared Reporting-Endpoints group.",
+      "snippet": "Reporting-Endpoints: network=\"https://reports.example.com/nel\"\nNEL: {\"report_to\":\"network\",\"max_age\":86400}"
+    },
+    "REPORT-003": {
+      "summary": "Provide a valid NEL JSON object.",
+      "snippet": "NEL: {\"report_to\":\"network\",\"max_age\":86400}"
+    },
+    "XCTO-001": {
+      "summary": "Disable MIME type sniffing.",
+      "snippet": "X-Content-Type-Options: nosniff"
+    },
+    "XFO-001": {
+      "summary": "Prevent untrusted framing.",
+      "snippet": "X-Frame-Options: DENY",
+      "note": "Use SAMEORIGIN if same-origin framing is required; CSP frame-ancestors is the modern control."
+    },
+    "REF-001": {
+      "summary": "Limit referrer data sent to other origins.",
+      "snippet": "Referrer-Policy: strict-origin-when-cross-origin"
+    },
+    "DEP-001": {
+      "summary": "Remove the obsolete X-XSS-Protection header.",
+      "snippet": "# Remove X-XSS-Protection from the response",
+      "note": "Use a properly configured Content-Security-Policy instead."
+    },
+    "DEP-002": {
+      "summary": "Remove the obsolete Public-Key-Pins header.",
+      "snippet": "# Remove Public-Key-Pins from the response",
+      "note": "Use certificate transparency monitoring and managed certificate lifecycle controls instead."
+    },
+    "DEP-003": {
+      "summary": "Remove the obsolete P3P header.",
+      "snippet": "# Remove P3P from the response",
+      "note": "Modern browser privacy controls do not use P3P."
+    },
+    "DEP-004": {
+      "summary": "Replace legacy Feature-Policy with Permissions-Policy.",
+      "snippet": "Permissions-Policy: camera=(), microphone=()"
+    },
+    "DEP-005": {
+      "summary": "Remove X-UA-Compatible if legacy IE document modes are not supported.",
+      "snippet": "# Remove X-UA-Compatible from the response"
+    },
+    "DEP-006": {
+      "summary": "Remove the obsolete Expect-CT header.",
+      "snippet": "# Remove Expect-CT from the response",
+      "note": "Modern browser certificate transparency policy is built in."
+    },
+    "DEP-007": {
+      "summary": "Replace X-Content-Security-Policy with the standardized header.",
+      "snippet": "Content-Security-Policy: default-src 'self'",
+      "note": "Test the policy against application resources before enforcing."
+    },
+    "DEP-008": {
+      "summary": "Replace X-WebKit-CSP with the standardized header.",
+      "snippet": "Content-Security-Policy: default-src 'self'",
+      "note": "Test the policy against application resources before enforcing."
+    },
+    "DEP-009": {
+      "summary": "Remove the obsolete Public-Key-Pins-Report-Only header.",
+      "snippet": "# Remove Public-Key-Pins-Report-Only from the response",
+      "note": "HPKP is deprecated; use certificate transparency monitoring instead."
+    },
+    "DEP-010": {
+      "summary": "Replace X-Content-Security-Policy-Report-Only with the standardized header.",
+      "snippet": "Content-Security-Policy-Report-Only: default-src 'self'",
+      "note": "Test the policy against application resources before promoting to enforcement."
+    },
+    "DEP-011": {
+      "summary": "Replace X-WebKit-CSP-Report-Only with the standardized header.",
+      "snippet": "Content-Security-Policy-Report-Only: default-src 'self'",
+      "note": "Test the policy against application resources before promoting to enforcement."
+    },
+    "DEP-012": {
+      "summary": "Remove the X-Download-Options header.",
+      "snippet": "# Remove X-Download-Options from the response",
+      "note": "This header is a legacy IE-specific directive and has no effect in modern browsers."
+    },
+    "DOC-001": {
+      "summary": "Consider a Document-Policy for features the application does not need.",
+      "snippet": "Document-Policy: js-profiling=?0",
+      "note": "Document-Policy support and directives vary; choose only directives implemented by target browsers."
+    },
+    "DUP-001": {
+      "summary": "Remove duplicate response headers and send each security header exactly once.",
+      "snippet": "# Remove the duplicate header at your web server or reverse proxy configuration",
+      "note": "Duplicate headers can cause browsers to apply only the first or last value, depending on the header; the effective policy may differ from what was intended."
+    },
+    "INTEGRITY-001": {
+      "summary": "Consider Integrity-Policy for enforcing integrity metadata on scripts.",
+      "snippet": "Integrity-Policy: blocked-destinations=(script)",
+      "note": "Inventory scripts and browser support before enforcing; this policy can block resources without integrity metadata."
+    },
+    "INTEGRITY-002": {
+      "summary": "Promote Integrity-Policy-Report-Only after reviewing reports.",
+      "snippet": "Integrity-Policy: blocked-destinations=(script)",
+      "note": "Validate application resources before enforcement."
+    },
+    "LEAK-001": {
+      "summary": "Disable server version disclosure where supported.",
+      "snippet": "# Nginx: server_tokens off;\n# Express: app.disable('x-powered-by');",
+      "note": "Framework and proxy settings vary; verify the final response headers."
+    },
+    "CACHE-001": {
+      "summary": "Prevent shared caching of sensitive cookie-setting responses.",
+      "snippet": "Cache-Control: no-store, private",
+      "note": "Confirm this matches the endpoint's caching requirements."
+    },
+    "COOK-001": {
+      "summary": "Set Secure on the cookie.",
+      "snippet": "Set-Cookie: <name>=<existing-value>; Path=/; Secure",
+      "note": "Preserve the application's existing cookie value and scope."
+    },
+    "COOK-002": {
+      "summary": "Set HttpOnly on server-managed cookies.",
+      "snippet": "Set-Cookie: <name>=<existing-value>; Path=/; HttpOnly",
+      "note": "JavaScript-created cookies cannot use HttpOnly."
+    },
+    "COOK-003": {
+      "summary": "Add Secure when SameSite=None is required.",
+      "snippet": "Set-Cookie: <name>=<existing-value>; SameSite=None; Secure",
+      "note": "Use a stricter SameSite value if cross-site cookie use is unnecessary."
+    },
+    "COOK-004": {
+      "summary": "Choose an explicit SameSite policy.",
+      "snippet": "Set-Cookie: <name>=<existing-value>; SameSite=Lax",
+      "note": "Use Strict or None only when the application's cross-site flow requires it."
+    },
+    "COOK-005": {
+      "summary": "Use the __Host- prefix for eligible session cookies.",
+      "snippet": "Set-Cookie: __Host-session=<existing-value>; Path=/; Secure; HttpOnly; SameSite=Lax",
+      "note": "A __Host- cookie must omit Domain and use Path=/."
+    },
+    "COOK-006": {
+      "summary": "Set Secure on the __Secure- cookie.",
+      "snippet": "Set-Cookie: __Secure-session=<existing-value>; Path=/; Secure",
+      "note": "The cookie must be set over HTTPS."
+    },
+    "COOK-007": {
+      "summary": "Fix the cookie attributes to match what its name prefix requires.",
+      "snippet": "Set-Cookie: __Host-session=<value>; Path=/; Secure; HttpOnly\nSet-Cookie: __Secure-session=<value>; Secure",
+      "note": "__Host- requires Secure, HttpOnly, Path=/, and no Domain attribute. __Secure- requires Secure. Browser will reject the cookie if requirements are not met."
+    },
+    "SRI-001": {
+      "summary": "Add Subresource Integrity attributes to external scripts.",
+      "snippet": "<script src=\"https://cdn.example.com/lib.js\"\n        integrity=\"sha384-<hash>\"\n        crossorigin=\"anonymous\"></script>",
+      "note": "Generate integrity hashes with 'openssl dgst -sha384 -binary lib.js | openssl base64 -A'. Self-hosted scripts do not need SRI."
+    },
+    "SUB-001": {
+      "summary": "Limit sensitive cookies to the host that needs them.",
+      "snippet": "Set-Cookie: <name>=<existing-value>; Path=/; Secure; HttpOnly; SameSite=Lax",
+      "note": "Omit Domain to create a host-only cookie."
+    },
+    "SUB-002": {
+      "summary": "Remove broad subdomain trust from script-src.",
+      "snippet": "script-src 'self' 'nonce-<random-per-response>'",
+      "note": "Replace wildcard subdomain sources with specific trusted origins or nonces."
+    },
+    "SUB-003": {
+      "summary": "Use an explicit CORS origin allowlist.",
+      "snippet": "Access-Control-Allow-Origin: https://app.example.com",
+      "note": "Validate the request Origin against a server-side allowlist; do not reflect arbitrary origins."
+    },
+    "SUB-003H": {
+      "summary": "Ensure dynamic CORS reflection is intentional and secure.",
+      "snippet": "Access-Control-Allow-Origin: https://app.example.com",
+      "note": "Vary: Origin indicates the server might reflect origins dynamically. Ensure it relies on an explicit allowlist, not arbitrary reflection."
+    },
+    "SUB-004": {
+      "summary": "Restrict embedding to the same origin.",
+      "snippet": "Content-Security-Policy: frame-ancestors 'self'",
+      "note": "Deliver as an HTTP response header."
+    },
+    "SUB-005": {
+      "summary": "Prefix sensitive cookies with __Host- where compatible.",
+      "snippet": "Set-Cookie: __Host-session=<existing-value>; Path=/; Secure; HttpOnly; SameSite=Lax",
+      "note": "Omit Domain; the prefix prevents subdomains from setting a competing cookie."
+    },
+    "SUB-006": {
+      "summary": "Isolate the top-level browsing context.",
+      "snippet": "Cross-Origin-Opener-Policy: same-origin",
+      "note": "Test popup, OAuth, and cross-origin window workflows before rollout."
+    },
+    "SUB-007": {
+      "summary": "Opt into origin-keyed agent clustering.",
+      "snippet": "Origin-Agent-Cluster: ?1",
+      "note": "Check compatibility with any intentional document.domain usage."
+    },
+    "SUB-008": {
+      "summary": "No change indicated by this informational finding.",
+      "note": "The analyzed subdomain has no detected trust bridge to its registrable domain."
+    },
+    "REDIR-001": {
+      "summary": "Review security headers across each redirect destination.",
+      "snippet": "# Configure required headers on the final destination response",
+      "note": "A redirecting response's policies do not automatically apply to the destination response."
+    },
+    "CSP-002S": {
+      "summary": "Remove unsafe-inline from style-src.",
+      "snippet": "Content-Security-Policy: style-src 'self'",
+      "note": "Allows injection of malicious CSS which can exfiltrate data via attribute selectors or deface the site."
+    },
+    "CSP-SYNTAX-001": {
+      "summary": "Fix CSP syntax or nonce issues.",
+      "snippet": "Content-Security-Policy: default-src 'self'",
+      "note": "Review CSP syntax."
+    }
   }
 }

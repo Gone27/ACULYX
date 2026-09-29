@@ -18,6 +18,9 @@
 import type { Finding, Hop } from '../../shared/types';
 import { sanitizeEvidence, parseCspDirectives, hasCspBypassProtection } from '../utils';
 import { URLS as JSONP_BYPASS_URLS } from 'csp_evaluator/dist/allowlist_bypasses/jsonp';
+import { CspEvaluator } from 'csp_evaluator/dist/evaluator';
+import { CspParser } from 'csp_evaluator/dist/parser';
+import { Type, Severity } from 'csp_evaluator/dist/finding';
 
 const REFERENCE =
   'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy';
@@ -344,5 +347,51 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
     });
   }
 
+
+  // -------------------------------------------------------------------------
+  // Deep CSP Evaluator integration
+  // -------------------------------------------------------------------------
+  try {
+    const parsed = new CspParser(cspValue).csp;
+    const evaluator = new CspEvaluator(parsed);
+    const evalFindings = evaluator.evaluate();
+
+    const existingRules = new Set(findings.map(f => f.ruleId));
+
+    for (const f of evalFindings) {
+      if (f.severity === Severity.STRICT_CSP || f.severity === Severity.NONE) continue;
+      
+      if (f.type === Type.STYLE_UNSAFE_INLINE) {
+        if (!existingRules.has('CSP-002S')) {
+          findings.push({
+            ruleId: 'CSP-002S',
+            category: 'header',
+            severity: 'low',
+            title: "CSP style-src contains 'unsafe-inline'",
+            impact: 'Allows injection of malicious CSS which can exfiltrate data via attribute selectors or deface the site.',
+            evidence: sanitizeEvidence(`${f.directive}: ${f.value || ''}`),
+            recommendation: 'Remove unsafe-inline from style-src and use external stylesheets or nonces/hashes for inline styles.',
+            reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/style-src'
+          });
+          existingRules.add('CSP-002S');
+        }
+      } else if (f.severity === Severity.SYNTAX || f.type === Type.NONCE_CHARSET || f.type === Type.NONCE_LENGTH || f.type === Type.STATIC_NONCE || f.type === Type.MISSING_SEMICOLON || f.type === Type.UNKNOWN_DIRECTIVE || f.type === Type.INVALID_KEYWORD) {
+        findings.push({
+          ruleId: 'CSP-SYNTAX-001',
+          category: 'header',
+          severity: 'info',
+          title: 'CSP Syntax or Nonce Issue',
+          impact: f.description,
+          evidence: sanitizeEvidence(`${f.directive}: ${f.value || ''}`),
+          recommendation: 'Review CSP syntax.',
+          reference: 'https://csp-evaluator.withgoogle.com/'
+        });
+      }
+    }
+  } catch (e) {
+    // Ignore parser errors
+  }
+
   return { findings, directives };
+
 }

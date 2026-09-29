@@ -17,7 +17,7 @@
  */
 
 import { normalizeHeaders, headersDiffer } from '../rules/utils';
-import type { Hop } from '../shared/types';
+import type { Hop, ApiHop } from '../shared/types';
 
 // ---------------------------------------------------------------------------
 // Types

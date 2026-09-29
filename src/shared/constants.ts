@@ -3,7 +3,7 @@ import type { Grade, Settings, Severity } from './types';
 // ─── Versioning ───────────────────────────────────────────────────────────────
 
 /** Bump when either score model changes so persisted history remains comparable. */
-export const SCORE_VERSION = '1.6.0';
+export const SCORE_VERSION = '1.7.0';
 
 // ─── Restricted schemes ───────────────────────────────────────────────────────
 

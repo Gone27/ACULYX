@@ -201,6 +201,32 @@ export function runRules(input: RuleInput): RuleOutput {
   };
 }
 
+
+export function runApiRules(
+  apiHop: import('../shared/types').ApiHop,
+  pageOrigin: string,
+  cookieSettings?: { alwaysSensitive: string[]; alwaysIgnore: string[] }
+): Finding[] {
+  const hopLike = apiHop as unknown as Hop;
+  const findings: Finding[] = [];
+
+  // API runs only a subset of rules that make sense for XHR/Fetch endpoints.
+  findings.push(...checkCors(hopLike));
+  findings.push(...checkXcto(hopLike));
+  findings.push(...checkInfoLeak(hopLike));
+  findings.push(...checkCacheCookie(
+    hopLike,
+    cookieSettings?.alwaysSensitive,
+    cookieSettings?.alwaysIgnore
+  ));
+  
+  // Tag all findings with the specific API source URL
+  return findings.map(f => ({
+    ...f,
+    sourceUrl: apiHop.url
+  }));
+}
+
 const REDIRECT_SECURITY_HEADERS = [
   'content-security-policy',
   'strict-transport-security',
