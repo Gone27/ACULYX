@@ -96,8 +96,8 @@ function toRawHeaders(
 /**
  * Registers all WebRequest listeners needed to capture response hops.
  *
- * @param onHopComplete - Callback invoked once both capture stages have
- *   fired for the same request.  Receives the completed Hop and the tabId.
+ * @param onHopComplete - Callback invoked for every captured response, including
+ *   intermediate redirect responses.
  */
 export function registerCaptureListeners(
   onHopComplete: (tabId: number, hop: Hop) => void,
@@ -219,30 +219,28 @@ export function registerCaptureListeners(
       if (details.type !== 'main_frame' || details.tabId < 0) return;
 
       const existing = captureMap.get(details.requestId);
-      if (existing) {
-        // Update the in-flight record to reflect the redirect.
-        existing.wasRedirected = true;
-        existing.redirectCount += 1;
-        existing.status = details.statusCode;
-        existing.url = details.redirectUrl;
-        captureMap.set(details.requestId, existing);
-      } else {
-        // First time we see this request (missed onHeadersReceived for redirect).
-        const raw = details.responseHeaders ?? [];
-        captureMap.set(details.requestId, {
-          tabId: details.tabId,
-          url: details.redirectUrl,
-          status: details.statusCode,
-          headersReceived: normalizeHeaders(raw),
-          rawHeadersReceived: toRawHeaders(raw),
-          headersStarted: null,
-          rawHeadersStarted: [],
-          fromCache: false,
-          wasRedirected: true,
-          timestamp: details.timeStamp,
-          redirectCount: 1,
-        });
-      }
+      const raw = details.responseHeaders ?? existing?.rawHeadersReceived ?? [];
+      const headers = normalizeHeaders(raw);
+      const rawHeaders = toRawHeaders(raw);
+      const beforeHeaders = existing?.headersReceived;
+      const hop: Hop = {
+        requestId: details.requestId,
+        url: details.url,
+        status: details.statusCode,
+        headers,
+        rawHeaders,
+        fromCache: false,
+        isHstsUpgrade: detectHstsUpgrade(rawHeaders),
+        capturedAt: 'onResponseStarted',
+        headersDiffer: beforeHeaders !== null && beforeHeaders !== undefined
+          ? headersDiffer(beforeHeaders, headers)
+          : false,
+        timestamp: existing?.timestamp ?? details.timeStamp,
+        redirectCount: 0,
+      };
+
+      captureMap.delete(details.requestId);
+      void onHopComplete(details.tabId, hop);
     },
     filter,
     extraInfoSpec,

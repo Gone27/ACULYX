@@ -27,7 +27,11 @@ const CACHE_CONTROL_HEADER = 'cache-control';
  * @param finalHop - The last hop in the redirect chain.
  * @returns An array of zero or one finding.
  */
-export function checkCacheCookie(finalHop: Hop): Finding[] {
+export function checkCacheCookie(
+  finalHop: Hop,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): Finding[] {
   // Extract all Set-Cookie header values.
   const setCookieHeaders = finalHop.rawHeaders
     .filter((h) => h.name.toLowerCase() === 'set-cookie')
@@ -41,7 +45,7 @@ export function checkCacheCookie(finalHop: Hop): Finding[] {
   const sensitiveCookies = setCookieHeaders.filter((headerVal) => {
     const name = headerVal.split('=')[0]?.trim() ?? '';
     const hasHttpOnly = /;\s*httponly/i.test(headerVal);
-    return hasHttpOnly || isSensitiveCookie(name);
+    return hasHttpOnly || isSensitiveCookie(name, alwaysSensitive, alwaysIgnore).isSensitive;
   });
 
   // Exemption: If only harmless tracking/preference cookies are set, skip no-store requirement.

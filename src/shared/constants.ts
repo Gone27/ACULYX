@@ -2,8 +2,8 @@ import type { Grade, Settings, Severity } from './types';
 
 // ─── Versioning ───────────────────────────────────────────────────────────────
 
-/** Bump when score weights change so persisted history remains comparable. */
-export const SCORE_VERSION = '1.2.0';
+/** Bump when either score model changes so persisted history remains comparable. */
+export const SCORE_VERSION = '1.6.0';
 
 // ─── Restricted schemes ───────────────────────────────────────────────────────
 
@@ -92,4 +92,7 @@ export const DEFAULT_SETTINGS: Settings = {
   allowedOrigins: [],
   severityFilter: ['critical', 'high', 'medium', 'low', 'info'],
   retainHistoryDays: 7,
+  alwaysSensitiveCookies: [],
+  alwaysIgnoreCookies: [],
 };
+

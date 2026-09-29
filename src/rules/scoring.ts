@@ -24,6 +24,7 @@ import weights from './weights.json';
 interface WeightsFile {
   version: string;
   rules: Record<string, { penalty: number }>;
+  qualityRules: Record<string, { penalty: number }>;
 }
 
 // Cast the imported JSON to the typed shape.
@@ -37,6 +38,8 @@ export interface ScoreResult {
   score: number;
   grade: Grade;
   breakdown: ScoreBreakdown[];
+  qualityScore: number;
+  qualityGrade: Grade;
   scoreVersion: string;
 }
 
@@ -133,10 +136,24 @@ export function computeScore(findings: Finding[], fromCache = false): ScoreResul
   );
   const grade: Grade = gradeEntry?.grade ?? 'F';
 
+  const qualityRuleIds = new Set<string>();
+  for (const finding of findings) {
+    if (WEIGHTS.qualityRules[finding.ruleId]) qualityRuleIds.add(finding.ruleId);
+  }
+  const qualityPenalty = [...qualityRuleIds].reduce(
+    (total, ruleId) => total + (WEIGHTS.qualityRules[ruleId]?.penalty ?? 0),
+    0,
+  );
+  const qualityScore = Math.max(0, 100 - Math.min(50, qualityPenalty));
+  const qualityGradeEntry = GRADE_THRESHOLDS.find((entry) => qualityScore >= entry.min);
+  const qualityGrade: Grade = qualityGradeEntry?.grade ?? 'F';
+
   return {
     score: clampedScore,
     grade,
     breakdown,
+    qualityScore,
+    qualityGrade,
     scoreVersion: SCORE_VERSION,
   };
 }

@@ -5,6 +5,8 @@
  *   HSTS-001 (high)   — header absent on an HTTPS origin
  *   HSTS-002 (medium) — max-age below the recommended minimum (1 year)
  *   HSTS-003 (low)    — includeSubDomains directive missing
+ *   HSTS-004 (info)   — preload token supplied without basic eligibility directives
+ *   HSTS-005 (info)   — header meets basic preload directives; list membership is not checked
  */
 
 import type { Finding, Hop } from '../../shared/types';
@@ -15,6 +17,7 @@ const REFERENCE =
 
 const HSTS_HEADER = 'strict-transport-security';
 const HSTS_MIN_MAX_AGE = 31_536_000; // 1 year in seconds
+const HSTS_PRELOAD_MAX_AGE = 31_536_000; // hstspreload.org minimum: 1 year (https://hstspreload.org/)
 
 /**
  * Evaluate HSTS posture for the final response hop.
@@ -82,6 +85,32 @@ export function checkHsts(finalHop: Hop): Finding[] {
       recommendation:
         'Add the "includeSubDomains" directive to ensure all subdomains are protected.',
       reference: REFERENCE,
+    });
+  }
+
+  const hasIncludeSubdomains = /includeSubDomains/i.test(headerValue);
+  const hasPreload = /(?:^|;)\s*preload\s*(?:;|$)/i.test(headerValue);
+  const meetsBasicPreloadRequirements = maxAge >= HSTS_PRELOAD_MAX_AGE && hasIncludeSubdomains;
+
+  if (hasPreload && !meetsBasicPreloadRequirements) {
+    findings.push({
+      ruleId: 'HSTS-004',
+      category: 'transport',
+      severity: 'info',
+      title: 'HSTS preload token is present but basic preload directives are incomplete',
+      evidence: sanitizeEvidence(headerValue),
+      recommendation: 'HSTS preload submissions require max-age of at least 31536000 (1 year) and includeSubDomains. Verify all subdomains support HTTPS before submitting.',
+      reference: 'https://hstspreload.org/',
+    });
+  } else if (!hasPreload && meetsBasicPreloadRequirements) {
+    findings.push({
+      ruleId: 'HSTS-005',
+      category: 'transport',
+      severity: 'info',
+      title: 'HSTS header meets basic preload directives; preload-list membership is not checked',
+      evidence: sanitizeEvidence(headerValue),
+      recommendation: 'If preload is desired, review all hstspreload.org requirements and submit the domain; these header checks do not verify certificate, redirect, subdomain, or list status.',
+      reference: 'https://hstspreload.org/',
     });
   }
 

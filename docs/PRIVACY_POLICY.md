@@ -11,7 +11,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 ---
 
 ## 2. Information We Do NOT Collect
-- **Zero Remote Telemetry:** SecCheck does not have any external tracking servers, analytics endpoints, or cloud backends. The extension's Content Security Policy strictly enforces `connect-src 'none'`, mathematically preventing network requests from extension pages.
+- **Zero Remote Telemetry:** SecCheck does not have any external tracking servers, analytics endpoints, or cloud backends. Extension pages enforce `connect-src 'none'`. The page-signal script also makes no network requests; it uses extension runtime messaging only to report locally.
 - **Never Stores Cookie Values:** SecCheck inspects cookie attributes (such as `Secure`, `HttpOnly`, `SameSite`, and prefix naming) for compliance. **Cookie values and contents are never read, copied, or stored in browser storage.** Only cookie names, domain scopes, and flag metadata are evaluated.
 - **No Personal Identifiers:** We do not collect names, email addresses, IP addresses, search queries, or browsing history.
 
@@ -20,6 +20,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 ## 3. Data Handled Locally on Your Device
 When you choose to monitor an origin, SecCheck temporarily processes network headers and cookie attributes locally:
 - **HTTP Response Headers:** Evaluated against security standards (HSTS, CSP, X-Content-Type-Options, etc.).
+- **Page signals:** After you grant an origin, a content script checks the top-level document for a non-empty CSP meta tag and reads the service-worker controller status and script URL. It sends only those signals to the extension service worker. It does not collect page HTML or the meta policy text.
 - **Local Storage (`chrome.storage.local` & `session`):** 
   - User configuration settings (e.g. per-site allowlist, severity filters).
   - Historical domain scores (capped at the last 10 visits per monitored domain to calculate trends).
@@ -33,7 +34,8 @@ SecCheck operates under a strict principle of least privilege:
 - `webRequest` & `webNavigation`: Used passively to inspect response headers as pages load.
 - `cookies`: Used to inspect security flags (`Secure`, `HttpOnly`, `SameSite`) on set cookies. Values are ignored.
 - `storage`: Used to persist user settings and local score history on your device.
-- `activeTab` / `optional_host_permissions`: SecCheck requests host permissions **per-site on demand** when you explicitly click "Monitor this site", rather than demanding blanket access to all websites upon installation.
+- `scripting` / `optional_host_permissions`: SecCheck requests host permissions **per-site on demand** when you explicitly click "Monitor this site", then injects the page-signal check only on permitted top-level pages. It does not declare a static all-sites content script.
+- `activeTab`: Supports interactions with the currently selected tab; it does not cause page-signal collection before the origin is granted.
 
 ---
 

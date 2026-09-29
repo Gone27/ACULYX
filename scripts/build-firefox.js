@@ -41,6 +41,11 @@ if (manifest.optional_host_permissions && !manifest.optional_permissions) {
 }
 
 delete manifest.minimum_chrome_version;
+if (manifest.side_panel && manifest.action) {
+  manifest.action.default_popup = manifest.side_panel.default_path;
+}
+delete manifest.side_panel;
+manifest.permissions = manifest.permissions.filter((permission) => permission !== 'sidePanel');
 
 // 4. Save adjusted manifest
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');

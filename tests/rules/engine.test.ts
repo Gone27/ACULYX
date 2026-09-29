@@ -25,6 +25,7 @@ import { checkInfoLeak } from '../../src/rules/headers/info-leak';
 import { checkCacheCookie } from '../../src/rules/headers/cache-cookie';
 import { computeScore } from '../../src/rules/scoring';
 import { sanitizeEvidence } from '../../src/rules/utils';
+import { runRules } from '../../src/rules/engine';
 import type { Hop, Finding } from '../../src/shared/types';
 
 // --------------------------------------------------------------------------
@@ -155,11 +156,13 @@ describe('checkHsts — explicit cases', () => {
     expect(ids).toContain('HSTS-003');
   });
 
-  it('No HSTS findings: max-age=31536000; includeSubDomains (fully valid)', () => {
+  it('reports basic preload readiness without claiming list membership', () => {
     const hop = makeHop({
       headers: { 'strict-transport-security': 'max-age=31536000; includeSubDomains' },
     });
-    expect(checkHsts(hop)).toHaveLength(0);
+    const finding = checkHsts(hop).find((item) => item.ruleId === 'HSTS-005');
+    expect(finding?.severity).toBe('info');
+    expect(finding?.title).toContain('preload-list membership is not checked');
   });
 
   it('XSS payload in HSTS value — no crash; HSTS-002 fires (max-age parse yields 0)', () => {
@@ -197,6 +200,118 @@ describe('checkCsp — explicit cases', () => {
     const hop = makeHop({ headers: {} });
     const { findings } = checkCsp(hop);
     expect(findings.map((f) => f.ruleId)).toContain('CSP-001');
+  });
+
+  it('does not report CSP missing when a meta CSP was detected', () => {
+    const { findings } = checkCsp(makeHop({ headers: {} }), true);
+    expect(findings.map((f) => f.ruleId)).toContain('CSP-008');
+    expect(findings.map((f) => f.ruleId)).not.toContain('CSP-001');
+  });
+
+  it('reports curated bypass-prone script hosts as informational heuristics', () => {
+    const { findings } = checkCsp(makeHop({ headers: {
+      'content-security-policy': "default-src 'self'; script-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    } }));
+    const bypass = findings.find((finding) => finding.ruleId === 'CSP-009');
+    expect(bypass?.severity).toBe('info');
+    expect(bypass?.evidence).toContain('www.google.com');
+  });
+
+  it('does not flag self-only sources or hosts ignored by strict-dynamic', () => {
+    const selfOnly = checkCsp(makeHop({ headers: {
+      'content-security-policy': "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    } })).findings;
+    const strictDynamic = checkCsp(makeHop({ headers: {
+      'content-security-policy': "script-src 'nonce-random' 'strict-dynamic' https://www.google.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    } })).findings;
+
+    expect(selfOnly.some((finding) => finding.ruleId === 'CSP-009')).toBe(false);
+    expect(strictDynamic.some((finding) => finding.ruleId === 'CSP-009')).toBe(false);
+  });
+
+  it('reports headers removed by an intermediate redirect response', () => {
+    const first = makeHop({ url: 'https://first.example/path', headers: { 'content-security-policy': "default-src 'self'" }, timestamp: 1 });
+    const next = makeHop({ url: 'https://next.example/path', headers: {}, timestamp: 2 });
+    const result = runRules({ hops: [first, next], cookies: [], origin: 'https://next.example' });
+    const degradation = result.findings.find((finding) => finding.ruleId === 'REDIR-001');
+
+    expect(degradation?.evidence).toContain('content-security-policy');
+    expect(degradation?.evidence).toContain('first.example');
+    expect(degradation?.severity).toBe('info');
+  });
+
+  it('does not report redirect degradation when the next hop retains the header', () => {
+    const first = makeHop({ headers: { 'x-content-type-options': 'nosniff' }, timestamp: 1 });
+    const next = makeHop({ url: 'https://next.example/path', headers: { 'x-content-type-options': 'nosniff' }, timestamp: 2 });
+    const result = runRules({ hops: [first, next], cookies: [], origin: 'https://next.example' });
+
+    expect(result.findings.some((finding) => finding.ruleId === 'REDIR-001')).toBe(false);
+  });
+
+  it('keeps capture correlation diagnostics informational for scoring', () => {
+    const hop = makeHop({ headers: {
+      'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+      'content-security-policy': "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'cross-origin-opener-policy': 'same-origin',
+      'origin-agent-cluster': '?1',
+    } });
+    const baseline = runRules({ hops: [hop], cookies: [], origin: 'https://example.com' });
+    const withDiagnostic = runRules({
+      hops: [hop],
+      cookies: [],
+      origin: 'https://example.com',
+      captureFindings: [{
+        ruleId: 'COOKIE-REJECTED',
+        category: 'cookie',
+        severity: 'info',
+        title: 'Set-Cookie was not observed',
+        evidence: 'Cookie name: sid',
+        recommendation: 'Review cookie attributes.',
+        reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie',
+      }],
+    });
+
+    expect(withDiagnostic.findings.some((finding) => finding.ruleId === 'COOKIE-REJECTED')).toBe(true);
+    expect(withDiagnostic.score).toBe(baseline.score);
+  });
+
+  it('keeps the security score stable while configuration quality reflects advisory controls', () => {
+    const baseHeaders = {
+      'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+      'content-security-policy': "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'cross-origin-opener-policy': 'same-origin',
+      'origin-agent-cluster': '?1',
+    };
+    const withoutOptionalHeaders = runRules({
+      hops: [makeHop({ headers: baseHeaders })],
+      cookies: [],
+      origin: 'https://example.com',
+    });
+    const withOptionalHeaders = runRules({
+      hops: [makeHop({ headers: {
+        ...baseHeaders,
+        'cross-origin-embedder-policy': 'require-corp',
+        'cross-origin-resource-policy': 'same-origin',
+        'permissions-policy': 'camera=(), microphone=()',
+        'reporting-endpoints': 'default="https://reports.example.com/"',
+        nel: '{"report_to":"default","max_age":86400}',
+        'document-policy': 'js-profiling=?0',
+        'integrity-policy': 'blocked-destinations=(script)',
+        'content-security-policy': `${baseHeaders['content-security-policy']}; report-to default`,
+      } })],
+      cookies: [],
+      origin: 'https://example.com',
+    });
+
+    expect(withoutOptionalHeaders.score).toBe(withOptionalHeaders.score);
+    expect(withoutOptionalHeaders.qualityScore).toBeLessThan(withOptionalHeaders.qualityScore);
+    expect(withOptionalHeaders.qualityScore).toBe(100);
   });
 
   it('CSP-002: unsafe-inline in script-src fires CSP-002', () => {
@@ -455,7 +570,7 @@ describe('computeScore', () => {
     let category: Finding['category'] = 'header';
     if (ruleId.startsWith('HSTS-')) category = 'transport';
     else if (ruleId.startsWith('COOK-') || ruleId === 'SUB-001' || ruleId === 'SUB-005') category = 'cookie';
-    else if (ruleId === 'SUB-003') category = 'cors';
+    else if (ruleId.startsWith('SUB-003')) category = 'cors';
 
     return {
       ruleId,
@@ -514,3 +629,5 @@ describe('computeScore', () => {
     expect(score).toBeGreaterThanOrEqual(95);
   });
 });
+
+

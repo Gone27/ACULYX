@@ -22,12 +22,14 @@ import type {
   SubdomainTrustVector,
 } from '../shared/types';
 import { sendToBackground } from '../shared/messaging';
-import { POPUP_PORT_NAME, BADGE_COLORS, SEVERITY_ORDER } from '../shared/constants';
+import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
 import { LocalStorage } from '../shared/storage';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let gradeBadge:          HTMLDivElement;
+let badgeGrade:          SVGTextElement;
 let scoreText:           HTMLDivElement;
+let qualityScoreText:    HTMLDivElement;
 let originText:          HTMLDivElement;
 let coverageBar:         HTMLDivElement;
 let stateMessage:        HTMLDivElement;
@@ -44,10 +46,13 @@ let settingsLink:        HTMLAnchorElement;
 let subdomainSection:    HTMLDetailsElement; // E
 let subdomainBadge:      HTMLSpanElement;    // E
 let vectorList:          HTMLUListElement;   // E
+let trustGraph:          SVGSVGElement;
 let onboardingCard:      HTMLDivElement;     // 5. Onboarding
 let onboardingCloseBtn:  HTMLButtonElement;
 let onboardingActionBtn: HTMLButtonElement;
 let trendIndicator:      HTMLDivElement;     // 3. Trend over time
+let trendChart:          SVGSVGElement;
+let trendText:           HTMLSpanElement;
 let specialNotice:       HTMLDivElement;     // 8. Graceful edge cases
 
 /** The tab ID currently being inspected by the popup. */
@@ -63,7 +68,9 @@ let currentState: TabState | null = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   gradeBadge          = getEl<HTMLDivElement>('grade-badge');
+  badgeGrade          = getEl<SVGTextElement>('badge-grade');
   scoreText           = getEl<HTMLDivElement>('score-text');
+  qualityScoreText    = getEl<HTMLDivElement>('quality-score-text');
   originText          = getEl<HTMLDivElement>('origin-text');
   coverageBar         = getEl<HTMLDivElement>('coverage-bar');
   stateMessage        = getEl<HTMLDivElement>('state-message');
@@ -80,10 +87,13 @@ document.addEventListener('DOMContentLoaded', () => {
   subdomainSection    = getEl<HTMLDetailsElement>('subdomain-section');   // E
   subdomainBadge      = getEl<HTMLSpanElement>('subdomain-badge');         // E
   vectorList          = getEl<HTMLUListElement>('vector-list');            // E
+  trustGraph          = getEl<SVGSVGElement>('trust-graph');
   onboardingCard      = getEl<HTMLDivElement>('onboarding-card');
   onboardingCloseBtn  = getEl<HTMLButtonElement>('onboarding-close-btn');
   onboardingActionBtn = getEl<HTMLButtonElement>('onboarding-action-btn');
   trendIndicator      = getEl<HTMLDivElement>('trend-indicator');
+  trendChart          = getEl<SVGSVGElement>('trend-chart');
+  trendText           = getEl<HTMLSpanElement>('trend-text');
   specialNotice       = getEl<HTMLDivElement>('special-notice');
 
   wireSettingsLink();
@@ -176,11 +186,17 @@ function openLivePort(): void {
   const port = chrome.runtime.connect({ name: POPUP_PORT_NAME });
 
   port.onMessage.addListener((msg: unknown) => {
+    if (isStateResponse(msg) && msg.state?.tabId === currentTabId) {
+      renderState(msg.state);
+      return;
+    }
     if (!isTabStateUpdate(msg)) return;
     if (msg.state.tabId === currentTabId) {
       renderState(msg.state);
     }
   });
+
+  port.postMessage({ type: 'REQUEST_STATE', tabId: currentTabId });
 
   port.onDisconnect.addListener(() => {
     // SW restarted — next interaction reconnects.
@@ -196,12 +212,11 @@ function renderState(state: TabState): void {
   clearStateMessage();
 
   // Grade badge & accessibility
-  gradeBadge.textContent = state.grade;
-  gradeBadge.style.background = BADGE_COLORS[state.grade] ?? BADGE_COLORS['?'];
-  gradeBadge.setAttribute('aria-label', `Security Grade: ${state.grade}, Score: ${state.score} of 100`);
+  setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
 
   // Score + origin
   scoreText.textContent = `Score: ${state.score}/100`;
+  qualityScoreText.textContent = `Configuration quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? 'A'})`;
   originText.textContent = state.origin;
 
   // 3. Historical trend over time
@@ -250,9 +265,10 @@ function renderCoverage(
 
   if (coverage.isRestricted) warnings.push('Restricted page');
   if (coverage.hasCache) warnings.push('⚠ Response from cache — headers may be stale');
+  if (coverage.metaCspFound) warnings.push('Meta CSP detected — policy contents not evaluated');
 
   const headersDiffer = hops.some((h) => h.headersDiffer);
-  if (headersDiffer) warnings.push('⚠ Headers modified by another extension');
+  if (headersDiffer) warnings.push('⚠ Headers differ between capture points; source cannot be attributed');
 
   coverageBar.textContent = warnings.join(' | ');
   coverageBar.hidden = false;
@@ -398,12 +414,130 @@ function renderSubdomainTrust(trust: SubdomainTrustAnalysis | undefined): void {
     : '✔ No escalation path';
   subdomainBadge.className = `subdomain-badge ${trust.hasEscalationPath ? 'has-path' : 'no-path'}`;
 
+  renderTrustGraph(trust.vectors);
+
   // Render each vector as a list item
   for (const vector of trust.vectors) {
     vectorList.appendChild(buildVectorItem(vector));
   }
 
   subdomainSection.hidden = false;
+}
+
+function renderTrustGraph(vectors: SubdomainTrustVector[]): void {
+  const svgNamespace = 'http://www.w3.org/2000/svg';
+  const centerX = 160;
+  const centerY = 90;
+  const positions = [
+    { x: 44, y: 28 },
+    { x: 116, y: 18 },
+    { x: 204, y: 18 },
+    { x: 276, y: 28 },
+    { x: 276, y: 150 },
+    { x: 204, y: 162 },
+    { x: 116, y: 162 },
+    { x: 44, y: 150 },
+  ];
+  const graphLabel = vectors.map((vector) => {
+    const status = vector.present === true ? 'risk detected' : vector.present === false ? 'protected' : 'not applicable';
+    return `${vector.id}: ${status}`;
+  }).join('. ');
+
+  const graphTitle = document.createElementNS(svgNamespace, 'title');
+  graphTitle.id = 'trust-graph-title';
+  graphTitle.textContent = 'Subdomain trust graph';
+  const graphDescription = document.createElementNS(svgNamespace, 'desc');
+  graphDescription.id = 'trust-graph-description';
+  graphDescription.textContent = `Spokes connect the analyzed page to each subdomain trust vector. ${graphLabel}`;
+  trustGraph.replaceChildren(graphTitle, graphDescription);
+  trustGraph.setAttribute('aria-labelledby', 'trust-graph-title trust-graph-description');
+
+  vectors.forEach((vector, index) => {
+    const position = positions[index % positions.length];
+    if (!position) return;
+    const state = String(vector.present);
+
+    const edgeGroup = document.createElementNS(svgNamespace, 'g');
+    const edgeTitle = document.createElementNS(svgNamespace, 'title');
+    edgeTitle.id = `trust-edge-title-${vector.id}`;
+    edgeTitle.textContent = `${vector.id} link to analyzed page`;
+    const edgeDescription = document.createElementNS(svgNamespace, 'desc');
+    edgeDescription.id = `trust-edge-description-${vector.id}`;
+    edgeDescription.textContent = `Trust bridge status: ${graphLabelForVector(vector)}. Risk level: ${vector.risk}.`;
+    edgeGroup.setAttribute('role', 'img');
+    edgeGroup.setAttribute('aria-labelledby', `${edgeTitle.id} ${edgeDescription.id}`);
+    edgeGroup.append(edgeTitle, edgeDescription);
+
+    const edge = document.createElementNS(svgNamespace, 'line');
+    edge.setAttribute('x1', String(centerX));
+    edge.setAttribute('y1', String(centerY));
+    edge.setAttribute('x2', String(position.x));
+    edge.setAttribute('y2', String(position.y));
+    edge.setAttribute('class', `trust-edge present-${state}`);
+    edge.setAttribute('aria-hidden', 'true');
+    edgeGroup.appendChild(edge);
+    trustGraph.appendChild(edgeGroup);
+
+    const node = document.createElementNS(svgNamespace, 'g');
+    node.setAttribute('class', `trust-node present-${state} risk-${vector.risk}`);
+    node.setAttribute('role', 'img');
+    const nodeTitle = document.createElementNS(svgNamespace, 'title');
+    nodeTitle.id = `trust-node-title-${vector.id}`;
+    nodeTitle.textContent = `${vector.id}: ${vector.label}`;
+    const nodeDescription = document.createElementNS(svgNamespace, 'desc');
+    nodeDescription.id = `trust-node-description-${vector.id}`;
+    nodeDescription.textContent = `${graphLabelForVector(vector)}. ${vector.detail}`;
+    node.setAttribute('aria-labelledby', `${nodeTitle.id} ${nodeDescription.id}`);
+    node.append(nodeTitle, nodeDescription);
+
+    const circle = document.createElementNS(svgNamespace, 'circle');
+    circle.setAttribute('cx', String(position.x));
+    circle.setAttribute('cy', String(position.y));
+    circle.setAttribute('r', '15');
+    circle.setAttribute('class', 'trust-node-circle');
+    circle.setAttribute('aria-hidden', 'true');
+    node.appendChild(circle);
+
+    const label = document.createElementNS(svgNamespace, 'text');
+    label.setAttribute('x', String(position.x));
+    label.setAttribute('y', String(position.y + 3));
+    label.textContent = vector.id.slice(-3);
+    label.setAttribute('aria-hidden', 'true');
+    node.appendChild(label);
+    trustGraph.appendChild(node);
+  });
+
+  const center = document.createElementNS(svgNamespace, 'g');
+  center.setAttribute('class', 'trust-center');
+  center.setAttribute('role', 'img');
+  center.setAttribute('aria-labelledby', 'trust-center-title trust-center-description');
+  const centerTitle = document.createElementNS(svgNamespace, 'title');
+  centerTitle.id = 'trust-center-title';
+  centerTitle.textContent = 'Analyzed page';
+  const centerDescription = document.createElementNS(svgNamespace, 'desc');
+  centerDescription.id = 'trust-center-description';
+  centerDescription.textContent = 'Central page node for the subdomain trust bridge graph.';
+  center.append(centerTitle, centerDescription);
+  const centerCircle = document.createElementNS(svgNamespace, 'circle');
+  centerCircle.setAttribute('cx', String(centerX));
+  centerCircle.setAttribute('cy', String(centerY));
+  centerCircle.setAttribute('r', '28');
+  centerCircle.setAttribute('aria-hidden', 'true');
+  center.appendChild(centerCircle);
+
+  const centerLabel = document.createElementNS(svgNamespace, 'text');
+  centerLabel.setAttribute('x', String(centerX));
+  centerLabel.setAttribute('y', String(centerY + 4));
+  centerLabel.textContent = 'PAGE';
+  centerLabel.setAttribute('aria-hidden', 'true');
+  center.appendChild(centerLabel);
+  trustGraph.appendChild(center);
+}
+
+function graphLabelForVector(vector: SubdomainTrustVector): string {
+  if (vector.present === true) return 'risk detected';
+  if (vector.present === false) return 'protected';
+  return 'not applicable';
 }
 
 function buildVectorItem(vector: SubdomainTrustVector): HTMLLIElement {
@@ -470,9 +604,9 @@ function wireStopMonitoringButton(): void {
           breakdownSection.hidden = true;
           findingsSection.hidden = true;
           subdomainSection.hidden = true;
-          gradeBadge.textContent = '?';
-          gradeBadge.style.background = BADGE_COLORS['?'];
+          setBadgeState('locked', undefined, 'Site access locked');
           scoreText.textContent = '';
+          qualityScoreText.textContent = '';
           currentState = null;
           showMonitorSection();
           clearStateMessage();
@@ -498,6 +632,8 @@ function wireExportButton(): void {
       url: currentState.url,
       grade: currentState.grade,
       score: currentState.score,
+      qualityScore: currentState.qualityScore ?? 100,
+      qualityGrade: currentState.qualityGrade ?? 'A',
       scoreVersion: currentState.scoreVersion,
       findings: currentState.findings,
       scoreBreakdown: currentState.scoreBreakdown,
@@ -540,11 +676,12 @@ function generateMarkdownReport(state: TabState): string {
   md += `**Date:** ${date}  \n`;
   md += `**Target URL:** ${state.url}  \n`;
   md += `**Overall Security Grade:** **${state.grade}** (${state.score} / 100)  \n\n`;
+  md += `**Configuration Quality:** ${state.qualityGrade ?? 'A'} (${state.qualityScore ?? 100} / 100)  \n\n`;
 
   md += `## Executive Summary\n`;
   md += `SecCheck conducted an automated, passive inspection of HTTP response headers and cookies for \`${state.origin}\`.\n\n`;
 
-  if (state.subdomainTrust && state.subdomainTrust.hasEscalationPath) {
+  if (state.subdomainTrust.hasEscalationPath) {
     md += `> ⚠️ **Subdomain Escalation Path Detected:** Trust bridges exist between this site and its subdomains that could allow a compromised subdomain to compromise main-domain sessions or data.\n\n`;
   }
 
@@ -555,14 +692,14 @@ function generateMarkdownReport(state: TabState): string {
     for (const f of state.findings) {
       md += `### [${f.severity.toUpperCase()}] ${f.title}\n`;
       md += `- **Rule ID:** \`${f.ruleId}\`\n`;
-      if (f.impact) md += `- **Real-World Impact:** ${f.impact}\n`;
-      if (f.evidence) md += `- **Evidence:** \`${f.evidence}\`\n`;
+      if (f.impact != null && f.impact.length > 0) md += `- **Real-World Impact:** ${f.impact}\n`;
+      if (f.evidence.length > 0) md += `- **Evidence:** \`${f.evidence}\`\n`;
       md += `- **Recommendation:** ${f.recommendation}\n`;
       md += `- **Reference:** ${f.reference}\n\n`;
     }
   }
 
-  if (state.subdomainTrust && state.subdomainTrust.vectors.length > 0) {
+  if (state.subdomainTrust.vectors.length > 0) {
     md += `## Subdomain Trust Analysis\n\n`;
     md += `| Vector ID | Assessment | Detail |\n`;
     md += `|---|---|---|\n`;
@@ -624,22 +761,48 @@ async function initOnboarding(): Promise<void> {
    3. Historical Trend Over Time
    ================================================================ */
 
-async function renderTrend(origin: string, currentScore: number, currentGrade: string): Promise<void> {
+async function renderTrend(origin: string, currentScore: number, currentGrade: TabState['grade']): Promise<void> {
   try {
     const history = await LocalStorage.getOriginHistory(origin);
     if (history.length >= 2) {
+      const points = history.slice(-8);
+      const lastPoint = points[points.length - 1];
+      if (!lastPoint || lastPoint.score !== currentScore || lastPoint.grade !== currentGrade) {
+        points.push({ timestamp: Date.now(), score: currentScore, grade: currentGrade });
+      }
+
+      if (points.length >= 2) {
+        const minScore = Math.min(...points.map((point) => point.score));
+        const maxScore = Math.max(...points.map((point) => point.score));
+        const coordinates = points.map((point, index) => {
+          const x = 4 + (index / (points.length - 1)) * 88;
+          const y = maxScore === minScore
+            ? 14
+            : 24 - ((point.score - minScore) / (maxScore - minScore)) * 20;
+          return `${x},${y}`;
+        });
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        line.setAttribute('points', coordinates.join(' '));
+        line.setAttribute('fill', 'none');
+        line.setAttribute('stroke', 'currentColor');
+        line.setAttribute('stroke-width', '2');
+        trendChart.replaceChildren(line);
+        trendChart.setAttribute('aria-label', `Score trend: ${points.map((point) => point.score).join(', ')}`);
+        trendChart.removeAttribute('hidden');
+      }
+
       // Compare current score to the previous recorded score
       const prev = history[history.length - 2];
       if (prev != null) {
         const diff = currentScore - prev.score;
         if (diff > 0) {
-          trendIndicator.textContent = `↗ +${diff} pts (was ${prev.grade}/${prev.score})`;
+          trendText.textContent = `↗ +${diff} pts (was ${prev.grade}/${prev.score})`;
           trendIndicator.className = 'trend-indicator trend-improved';
         } else if (diff < 0) {
-          trendIndicator.textContent = `↘ ${diff} pts (was ${prev.grade}/${prev.score})`;
+          trendText.textContent = `↘ ${diff} pts (was ${prev.grade}/${prev.score})`;
           trendIndicator.className = 'trend-indicator trend-regressed';
         } else {
-          trendIndicator.textContent = `• Stable ${currentGrade} (${currentScore})`;
+          trendText.textContent = `• Stable ${currentGrade} (${currentScore})`;
           trendIndicator.className = 'trend-indicator trend-stable';
         }
         trendIndicator.hidden = false;
@@ -649,6 +812,7 @@ async function renderTrend(origin: string, currentScore: number, currentGrade: s
   } catch {
     // Ignore history error
   }
+  trendChart.setAttribute('hidden', '');
   trendIndicator.hidden = true;
 }
 
@@ -697,8 +861,29 @@ function showStateMessage(
   msg: string,
   mode: 'loading' | 'waiting' | 'permission' | 'restricted' | 'error' = 'waiting',
 ): void {
+  if (mode === 'loading' || mode === 'waiting') {
+    setBadgeState('scanning', undefined, 'Checking this page');
+  } else if (mode === 'permission' || mode === 'restricted' || mode === 'error') {
+    setBadgeState('locked', undefined, mode === 'permission' ? 'Site access locked' : 'Page not available for analysis');
+  }
   stateMessage.textContent = msg;
   stateMessage.className = `state-message state-${mode}`;
+}
+
+function setBadgeState(
+  state: 'locked' | 'scanning' | 'graded',
+  grade: TabState['grade'] | undefined,
+  label: string,
+): void {
+  gradeBadge.dataset['state'] = state;
+  if (grade === undefined) {
+    gradeBadge.removeAttribute('data-grade');
+    badgeGrade.textContent = '?';
+  } else {
+    gradeBadge.dataset['grade'] = grade;
+    badgeGrade.textContent = grade;
+  }
+  gradeBadge.setAttribute('aria-label', label);
 }
 
 function clearStateMessage(): void {
@@ -731,7 +916,7 @@ function wireMonitorButton(): void {
       (granted) => {
         if (granted) {
           monitorSection.hidden = true;
-          showStateMessage('Waiting for the first response on this page…', 'waiting');
+          showStateMessage('Permission granted. Refreshing this page to begin monitoring…', 'waiting');
 
           if (currentTabId !== null) {
             void sendToBackground({
@@ -739,9 +924,14 @@ function wireMonitorButton(): void {
               granted: true,
               origins: [`${currentOrigin}/*`],
             }).catch(() => undefined);
-          }
 
-          openLivePort();
+            openLivePort();
+            chrome.tabs.reload(currentTabId, {}, () => {
+              if (chrome.runtime.lastError != null) {
+                showStateMessage('Permission was granted, but this page could not be refreshed. Reload it to begin monitoring.', 'error');
+              }
+            });
+          }
         }
       },
     );
@@ -752,10 +942,10 @@ function wireMonitorButton(): void {
    Utilities
    ================================================================ */
 
-function getEl<T extends HTMLElement>(id: string): T {
-  const el = document.getElementById(id);
+function getEl<T extends Element>(id: string): T {
+  const el = document.querySelector<T>(`#${CSS.escape(id)}`);
   if (!el) throw new Error(`Missing required element #${id}`);
-  return el as T;
+  return el;
 }
 
 function isRestrictedUrl(url: string): boolean {
@@ -785,6 +975,18 @@ function formatSourceHost(sourceUrl: string): string {
 interface TabStateUpdateMsg {
   type: 'TAB_STATE_UPDATE';
   state: TabState;
+}
+
+interface StateResponseMsg {
+  type: 'STATE_RESPONSE';
+  state: TabState | null;
+}
+
+function isStateResponse(msg: unknown): msg is StateResponseMsg {
+  return typeof msg === 'object'
+    && msg !== null
+    && (msg as Record<string, unknown>)['type'] === 'STATE_RESPONSE'
+    && 'state' in msg;
 }
 
 function isTabStateUpdate(msg: unknown): msg is TabStateUpdateMsg {

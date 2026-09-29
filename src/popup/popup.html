@@ -20,13 +20,13 @@
       <button class="onboarding-close-btn" id="onboarding-close-btn" title="Dismiss" aria-label="Dismiss onboarding">✕</button>
     </div>
     <p class="onboarding-text">
-      Instant, passive security analysis for HTTP response headers &amp; cookies.
+      Monitoring starts only after you grant read-only access for this site. Headers and cookie attributes are analyzed locally.
     </p>
     <div class="onboarding-highlights">
       <span class="onboarding-pill">🔒 100% Local &amp; Private</span>
       <span class="onboarding-pill">⚡ Zero Tracking</span>
     </div>
-    <button class="onboarding-action-btn" id="onboarding-action-btn">Got it — let's inspect</button>
+    <button class="onboarding-action-btn" id="onboarding-action-btn">Continue</button>
   </div>
 
   <!-- Special condition notice (localhost, PDF, zero cookies, etc.) -->
@@ -34,12 +34,23 @@
 
   <!-- Grade display -->
   <div class="grade-section" id="grade-section" role="region" aria-label="Security Grade">
-    <div class="grade-badge" id="grade-badge" aria-label="Security rating" role="img">?</div>
+    <div class="grade-badge" id="grade-badge" data-state="locked" aria-label="Site access locked" role="img">
+      <svg class="badge-shield" viewBox="0 0 64 72" aria-hidden="true" focusable="false">
+        <path class="shield-outline" d="M32 3 57 12v19c0 17-10 29-25 38C17 60 7 48 7 31V12L32 3Z" />
+        <path class="badge-lock" d="M24 31v-5a8 8 0 0 1 16 0v5m-18 0h20v17H22V31Z" />
+        <circle class="badge-scan" cx="32" cy="38" r="5" />
+        <text class="badge-grade" id="badge-grade" x="32" y="43" text-anchor="middle">?</text>
+      </svg>
+    </div>
     <div class="grade-details">
       <div class="score" id="score-text"></div>
+      <div class="quality-score" id="quality-score-text"></div>
       <div class="origin" id="origin-text"></div>
       <!-- 3. Historical trend over time -->
-      <div class="trend-indicator" id="trend-indicator" hidden role="status"></div>
+      <div class="trend-indicator" id="trend-indicator" hidden role="status">
+        <svg class="trend-chart" id="trend-chart" viewBox="0 0 96 28" role="img" hidden></svg>
+        <span id="trend-text"></span>
+      </div>
       <!-- C: Stop monitoring link — shown when site is monitored -->
       <button class="stop-monitoring-btn" id="stop-monitoring-btn" hidden aria-label="Stop monitoring this site">Stop monitoring</button>
     </div>
@@ -84,6 +95,10 @@
       Subdomain trust analysis
       <span class="subdomain-badge" id="subdomain-badge"></span>
     </summary>
+    <svg class="trust-graph" id="trust-graph" viewBox="0 0 320 180" role="group" aria-labelledby="trust-graph-title trust-graph-description">
+      <title id="trust-graph-title">Subdomain trust graph</title>
+      <desc id="trust-graph-description">Spokes connect the analyzed page to each subdomain trust vector.</desc>
+    </svg>
     <ul class="vector-list" id="vector-list" role="list"></ul>
   </details>
 

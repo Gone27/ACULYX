@@ -23,7 +23,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/rules/**/*.test.ts'],
+    include: ['tests/**/*.test.ts'],
     exclude: ['tests/e2e/**'],
     coverage: {
       provider: 'v8',

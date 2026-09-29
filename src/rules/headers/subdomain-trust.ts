@@ -157,6 +157,8 @@ export interface SubdomainTrustResult {
 export function checkSubdomainTrust(
   finalHop: Hop,
   cookies: CookieRecord[],
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
 ): SubdomainTrustResult {
   const findings: Finding[] = [];
   const vectors: SubdomainTrustVector[] = [];
@@ -200,10 +202,10 @@ export function checkSubdomainTrust(
     const d = cookie.domain;
     const normalised = d.startsWith('.') ? d.slice(1) : d;
     if (normalised === regDomain || d === `.${regDomain}`) {
-      // Only flag cookies that represent session/auth tokens or are server-managed (HttpOnly).
+      // Only flag cookies that look authentication-related or are session-shaped and server-managed.
       // Harmless client preferences (theme, language, UI flags, analytics) shared across
       // subdomains are completely standard and do not constitute an account takeover escalation path.
-      if (isSensitiveCookie(cookie.name) || cookie.httpOnly) {
+      if (isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore).isSensitive || (cookie.httpOnly && cookie.session)) {
         broadCookies.push(cookie.name);
       }
     }
@@ -243,7 +245,7 @@ export function checkSubdomainTrust(
   // SUB-005: Cookie Tossing / Shadowing Risk (Sensitive cookies lack __Host- prefix)
   const unshieldedSensitiveCookies: string[] = [];
   for (const cookie of cookies) {
-    if (isSensitiveCookie(cookie.name) && !cookie.name.startsWith('__Host-')) {
+    if (isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore).isSensitive && !cookie.name.startsWith('__Host-')) {
       unshieldedSensitiveCookies.push(cookie.name);
     }
   }
@@ -305,15 +307,13 @@ export function checkSubdomainTrust(
         cspEvidence = dangerous.join(' ');
       }
     }
-  } else if (cspValue.length === 0) {
-    cspSubdomainTrust = true;
-    hasEscalationPath = true;
-    cspEvidence = '(no CSP — all origins trusted implicitly)';
   }
 
   const subdomainTrustDetail = effectiveScriptSrc != null
     ? `script-src is scoped to explicit hosts (no wildcard subdomain trust for ${regDomain})`
-    : `CSP present but script-src not found`;
+    : cspValue.length > 0
+      ? 'CSP present but script-src not found'
+      : 'No CSP response header; explicit subdomain script trust is not evaluated here';
 
   vectors.push({
     id: 'SUB-002',
@@ -368,31 +368,44 @@ export function checkSubdomainTrust(
       }
     }
   } else if (varyHeader.toLowerCase().includes('origin')) {
-    // Dynamic origin reflection indicator
+    // Vary: Origin is required by the CORS spec for *any* response that varies
+    // by origin — including responses with a safe, explicit ACAO allowlist.
+    // We only treat it as a suspicious reflection indicator when the ACAO header
+    // is completely absent, because that means the server is signalling origin-
+    // awareness without disclosing its policy — a pattern consistent with dynamic
+    // reflection. When ACAO is present the branch above already evaluated it.
+    //
+    // NOTE: This remains a heuristic — Vary: Origin alone does not prove
+    // reflection. The finding is labelled accordingly in the evidence string.
     corsTrustPresent = true;
-    corsDetail = 'Vary: Origin detected — server dynamically reflects requested Origin (frequent subdomain trust)';
+    corsDetail = 'Vary: Origin present with no Access-Control-Allow-Origin header — possible dynamic reflection (heuristic)';
   }
 
   if (corsTrustPresent) hasEscalationPath = true;
 
+  // Heuristic-only trigger (Vary: Origin, no ACAO header) is lower confidence.
+  const varyOnlyHeuristic = corsTrustPresent && corsOrigin.length === 0;
+
   vectors.push({
-    id: 'SUB-003',
-    label: 'CORS allows subdomain / wildcard origins',
+    id: varyOnlyHeuristic ? 'SUB-003H' : 'SUB-003',
+    label: varyOnlyHeuristic ? 'CORS Vary: Origin heuristic' : 'CORS allows subdomain / wildcard origins',
     detail: corsTrustPresent
       ? corsDetail
       : corsOrigin.length > 0
         ? `Access-Control-Allow-Origin: ${corsOrigin.slice(0, 80)} (no cross-subdomain trust detected)`
         : 'No CORS header present',
-    risk: 'high',
+    risk: varyOnlyHeuristic ? 'medium' : 'high',
     present: corsTrustPresent,
   });
 
   if (corsTrustPresent) {
     findings.push({
-      ruleId: 'SUB-003',
+      ruleId: varyOnlyHeuristic ? 'SUB-003H' : 'SUB-003',
       category: 'cors',
-      severity: 'high',
-      title: `CORS policy trusts subdomain origin — cross-subdomain API data exposure possible`,
+      severity: varyOnlyHeuristic ? 'medium' : 'high',
+      title: varyOnlyHeuristic
+        ? 'Vary: Origin with no explicit CORS policy — possible dynamic origin reflection (heuristic)'
+        : 'CORS policy trusts subdomain origin — cross-subdomain API data exposure possible',
       impact:
         'Compromised or attacker-controlled subdomains can send authenticated AJAX requests to your private APIs and read sensitive user data across origins.',
       evidence: sanitizeEvidence(corsDetail),
@@ -409,19 +422,12 @@ export function checkSubdomainTrust(
 
   const frameableBySubdomain =
     xfo.length === 0 &&
-    (
-      frameAncestors.length === 0 ||
-      frameAncestors.includes('*') ||
-      (frameAncestors.length > 0 && cspAllowsSubdomain(frameAncestors, regDomain))
-    );
+    frameAncestors.length > 0 &&
+    (frameAncestors.includes('*') || cspAllowsSubdomain(frameAncestors, regDomain));
 
   if (frameableBySubdomain) {
     postMsgTrustPresent = true;
-    postMsgDetail = frameAncestors
-      ? `frame-ancestors: ${frameAncestors.slice(0, 80)}`
-      : xfo
-        ? `X-Frame-Options: ${xfo}`
-        : 'No frame-ancestors directive and no X-Frame-Options — page can be framed by any origin';
+    postMsgDetail = `Explicit subdomain framing trust: ${frameAncestors.slice(0, 80)}`;
     hasEscalationPath = true;
   }
 
@@ -430,7 +436,9 @@ export function checkSubdomainTrust(
     label: 'postMessage / framing trust open to subdomains',
     detail: postMsgTrustPresent
       ? postMsgDetail
-      : `Framing is restricted (${frameAncestors.length > 0 ? 'frame-ancestors' : 'X-Frame-Options'} present)`,
+      : frameAncestors.length > 0 || xfo.length > 0
+        ? `Framing is restricted (${frameAncestors.length > 0 ? 'frame-ancestors' : 'X-Frame-Options'} present)`
+        : 'No framing policy detected; covered by CSP-005 and XFO-001',
     risk: 'high',
     present: postMsgTrustPresent,
   });

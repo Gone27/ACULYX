@@ -27,16 +27,33 @@ const REF_SAMESITE =
 // Per-cookie checks (return 0 or 1 finding each)
 // ---------------------------------------------------------------------------
 
-function checkSecure(cookie: CookieRecord, isHttps: boolean): Finding | null {
-  // The Secure flag only makes sense for HTTPS origins.
+function checkSecure(
+  cookie: CookieRecord,
+  isHttps: boolean,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): Finding | null {
   if (!isHttps) return null;
   if (cookie.secure) return null;
-  const sensitive = isSensitiveCookie(cookie.name);
+  
+  const { isSensitive, reason } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
+  
+  // If it's classified as sensitive only via regex, cap at medium severity
+  // unless we have another strong signal like cookie.session (a session cookie).
+  const isRegexHeuristic = reason === 'regex';
+  const hasStrongSignal = cookie.httpOnly || reason === 'override' || reason === 'prefix';
+  
+  const effectiveSeverity = isSensitive
+    ? (isRegexHeuristic && !hasStrongSignal ? 'medium' : 'high')
+    : 'low';
+    
+  const heuristicLabel = isSensitive && isRegexHeuristic && !hasStrongSignal ? ' (name-based heuristic)' : '';
+
   return {
     ruleId: 'COOK-001',
     category: 'cookie',
-    severity: sensitive ? 'high' : 'low',
-    title: `${sensitive ? 'Sensitive cookie' : 'Cookie'} "${sanitizeEvidence(cookie.name)}" is missing the Secure flag`,
+    severity: effectiveSeverity,
+    title: `${isSensitive ? 'Sensitive cookie' : 'Cookie'} "${sanitizeEvidence(cookie.name)}" is missing the Secure flag${heuristicLabel}`,
     impact:
       'The cookie can be transmitted across unencrypted HTTP links, allowing network eavesdroppers to intercept session tokens or user data in cleartext.',
     evidence: sanitizeEvidence(cookie.name),
@@ -46,19 +63,26 @@ function checkSecure(cookie: CookieRecord, isHttps: boolean): Finding | null {
   };
 }
 
-function checkHttpOnly(cookie: CookieRecord): Finding | null {
+function checkHttpOnly(
+  cookie: CookieRecord,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): Finding | null {
   if (cookie.httpOnly) return null;
-  // JS-set cookies intentionally lack HttpOnly — don't report them.
   if (cookie.setByJs === true) return null;
-  // Non-sensitive client cookies (analytics, UI preferences, language, CSRF tokens
-  // needed for double-submit patterns) are legitimately read by JavaScript.
-  if (!isSensitiveCookie(cookie.name)) return null;
+  
+  const { isSensitive, reason } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
+  if (!isSensitive) return null;
+  
+  const isRegexHeuristic = reason === 'regex';
+  const hasStrongSignal = cookie.secure || reason === 'override' || reason === 'prefix';
+  const heuristicLabel = isRegexHeuristic && !hasStrongSignal ? ' (name-based heuristic)' : '';
 
   return {
     ruleId: 'COOK-002',
     category: 'cookie',
-    severity: 'medium',
-    title: `Sensitive cookie "${sanitizeEvidence(cookie.name)}" is missing the HttpOnly flag`,
+    severity: 'medium', // already medium, but we add the label
+    title: `Sensitive cookie "${sanitizeEvidence(cookie.name)}" is missing the HttpOnly flag${heuristicLabel}`,
     impact:
       'This sensitive session cookie is readable by JavaScript via document.cookie, meaning any Cross-Site Scripting (XSS) attack can immediately steal it.',
     evidence: sanitizeEvidence(cookie.name),
@@ -145,6 +169,30 @@ function checkSecurePrefix(cookie: CookieRecord): Finding | null {
   };
 }
 
+function checkHttpPrefix(cookie: CookieRecord): Finding | null {
+  const hostHttp = cookie.name.startsWith('__Host-Http-');
+  const http = hostHttp || cookie.name.startsWith('__Http-');
+  if (!http) return null;
+  const violations: string[] = [];
+  if (!cookie.secure) violations.push('Secure flag missing');
+  if (!cookie.httpOnly) violations.push('HttpOnly flag missing');
+  if (hostHttp) {
+    if (cookie.path !== '/') violations.push(`Path is "${cookie.path}" (must be /)`);
+    if (cookie.domainAttributePresent === true) violations.push('Domain attribute must be absent');
+  }
+  if (violations.length === 0) return null;
+  return {
+    ruleId: 'COOK-007', category: 'cookie', severity: 'high',
+    title: `Cookie "${sanitizeEvidence(cookie.name)}" violates ${hostHttp ? '__Host-Http-' : '__Http-'} prefix requirements`,
+    impact: 'The browser-enforced prefix requirements are not met, so the cookie may be rejected or lose the server-only and host-bound protections its name claims.',
+    evidence: sanitizeEvidence(violations.join('; ')),
+    recommendation: hostHttp
+      ? 'Use Secure, HttpOnly, Path=/, and omit Domain.'
+      : 'Use both Secure and HttpOnly.',
+    reference: REF_PREFIX,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -162,16 +210,19 @@ function checkSecurePrefix(cookie: CookieRecord): Finding | null {
 export function checkCookies(
   cookies: CookieRecord[],
   isHttps: boolean,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
 ): Finding[] {
   const findings: Finding[] = [];
 
   for (const cookie of cookies) {
-    const secure   = checkSecure(cookie, isHttps);
-    const httpOnly = checkHttpOnly(cookie);
+    const secure   = checkSecure(cookie, isHttps, alwaysSensitive, alwaysIgnore);
+    const httpOnly = checkHttpOnly(cookie, alwaysSensitive, alwaysIgnore);
     const sameNone = checkSameSiteNone(cookie);
     const sameMiss = checkSameSiteMissing(cookie);
     const host     = checkHostPrefix(cookie);
     const secPfx   = checkSecurePrefix(cookie);
+    const httpPfx  = checkHttpPrefix(cookie);
 
     if (secure   !== null) findings.push(secure);
     if (httpOnly !== null) findings.push(httpOnly);
@@ -179,7 +230,9 @@ export function checkCookies(
     if (sameMiss !== null) findings.push(sameMiss);
     if (host     !== null) findings.push(host);
     if (secPfx   !== null) findings.push(secPfx);
+    if (httpPfx  !== null) findings.push(httpPfx);
   }
 
   return findings;
 }
+

@@ -9,6 +9,7 @@ import {
   registrableDomain,
   isSubdomain,
 } from '../../src/rules/headers/subdomain-trust';
+import { isThirdPartyCookie } from '../../src/background/correlate';
 import type { Hop, CookieRecord } from '../../src/shared/types';
 
 function makeHop(overrides: Partial<Hop> & { headers?: Record<string, string> }): Hop {
@@ -71,6 +72,11 @@ describe('Domain Parsing & Subdomain Detection', () => {
     expect(isSubdomain('www.example.com')).toBe(false); // www treated as apex
     expect(isSubdomain('api.example.com')).toBe(true);
     expect(isSubdomain('app.portal.example.co.uk')).toBe(true);
+  });
+
+  it('uses registrable domains for third-party cookie classification', () => {
+    expect(isThirdPartyCookie('shop.example.co.uk', '.example.co.uk')).toBe(false);
+    expect(isThirdPartyCookie('shop.example.co.uk', '.other.co.uk')).toBe(true);
   });
 });
 
@@ -140,15 +146,15 @@ describe('Vector 2: CSP Subdomain Trust', () => {
     expect(sub002?.evidence).toContain('*.example.com');
   });
 
-  it('flags missing CSP as implicit subdomain trust (SUB-002)', () => {
+  it('does not classify a missing CSP as explicit subdomain trust (SUB-002)', () => {
     const hop = makeHop({
       url: 'https://example.com/',
       headers: {},
     });
 
     const result = checkSubdomainTrust(hop, []);
-    expect(result.hasEscalationPath).toBe(true);
-    expect(result.findings.some((f) => f.ruleId === 'SUB-002')).toBe(true);
+    expect(result.vectors.find((vector) => vector.id === 'SUB-002')?.present).toBe(false);
+    expect(result.findings.some((f) => f.ruleId === 'SUB-002')).toBe(false);
   });
 });
 
@@ -170,14 +176,26 @@ describe('Vector 3: CORS & Framing / Opener Trust', () => {
     expect(sub003?.evidence).toContain('user-content.example.com');
   });
 
-  it('flags unconstrained framing allowing postMessage confusion (SUB-004)', () => {
+  it('does not duplicate blanket missing framing protection as SUB-004', () => {
     const hop = makeHop({
       url: 'https://example.com/',
       headers: {}, // No CSP frame-ancestors, no XFO
     });
 
     const result = checkSubdomainTrust(hop, []);
-    expect(result.findings.some((f) => f.ruleId === 'SUB-004')).toBe(true);
+    expect(result.findings.some((f) => f.ruleId === 'SUB-004')).toBe(false);
+  });
+
+  it('flags explicitly allowed subdomain framing (SUB-004)', () => {
+    const hop = makeHop({
+      url: 'https://example.com/',
+      headers: {
+        'content-security-policy': "default-src 'self'; frame-ancestors https://*.example.com",
+      },
+    });
+    const result = checkSubdomainTrust(hop, []);
+
+    expect(result.findings.some((finding) => finding.ruleId === 'SUB-004')).toBe(true);
   });
 
   it('flags missing Cross-Origin-Opener-Policy (SUB-006)', () => {

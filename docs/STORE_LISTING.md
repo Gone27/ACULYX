@@ -26,12 +26,16 @@ Most security header checkers are remote online scanners that run outside your a
 
 **SecCheck** is a developer- and security-focused browser extension designed for web developers, penetration testers, and bug bounty hunters. It passively evaluates HTTP response headers and live cookie configurations directly from within your browser as pages load — giving you an accurate, real-world security grade without sending a single byte of your browsing data over the network.
 
+Because SecCheck observes responses in the browser you are already using, it can audit pages reached after you sign in, subject to the per-origin permission you grant. It does not bypass authentication, defeat access controls, or discover pages you have not visited.
+
 ---
 
 ### 🚀 Key Features
 
 - **🎯 Trustworthy Scoring Engine:**
-  - Evaluates HSTS, Content-Security-Policy (CSP Level 3 aware, recognizing modern nonces and strict-dynamic), X-Content-Type-Options, X-Frame-Options, Referrer-Policy, and cache directives.
+  - Evaluates HSTS, Content-Security-Policy (CSP Level 3 aware, recognizing modern nonces and strict-dynamic), COEP/CORP, Permissions-Policy, Document-/Integrity-Policy, browser reporting, legacy headers, server fingerprints, and cache directives.
+  - Provides basic HSTS preload-header readiness guidance; it does not query or assert public preload-list membership.
+  - Reports headers that disappear between redirect responses and highlights a small curated set of CSP script hosts for manual review (informational heuristics, not proof of exploitability).
   - Sensitivity-aware cookie rules: distinguishes between high-value session tokens and harmless client-side UI cookies (preventing false alarms on theme or analytics cookies).
   - Categorized penalty caps prevent minor cookie issues from artificially tanking an otherwise rock-solid site.
 
@@ -51,16 +55,28 @@ Most security header checkers are remote online scanners that run outside your a
 
 - **📋 One-Click Audit Reports:**
   - Export structured technical JSON for automation or test suites.
+  - **SARIF 2.1.0 CLI output:** Upload findings to GitHub Code Scanning or other SARIF-compatible CI systems.
+  - **Offline HAR import:** Audit a selected captured response, including pages reached in an authenticated browser session; cookie values are redacted and response bodies are not analyzed.
   - **Copy Markdown Report:** Generates an executive summary and findings table formatted ready to paste into Jira, HackerOne bug bounty reports, or client penetration test deliverables.
 
+- **🧭 Browser Side Panel:** Keep findings, score breakdowns, trend, and trust graph open beside the page while you work.
+
 - **🔒 Built for Privacy First:**
-  - **Zero Remote Telemetry:** The extension's Content Security Policy strictly blocks all outbound network connections (`connect-src 'none'`).
+  - **Zero Remote Telemetry:** Extension pages block outbound connections with `connect-src 'none'`; the page-signal script makes no network requests and sends only local extension messages.
   - **Zero Cookie Value Storage:** Only cookie metadata (flags and domain scope) is analyzed. Cookie contents and secrets are never read or stored.
   - **Opt-in Permissions:** Works on an on-demand, per-site model — you decide when and where to inspect.
+  - **Meta-CSP Signal:** Detects whether a page contains a CSP meta tag, but does not evaluate the meta policy contents.
+
+### Coverage Boundaries
+
+- SecCheck analyzes top-level (`main_frame`) navigation responses only. Headers from iframes and other sub-resources are not inspected; this is not a whole-page resource audit.
+- A detected meta CSP is reported as a signal only. Full CSP policy analysis applies to response-header CSP.
 
 ---
 
 ## 5. Screenshot Walkthrough & Captions
+
+> **Submission media status:** No actual store screenshots, promotional tile, or demo video are present in this repository. The captions below are capture briefs, not upload-ready assets. The existing `icons/` files are extension icons, not listing screenshots. Capture real UI screenshots before submitting the CWS listing.
 
 ### Screenshot 1: Overview & Instant Security Grade
 - **Caption:** *"Instant passive security evaluation with clear letter grades and domain score tracking."*
@@ -92,4 +108,6 @@ Most security header checkers are remote online scanners that run outside your a
 - `webRequest` / `webNavigation`: Passively observes HTTP response headers on main-frame navigations to calculate security header grades.
 - `cookies`: Inspects cookie security attributes (Secure, HttpOnly, SameSite, prefixes) to detect insecure session storage.
 - `storage`: Persists local user preferences and historical domain scores locally on the device.
+- `scripting`: Injects the small page-signal check only after the user grants that origin; it checks meta-CSP presence and service-worker control, and sends results only to the local extension service worker.
+- `sidePanel`: Opens the existing analysis UI in Chrome's side panel when the toolbar action is clicked.
 - `optional_host_permissions`: Requested strictly on-demand per origin when the user clicks "Monitor this site" to respect least-privilege principles.

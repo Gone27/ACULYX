@@ -130,14 +130,14 @@
       <p class="section-desc">
         All analysis is performed <strong>entirely on your device</strong>. No header
         values, cookie names, URLs, or findings are ever transmitted to any server.
-        The extension has <code>connect-src 'none'</code> in its CSP — it is physically
-        incapable of making network requests.
+        The extension pages use <code>connect-src 'none'</code> in their CSP, so
+        the extension UI cannot make outbound network requests.
       </p>
       <p class="section-desc">
         Source code and issue tracker:
         <a
           id="github-link"
-          href="https://github.com/example/header-cookie-security-checker"
+          href="https://github.com/Gone27/Cookie-and-header-reader-extention"
           target="_blank"
           rel="noopener noreferrer"
           class="text-link"
@@ -158,3 +158,4 @@
   <script type="module" src="options.ts"></script>
 </body>
 </html>
+

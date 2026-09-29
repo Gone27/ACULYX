@@ -5,8 +5,7 @@
  *   LEAK-001 (low) — a response header exposes a version string or known
  *                    server/framework fingerprint.
  *
- * Checked headers: server, x-powered-by, x-aspnet-version,
- *                  x-aspnetmvc-version, x-generator
+ * Checked headers include common server/framework/version and runtime markers.
  */
 
 import type { Finding, Hop } from '../../shared/types';
@@ -28,18 +27,23 @@ const LEAKY_HEADERS: readonly string[] = [
 ];
 
 /**
- * Matches explicit version numbers (e.g. "1.2", "14.0.3").
+ * Matches explicit version numbers prefixed by a product or technology name 
+ * (e.g. "nginx/1.24.0", "Apache/2.4", "PHP/8.1", "Express 4.x")
+ * or bare versions if the header implies it (e.g. X-AspNet-Version: 4.0.30319).
  */
 const VERSION_PATTERN = /[0-9]+\.[0-9]+/;
+const PRODUCT_VERSION_PATTERN = /(?:microsoft-iis|apache|nginx|php|express|rails|django|laravel|node|openresty|litespeed|envoy|caddy|haproxy|tomcat|jetty|glassfish|jboss|weblogic|websphere)[\/\s-]*v?[0-9]+\.[0-9x]+/i;
 
 /**
- * Returns true when the header value contains a version number string.
- * A technology name alone (e.g. "nginx", "Apache") is not enough —
- * we require an explicit version (e.g. "nginx/1.24.0", "Apache/2.4") to
- * avoid false positives on minimal server headers.
+ * Returns true when the header value exposes a specific technology version.
+ * Tightened to require product/version pairs, avoiding 
+ * false positives on simple numeric headers, UNLESS the header name explicitly implies a version.
  */
-function isLeaky(value: string): boolean {
-  return VERSION_PATTERN.test(value);
+function isLeaky(value: string, headerName: string): boolean {
+  if (headerName.includes('-version')) {
+    return VERSION_PATTERN.test(value);
+  }
+  return PRODUCT_VERSION_PATTERN.test(value);
 }
 
 /**
@@ -54,7 +58,7 @@ export function checkInfoLeak(finalHop: Hop): Finding[] {
 
   for (const headerName of LEAKY_HEADERS) {
     const value = finalHop.headers[headerName];
-    if (value !== undefined && isLeaky(value)) {
+    if (value !== undefined && isLeaky(value, headerName)) {
       findings.push({
         ruleId: 'LEAK-001',
         category: 'header',

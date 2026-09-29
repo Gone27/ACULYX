@@ -1,0 +1,19 @@
+{
+  "url": "https://example.test/",
+  "status": 200,
+  "headers": {
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "content-security-policy": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; report-to default",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "cross-origin-opener-policy": "same-origin",
+    "origin-agent-cluster": "?1",
+    "cross-origin-embedder-policy": "require-corp",
+    "cross-origin-resource-policy": "same-origin",
+    "permissions-policy": "camera=(), microphone=()",
+    "reporting-endpoints": "default=\"https://reports.example.test/csp\"",
+    "nel": "{\"report_to\":\"default\",\"max_age\":86400}"
+  },
+  "cookies": []
+}

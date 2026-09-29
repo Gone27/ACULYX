@@ -27,7 +27,12 @@ import { checkInfoLeak } from './headers/info-leak';
 import { checkCacheCookie } from './headers/cache-cookie';
 import { checkCookies } from './cookies/cookies';
 import { checkSubdomainTrust } from './headers/subdomain-trust';
+import { checkIsolationHeaders } from './headers/isolation';
+import { checkReportingHeaders } from './headers/reporting';
+import { checkPolicyHardeningHeaders } from './headers/policy-hardening';
+import { checkCors } from './headers/cors';
 import { computeScore } from './scoring';
+import { checkDuplicateHeaders } from './utils';
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -41,6 +46,15 @@ export interface RuleInput {
   cookies: CookieRecord[];
   /** The effective origin of the final page (e.g. 'https://example.com'). */
   origin: string;
+  /** A meta CSP was detected in the document when no response header exists. */
+  metaCspFound?: boolean;
+  /** Response-correlation diagnostics that do not originate in static rules. */
+  captureFindings?: Finding[];
+  /** Optional cookie overrides from user settings. */
+  cookieSettings?: {
+    alwaysSensitive: string[];
+    alwaysIgnore: string[];
+  };
 }
 
 /** Aggregated result returned to the popup / storage layer. */
@@ -48,6 +62,8 @@ export interface RuleOutput {
   findings: Finding[];
   score: number;
   grade: Grade;
+  qualityScore: number;
+  qualityGrade: Grade;
   breakdown: ScoreBreakdown[];
   scoreVersion: string;
   /** Subdomain escalation analysis (always populated, may have no vectors). */
@@ -85,6 +101,8 @@ export function runRules(input: RuleInput): RuleOutput {
       findings: [],
       score: 100,
       grade: 'A',
+      qualityScore: 100,
+      qualityGrade: 'A',
       breakdown: [],
       scoreVersion: '',
       subdomainTrust: emptySubdomainTrust,
@@ -98,16 +116,21 @@ export function runRules(input: RuleInput): RuleOutput {
   // length > 0. The guard above ensures we only reach here with hops.length > 0,
   // so finalHop is always defined. Cast with a non-null assertion here.
   if (finalHop === undefined) {
-    return { findings: [], score: 100, grade: 'A', breakdown: [], scoreVersion: '', subdomainTrust: emptySubdomainTrust };
+    return { findings: [], score: 100, grade: 'A', qualityScore: 100, qualityGrade: 'A', breakdown: [], scoreVersion: '', subdomainTrust: emptySubdomainTrust };
   }
 
   const findings: Finding[] = [];
+
+  const redirectFindings = detectRedirectDegradation(hops);
+  findings.push(...redirectFindings);
+  findings.push(...(input.captureFindings ?? []));
+  findings.push(...checkDuplicateHeaders(finalHop));
 
   // 1. HSTS
   findings.push(...checkHsts(finalHop));
 
   // 2. CSP — also returns the parsed directives map for downstream rules.
-  const { findings: cspFindings, directives } = checkCsp(finalHop);
+  const { findings: cspFindings, directives } = checkCsp(finalHop, input.metaCspFound);
   findings.push(...cspFindings);
 
   // 3. XFO — needs the CSP directives to decide if frame-ancestors supersedes it.
@@ -119,6 +142,11 @@ export function runRules(input: RuleInput): RuleOutput {
   // 5. Referrer-Policy
   findings.push(...checkReferrer(finalHop));
 
+  findings.push(...checkIsolationHeaders(finalHop));
+  findings.push(...checkReportingHeaders(finalHop));
+  findings.push(...checkPolicyHardeningHeaders(finalHop));
+  findings.push(...checkCors(finalHop));
+
   // 6. Deprecated headers (X-XSS-Protection, etc.)
   findings.push(...checkDeprecated(finalHop));
 
@@ -126,28 +154,44 @@ export function runRules(input: RuleInput): RuleOutput {
   findings.push(...checkInfoLeak(finalHop));
 
   // 8. Cache-Control on responses that set cookies
-  findings.push(...checkCacheCookie(finalHop));
+  findings.push(...checkCacheCookie(
+    finalHop,
+    input.cookieSettings?.alwaysSensitive,
+    input.cookieSettings?.alwaysIgnore
+  ));
 
   // 9. Cookie attribute rules (Secure, HttpOnly, SameSite, prefix compliance)
   const isHttps = finalHop.url.startsWith('https://');
-  findings.push(...checkCookies(input.cookies, isHttps));
+  findings.push(...checkCookies(
+    input.cookies,
+    isHttps,
+    input.cookieSettings?.alwaysSensitive,
+    input.cookieSettings?.alwaysIgnore
+  ));
 
   // 10. Subdomain → main-domain escalation trust analysis
-  const subdomainResult = checkSubdomainTrust(finalHop, input.cookies);
+  const subdomainResult = checkSubdomainTrust(
+    finalHop,
+    input.cookies,
+    input.cookieSettings?.alwaysSensitive,
+    input.cookieSettings?.alwaysIgnore
+  );
   findings.push(...subdomainResult.findings);
 
   const findingsWithSource = findings.map((finding) => ({
     ...finding,
-    sourceUrl: finalHop.url,
+    sourceUrl: finding.sourceUrl ?? finalHop.url,
   }));
 
   // Compute the aggregate score and grade, taking caching into account.
-  const { score, grade, breakdown, scoreVersion } = computeScore(findingsWithSource, finalHop.fromCache);
+  const { score, grade, qualityScore, qualityGrade, breakdown, scoreVersion } = computeScore(findingsWithSource, finalHop.fromCache);
 
   return {
     findings: findingsWithSource,
     score,
     grade,
+    qualityScore,
+    qualityGrade,
     breakdown,
     scoreVersion,
     subdomainTrust: {
@@ -155,4 +199,55 @@ export function runRules(input: RuleInput): RuleOutput {
       vectors: subdomainResult.vectors,
     },
   };
+}
+
+const REDIRECT_SECURITY_HEADERS = [
+  'content-security-policy',
+  'strict-transport-security',
+  'x-frame-options',
+  'x-content-type-options',
+  'referrer-policy',
+  'permissions-policy',
+  'cross-origin-opener-policy',
+  'cross-origin-resource-policy',
+  'cross-origin-embedder-policy',
+] as const;
+
+function safeHopLabel(hop: Hop): string {
+  try {
+    const url = new URL(hop.url);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return hop.url.slice(0, 160);
+  }
+}
+
+function detectRedirectDegradation(hops: Hop[]): Finding[] {
+  const findings: Finding[] = [];
+  for (let index = 1; index < hops.length; index += 1) {
+    const previous = hops[index - 1];
+    const current = hops[index];
+    if (!previous || !current) continue;
+
+    const removed = REDIRECT_SECURITY_HEADERS.filter((header) => {
+      const previousValue = previous.headers[header]?.trim();
+      const currentValue = current.headers[header]?.trim();
+      return previousValue !== undefined && previousValue.length > 0
+        && (currentValue === undefined || currentValue.length === 0);
+    });
+    if (removed.length === 0) continue;
+
+    findings.push({
+      ruleId: 'REDIR-001',
+      category: 'header',
+      severity: 'info',
+      title: `Redirect response drops ${removed.length} previously present security header(s)`,
+      impact: 'A protection present on an earlier redirect response is absent from the next response; review whether the destination needs its own policy.',
+      evidence: `${safeHopLabel(previous)} -> ${safeHopLabel(current)}: ${removed.join(', ')}`,
+      recommendation: 'Review the redirect chain and configure the destination response to send the protections required for that origin. Header policies do not automatically carry across responses.',
+      reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections',
+      sourceUrl: current.url,
+    });
+  }
+  return findings;
 }

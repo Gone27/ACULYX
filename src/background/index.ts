@@ -18,6 +18,7 @@
 import { tabStates, initLifecycle, hydrateFromSession } from './lifecycle';
 import { registerCaptureListeners, captureMap } from './capture';
 import { correlateCookies } from './correlate';
+import { registerPageSignalInjection } from './page-signals';
 import { runRules } from '../rules/engine';
 import { extractSetCookieHeaders, originFromUrl } from '../rules/utils';
 import { SessionStorage, LocalStorage } from '../shared/storage';
@@ -27,11 +28,13 @@ import {
   RESTRICTED_SCHEMES,
   POPUP_PORT_NAME,
   SIDEPANEL_PORT_NAME,
+  DEFAULT_SETTINGS,
 } from '../shared/constants';
 import type {
   TabState,
   Grade,
   CoverageInfo,
+  Settings,
 } from '../shared/types';
 import type {
   ExtensionMessage,
@@ -48,17 +51,29 @@ const pendingServiceWorkerReports = new Map<number, {
   status: 'controlled' | 'not-controlled';
   serviceWorkerUrl: string | null;
 }>();
+const pendingMetaCspReports = new Set<number>();
+
+let currentSettings: Settings = DEFAULT_SETTINGS;
+LocalStorage.getSettings().then((s) => { currentSettings = s; }).catch(() => {});
 
 function recomputeTabState(tabId: number, state: TabState): void {
   const result = runRules({
     hops: state.hops,
     cookies: state.cookies,
     origin: state.origin,
+    metaCspFound: state.coverage.metaCspFound,
+    captureFindings: state.captureFindings ?? [],
+    cookieSettings: {
+      alwaysSensitive: currentSettings.alwaysSensitiveCookies,
+      alwaysIgnore: currentSettings.alwaysIgnoreCookies,
+    },
   });
 
   state.findings = result.findings;
   state.score = result.score;
   state.grade = result.grade;
+  state.qualityScore = result.qualityScore;
+  state.qualityGrade = result.qualityGrade;
   state.scoreBreakdown = result.breakdown;
   state.scoreVersion = result.scoreVersion;
   state.subdomainTrust = result.subdomainTrust;
@@ -121,7 +136,7 @@ function createDefaultTabState(tabId: number, url: string): TabState {
     serviceWorkerStatus: serviceWorkerReport?.status ?? 'unknown',
     serviceWorkerUrl: serviceWorkerReport?.serviceWorkerUrl ?? null,
     isRestricted: isRestrictedUrl(url),
-    metaCspFound: false,
+    metaCspFound: pendingMetaCspReports.has(tabId),
   };
 
   return {
@@ -131,8 +146,11 @@ function createDefaultTabState(tabId: number, url: string): TabState {
     hops: [],
     cookies: [],
     findings: [],
+    captureFindings: [],
     grade: 'F',
     score: 0,
+    qualityScore: 100,
+    qualityGrade: 'A',
     scoreVersion: '',
     scoreBreakdown: [],
     coverage,
@@ -192,15 +210,16 @@ async function onHopComplete(
     setBadgeForTab(tabId, '?');
     return;
   }
+  state.coverage.metaCspFound ||= pendingMetaCspReports.has(tabId);
   state.monitoredByUser = true;
 
   // ------------------------------------------------------------------
   // 4. Append the new hop.
   // ------------------------------------------------------------------
-  state.hops = [...state.hops, hop];
+  state.hops = [...state.hops, hop].sort((left, right) => left.timestamp - right.timestamp);
   state.coverage.hopsExpected = Math.max(
     state.coverage.hopsExpected,
-    state.hops.reduce((count, item) => count + 1 + (item.redirectCount ?? 0), 0),
+    state.hops.length,
   );
   state.coverage.hopsCaptured = state.hops.length;
   state.coverage.hasCache = state.coverage.hasCache || hop.fromCache;
@@ -209,8 +228,15 @@ async function onHopComplete(
   // 5. Correlate cookies.
   // ------------------------------------------------------------------
   const setCookieValues = extractSetCookieHeaders(hop.rawHeaders);
-  const correlatedCookies = await correlateCookies(tabId, hop.url, setCookieValues);
-  state.cookies = correlatedCookies;
+  const correlation = await correlateCookies(tabId, hop.url, setCookieValues);
+  state.cookies = correlation.records;
+  const captureFindingMap = new Map(
+    [...(state.captureFindings ?? []), ...correlation.findings].map((finding) => [
+      `${finding.ruleId}:${finding.sourceUrl ?? ''}:${finding.evidence}`,
+      finding,
+    ]),
+  );
+  state.captureFindings = [...captureFindingMap.values()];
 
   // ------------------------------------------------------------------
   // 6. Recompute evaluation from the canonical tab state.
@@ -238,6 +264,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(
     const { tabId } = details;
 
     pendingServiceWorkerReports.delete(tabId);
+    pendingMetaCspReports.delete(tabId);
 
     // Remove in-memory state.
     tabStates.delete(tabId);
@@ -256,6 +283,10 @@ chrome.webNavigation.onBeforeNavigate.addListener(
     setBadgeForTab(tabId, '?');
   },
 );
+
+registerPageSignalInjection();
+
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
 
 // ---------------------------------------------------------------------------
 // Cookie change listener
@@ -287,8 +318,8 @@ chrome.cookies.onChanged.addListener(
       // Re-correlate and re-score asynchronously (fire-and-forget with error guard).
       void (async () => {
         try {
-          const correlatedCookies = await correlateCookies(tabId, state.url, []);
-          state.cookies = correlatedCookies;
+          const correlation = await correlateCookies(tabId, state.url, []);
+          state.cookies = correlation.records;
 
           recomputeTabState(tabId, state);
         } catch {
@@ -305,6 +336,7 @@ chrome.cookies.onChanged.addListener(
 
 chrome.tabs.onRemoved.addListener((tabId: number): void => {
   tabStates.delete(tabId);
+  pendingMetaCspReports.delete(tabId);
   SessionStorage.removeTabState(tabId).catch(() => undefined);
 });
 
@@ -399,6 +431,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'SETTINGS_CHANGED') {
+      currentSettings = message.settings;
       portRegistry.broadcastAll(message);
       sendResponse(message);
       return false;
@@ -423,6 +456,48 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
+    if (message.type === 'META_CSP_FOUND') {
+      const senderTabId = _sender.tab?.id;
+      if (senderTabId !== undefined) {
+        pendingMetaCspReports.add(senderTabId);
+        const state = tabStates.get(senderTabId);
+        if (state && !state.coverage.metaCspFound) {
+          state.coverage.metaCspFound = true;
+          recomputeTabState(senderTabId, state);
+        }
+      }
+      return false;
+    }
+
+    if (message.type === 'SRI_SCAN') {
+      const senderTabId = _sender.tab?.id;
+      const state = senderTabId === undefined ? undefined : tabStates.get(senderTabId);
+      if (senderTabId !== undefined && state) {
+        state.captureFindings = (state.captureFindings ?? []).filter((finding) => finding.ruleId !== 'SRI-001');
+
+        const missingScripts = message.missingIntegrity ?? 0;
+        const missingStyles = message.missingStyleIntegrity ?? 0;
+        const totalMissing = missingScripts + missingStyles;
+
+        if (totalMissing > 0) {
+          const parts: string[] = [];
+          if (missingScripts > 0) parts.push(`${missingScripts}/${message.externalScripts ?? 0} script(s)`);
+          if (missingStyles > 0) parts.push(`${missingStyles}/${message.externalStylesheets ?? 0} stylesheet(s)`);
+
+          state.captureFindings.push({
+            ruleId: 'SRI-001', category: 'header', severity: 'medium',
+            title: `${totalMissing} external resource(s) lack Subresource Integrity`,
+            impact: 'A compromised or modified third-party script or stylesheet may run with the privileges of this page.',
+            evidence: `Missing integrity attribute on: ${parts.join(', ')}`,
+            recommendation: 'Add integrity hashes and crossorigin="anonymous" to external scripts and stylesheets, or self-host resources whose content you control.',
+            reference: 'https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity',
+          });
+        }
+        recomputeTabState(senderTabId, state);
+      }
+      return false;
+    }
+
     return false;
   },
 );
@@ -430,6 +505,12 @@ chrome.runtime.onMessage.addListener(
 // ---------------------------------------------------------------------------
 // Startup sequence
 // ---------------------------------------------------------------------------
+
+chrome.storage.local.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }) => {
+  if (changes.settings?.newValue !== undefined) {
+    currentSettings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue as Partial<Settings>) };
+  }
+});
 
 void (async (): Promise<void> => {
   // 1. Restore in-memory state from session storage (survives SW restart).
@@ -443,3 +524,7 @@ void (async (): Promise<void> => {
     void onHopComplete(tabId, hop);
   });
 })();
+
+
+
+

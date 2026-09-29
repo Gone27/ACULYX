@@ -19,6 +19,8 @@ const ALL_SEVERITIES: Severity[] = [...SEVERITY_ORDER];
 let modeRadios: NodeListOf<HTMLInputElement>;
 let severityCheckboxes: NodeListOf<HTMLInputElement>;
 let retainDaysInput: HTMLInputElement;
+let alwaysSensitiveInput: HTMLTextAreaElement;
+let alwaysIgnoreInput: HTMLTextAreaElement;
 let allowlistEl: HTMLUListElement;
 let allowlistEmptyMsg: HTMLParagraphElement;
 let saveBtn: HTMLButtonElement;
@@ -40,6 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
   modeRadios           = document.querySelectorAll<HTMLInputElement>('input[name="monitoringMode"]');
   severityCheckboxes   = document.querySelectorAll<HTMLInputElement>('input[name="severity"]');
   retainDaysInput      = getEl<HTMLInputElement>('retain-history-days');
+alwaysSensitiveInput = getEl<HTMLTextAreaElement>('always-sensitive');
+alwaysIgnoreInput  = getEl<HTMLTextAreaElement>('always-ignore');
   allowlistEl          = getEl<HTMLUListElement>('allowlist');
   allowlistEmptyMsg    = getEl<HTMLParagraphElement>('allowlist-empty');
   saveBtn              = getEl<HTMLButtonElement>('save-btn');
@@ -78,6 +82,8 @@ async function loadAndPopulate(): Promise<void> {
 
   // ── History ──────────────────────────────────────────────────
   retainDaysInput.value = String(settings.retainHistoryDays);
+  alwaysSensitiveInput.value = settings.alwaysSensitiveCookies.join(', ');
+  alwaysIgnoreInput.value = settings.alwaysIgnoreCookies.join(', ');
 
   // ── Allowlist ────────────────────────────────────────────────
   workingOrigins = [...settings.allowedOrigins];
@@ -149,12 +155,16 @@ function readFormValues(): Settings {
 
   // Retain history days
   const retainHistoryDays = Math.max(0, Math.min(365, parseInt(retainDaysInput.value, 10) || 0));
+  const alwaysSensitiveCookies = alwaysSensitiveInput.value.split(',').map(s => s.trim()).filter(Boolean);
+  const alwaysIgnoreCookies = alwaysIgnoreInput.value.split(',').map(s => s.trim()).filter(Boolean);
 
   return {
     monitoringMode,
     allowedOrigins: [...workingOrigins],
     severityFilter,
     retainHistoryDays,
+    alwaysSensitiveCookies,
+    alwaysIgnoreCookies,
   };
 }
 
@@ -277,3 +287,4 @@ function getEl<T extends HTMLElement>(id: string): T {
   if (!el) throw new Error(`Missing required element #${id}`);
   return el as T;
 }
+

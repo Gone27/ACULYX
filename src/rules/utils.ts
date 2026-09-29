@@ -1,4 +1,5 @@
 import { MAX_EVIDENCE_LENGTH } from '../shared/constants';
+import type { Finding, Hop } from '../shared/types';
 
 // ─── Evidence sanitisation ────────────────────────────────────────────────────
 //
@@ -29,6 +30,27 @@ export function sanitizeEvidence(raw: string): string {
     s += ` … [${raw.length - MAX_EVIDENCE_LENGTH} chars truncated]`;
   }
   return s;
+}
+
+/** Find conflicting repeated values among security-sensitive response headers. */
+export function checkDuplicateHeaders(hop: Hop): Finding[] {
+  const names = ['strict-transport-security', 'x-frame-options', 'referrer-policy', 'x-content-type-options', 'x-xss-protection'];
+  const findings: Finding[] = [];
+  for (const name of names) {
+    const values = hop.rawHeaders
+      .filter((header) => header.name.toLowerCase() === name)
+      .map((header) => header.value.trim());
+    if (values.length < 2 || new Set(values).size < 2) continue;
+    findings.push({
+      ruleId: 'DUP-001', category: 'header', severity: 'info',
+      title: `Conflicting duplicate ${name} headers`,
+      impact: 'Browsers and intermediaries may interpret conflicting repeated policy values differently.',
+      evidence: sanitizeEvidence(`${name}: ${values.join(' | ')}`),
+      recommendation: 'Configure the server or proxy to emit one authoritative value for this header.',
+      reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers',
+    });
+  }
+  return findings;
 }
 
 // ─── Header normalisation ─────────────────────────────────────────────────────
@@ -126,7 +148,7 @@ export function originFromUrl(url: string): string | null {
 // ─── Sensitive Cookie Heuristics ──────────────────────────────────────────────
 
 const SENSITIVE_COOKIE_RE =
-  /(^|[-_])(session|sess|auth|token|jwt|sid|login|user|sso|connect\.sid|phpsessid|jsessionid|asp\.net_sessionid|credential|secret|password|access[-_]?token|id[-_]?token)([-_]|$)/i;
+  /(^|[-_])(session|sess|auth|token|jwt|sid|login|sso|connect\.sid|phpsessid|jsessionid|asp\.net_sessionid|credential|secret|password|access[-_]?token|id[-_]?token)([-_]|$)/i;
 
 const NON_SENSITIVE_COOKIE_RE =
   /(^|[-_])(ga|gid|gat|gcl|fbp|fbc|theme|dark|light|lang|locale|country|currency|timezone|tz|sidebar|banner|notice|consent|cookie_consent|optout|optimizely|amplitude|intercom|csrf|xsrf|csrftoken)([-_]|$)/i;
@@ -138,10 +160,18 @@ const NON_SENSITIVE_COOKIE_RE =
  * Harmless client-side cookies (analytics, UI preferences, language, CSRF tokens that
  * need JS reading in double-submit patterns) return false.
  */
-export function isSensitiveCookie(name: string): boolean {
-  if (name.startsWith('__Host-') || name.startsWith('__Secure-')) return true;
-  if (NON_SENSITIVE_COOKIE_RE.test(name)) return false;
-  return SENSITIVE_COOKIE_RE.test(name);
+export function isSensitiveCookie(
+  name: string,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): { isSensitive: boolean; reason: 'override' | 'prefix' | 'regex' } {
+  // Cookie names are case-sensitive.
+  if (alwaysIgnore.includes(name)) return { isSensitive: false, reason: 'override' };
+  if (alwaysSensitive.includes(name)) return { isSensitive: true, reason: 'override' };
+
+  if (name.startsWith('__Host-') || name.startsWith('__Secure-')) return { isSensitive: true, reason: 'prefix' };
+  if (NON_SENSITIVE_COOKIE_RE.test(name)) return { isSensitive: false, reason: 'regex' };
+  return { isSensitive: SENSITIVE_COOKIE_RE.test(name), reason: 'regex' };
 }
 
 // ─── Modern CSP Protection Checks ─────────────────────────────────────────────
@@ -169,3 +199,4 @@ export function hasCspBypassProtection(sourceList: string): {
   const isModernStrict = hasNonce || hasHash || hasStrictDynamic;
   return { hasNonce, hasHash, hasStrictDynamic, isModernStrict };
 }
+

@@ -8,7 +8,9 @@
  * this file.  Only metadata fields (name, domain, flags, etc.) are accessed.
  */
 
-import type { CookieRecord } from '../shared/types';
+import type { CookieRecord, Finding } from '../shared/types';
+import { registrableDomain } from '../rules/headers/subdomain-trust';
+import { sanitizeEvidence } from '../rules/utils';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,11 +31,17 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
   name: string;
   path: string | null;
   domainAttributePresent: boolean;
+  domain: string | null;
+  sameSiteNone: boolean;
+  secure: boolean;
 } {
   const parts = setCookieHeader.split(';').map((part) => part.trim());
   const name = parseCookieName(setCookieHeader);
   let path: string | null = null;
   let domainAttributePresent = false;
+  let domain: string | null = null;
+  let sameSiteNone = false;
+  let secure = false;
 
   for (const attribute of parts.slice(1)) {
     const separator = attribute.indexOf('=');
@@ -43,19 +51,89 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
     if (attributeName === 'path' && separator !== -1) {
       path = attribute.slice(separator + 1).trim();
     }
-    if (attributeName === 'domain') domainAttributePresent = true;
+    if (attributeName === 'domain') {
+      domainAttributePresent = true;
+      domain = separator === -1 ? '' : attribute.slice(separator + 1).trim().replace(/^\./, '').toLowerCase();
+    }
+    if (attributeName === 'samesite' && separator !== -1) {
+      sameSiteNone = attribute.slice(separator + 1).trim().toLowerCase() === 'none';
+    }
+    if (attributeName === 'secure' && separator === -1) secure = true;
   }
 
-  return { name, path, domainAttributePresent };
+  return { name, path, domainAttributePresent, domain, sameSiteNone, secure };
 }
 
-/**
- * Derive the registrable domain (eTLD+1 approximation) from a hostname.
- * This is a simple heuristic that strips the leftmost label; it is sufficient
- * for the third-party cookie check without pulling in a full public-suffix
- * library.
- *
- * Examples:
+export function findUnobservedCookieFindings(
+  setCookieHeaders: string[],
+  cookies: Array<{ name: string; path: string; domain: string }>,
+  tabUrl: string,
+): Finding[] {
+  const metadata = setCookieHeaders.map(parseCookieHeaderMetadata);
+  const url = (() => {
+    try {
+      return new URL(tabUrl);
+    } catch {
+      return null;
+    }
+  })();
+  if (url === null) return [];
+
+  const visibleNames = new Set(cookies.map((cookie) => cookie.name));
+  return metadata
+    .filter((cookie) => cookie.name.length > 0 && !visibleNames.has(cookie.name))
+    .flatMap((cookie): Finding[] => {
+      const reasons: string[] = [];
+      let likelyRejected = false;
+      if (cookie.sameSiteNone && !cookie.secure) {
+        reasons.push('SameSite=None requires Secure in modern browsers');
+        likelyRejected = true;
+      }
+      if (cookie.domain !== null && cookie.domain.length > 0
+        && url.hostname !== cookie.domain && !url.hostname.endsWith(`.${cookie.domain}`)) {
+        reasons.push('the Domain attribute does not match the response host');
+        likelyRejected = true;
+      }
+      if (cookie.domainAttributePresent && cookie.domain === '') {
+        reasons.push('the Domain attribute is empty or malformed');
+        likelyRejected = true;
+      }
+
+      const pathDoesNotMatch = cookie.path !== null
+        && cookie.path.startsWith('/')
+        && !cookiePathMatches(url.pathname, cookie.path);
+      if (pathDoesNotMatch) {
+        reasons.push(`the cookie Path (${cookie.path}) does not include the current page path`);
+        if (!likelyRejected) return [];
+      }
+      if (reasons.length === 0) {
+        reasons.push('browser privacy policy, third-party cookie blocking, expiry, or another cookie validation rule may apply');
+      }
+
+      return [{
+        ruleId: 'COOKIE-REJECTED',
+        category: 'cookie',
+        severity: 'info',
+        title: `Set-Cookie named "${sanitizeEvidence(cookie.name)}" was not observed in the accessible cookie jar`,
+        impact: 'The cookie may not persist in this browser context, which can break a login or other stateful flow.',
+        evidence: sanitizeEvidence(`Cookie name: ${cookie.name}; sent attributes: ${[
+          cookie.sameSiteNone ? 'SameSite=None' : '',
+          cookie.secure ? 'Secure' : '',
+          cookie.domainAttributePresent ? 'Domain attribute' : 'host-only',
+        ].filter((part) => part.length > 0).join(', ')}`),
+        recommendation: `Check whether ${reasons.join('; ')}. A name-only jar comparison cannot prove rejection if a same-name cookie existed before this response.`,
+        reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie',
+        sourceUrl: url.href,
+      }];
+    });
+}
+
+function cookiePathMatches(requestPath: string, cookiePath: string): boolean {
+  if (requestPath === cookiePath) return true;
+  if (!requestPath.startsWith(cookiePath)) return false;
+  if (cookiePath.endsWith('/')) return true;
+  return requestPath[cookiePath.length] === '/';
+}
 
 /**
  * Map Chrome's SameSiteStatus enum to the project's union type.
@@ -90,14 +168,21 @@ function mapSameSite(
  * cookie's domain (accounting for the leading dot that Chrome adds for
  * host-level cookies).
  */
-function isThirdPartyCookie(pageHostname: string, cookieDomain: string): boolean {
+export function isThirdPartyCookie(pageHostname: string, cookieDomain: string): boolean {
   // Strip the leading dot used by Chrome for domain-scoped cookies.
-  const normalised = cookieDomain.startsWith('.')
+  const normalised = (cookieDomain.startsWith('.')
     ? cookieDomain.slice(1)
-    : cookieDomain;
+    : cookieDomain).toLowerCase();
+  const pageDomain = registrableDomain(pageHostname);
+  const cookieRegistrableDomain = registrableDomain(normalised);
+
+  if (pageDomain !== null && cookieRegistrableDomain !== null) {
+    return pageDomain !== cookieRegistrableDomain;
+  }
 
   // First-party: the page hostname IS the cookie domain, or is a subdomain.
-  return pageHostname !== normalised && !pageHostname.endsWith(`.${normalised}`);
+  const normalisedPage = pageHostname.toLowerCase();
+  return normalisedPage !== normalised && !normalisedPage.endsWith(`.${normalised}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +207,7 @@ export async function correlateCookies(
   _tabId: number,
   tabUrl: string,
   setCookieHeaders: string[],
-): Promise<CookieRecord[]> {
+): Promise<{ records: CookieRecord[]; findings: Finding[] }> {
   // ------------------------------------------------------------------
   // 1. Build a set of names that appeared in Set-Cookie headers.
   //    These were definitively set by the server, not by JavaScript.
@@ -138,7 +223,7 @@ export async function correlateCookies(
     urlScopedCookies = await chrome.cookies.getAll({ url: tabUrl });
   } catch {
     // Permissions not granted or invalid URL — return empty.
-    return [];
+    return { records: [], findings: [] };
   }
 
   // ------------------------------------------------------------------
@@ -203,5 +288,8 @@ export async function correlateCookies(
     },
   );
 
-  return records;
+  return {
+    records,
+    findings: findUnobservedCookieFindings(setCookieHeaders, urlScopedCookies, tabUrl),
+  };
 }

@@ -9,6 +9,7 @@
  *   CSP-005 (medium) — frame-ancestors directive is absent
  *   CSP-006 (medium) — effective object-src is absent or not 'none'
  *   CSP-007 (low)    — base-uri directive is absent
+ *   CSP-009 (info)   — script-src trusts a small curated set of bypass-prone hosts (heuristic)
  *
  * Returns both findings and the parsed directive map so other rules
  * (e.g. XFO) can inspect directives without re-parsing.
@@ -16,11 +17,28 @@
 
 import type { Finding, Hop } from '../../shared/types';
 import { sanitizeEvidence, parseCspDirectives, hasCspBypassProtection } from '../utils';
+import { URLS as JSONP_BYPASS_URLS } from 'csp_evaluator/dist/allowlist_bypasses/jsonp';
 
 const REFERENCE =
   'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy';
 
 const CSP_HEADER = 'content-security-policy';
+
+
+/**
+ * Bypass-prone hosts derived from Google's csp_evaluator maintained JSONP list.
+ * Extracted at module-load time: strip scheme/path from each URL and deduplicate.
+ *
+ * This replaces the hand-written 4-item list with the package's curated set,
+ * which Google keeps up to date with real-world bypass-prone endpoints.
+ */
+const CSP_BYPASS_HOSTS: ReadonlySet<string> = new Set(
+  JSONP_BYPASS_URLS.map((url) => {
+    // Strip leading '//' or 'https?://', take the host portion before first '/'
+    const stripped = url.replace(/^(https?:)?\/\//, '');
+    return (stripped.split('/')[0] ?? '').toLowerCase();
+  }).filter((host) => host.length > 0),
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,6 +86,25 @@ function hasWildcardSource(sourceList: string, isModernStrict: boolean): boolean
   );
 }
 
+function findBypassProneHosts(sourceList: string): string[] {
+  const matched = new Set<string>();
+  for (const token of sourceTokens(sourceList)) {
+    if (token.startsWith("'") || token === '*') continue;
+    const schemeStripped = token.replace(/^https?:\/\//i, '');
+    const hostSource = schemeStripped.split('/')[0]?.toLowerCase() ?? '';
+    const wildcard = hostSource.startsWith('*.');
+    const host = hostSource.replace(/^\*\./, '').replace(/:\d+$/, '');
+    if (host.length === 0) continue;
+
+    for (const riskyHost of CSP_BYPASS_HOSTS) {
+      if (host === riskyHost || host.endsWith(`.${riskyHost}`) || (wildcard && riskyHost.endsWith(`.${host}`))) {
+        matched.add(riskyHost);
+      }
+    }
+  }
+  return [...matched];
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -85,31 +122,71 @@ export interface CspResult {
  * @param finalHop - The last hop in the redirect chain.
  * @returns An object containing all findings and the parsed directives map.
  */
-export function checkCsp(finalHop: Hop): CspResult {
+export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
   const findings: Finding[] = [];
   const cspValue = finalHop.headers[CSP_HEADER];
 
   // CSP-001 — header absent entirely.
   if (cspValue === undefined) {
-    findings.push({
-      ruleId: 'CSP-001',
-      category: 'header',
-      severity: 'high',
-      title: 'Content-Security-Policy header is missing',
-      impact:
-        'Without a CSP, any Cross-Site Scripting (XSS) vulnerability can execute malicious scripts, steal login cookies, or take over user accounts.',
-      evidence: sanitizeEvidence('(header absent)'),
-      recommendation:
-        'Add a Content-Security-Policy header. Start with a strict base policy ' +
-        "such as \"default-src 'none'; script-src 'self'; object-src 'none'; base-uri 'none'\".",
-      reference: REFERENCE,
-    });
+    const reportOnlyValue = finalHop.headers['content-security-policy-report-only'];
+    if (metaCspFound) {
+      findings.push({
+        ruleId: 'CSP-008',
+        category: 'header',
+        severity: 'info',
+        title: 'CSP detected in a meta tag; policy details are not evaluated',
+        impact:
+          'A meta CSP can enforce some policy directives, but it cannot replace response-header protections such as frame-ancestors and may take effect later in document parsing.',
+        evidence: sanitizeEvidence('<meta http-equiv="Content-Security-Policy">'),
+        recommendation:
+          'Also send Content-Security-Policy as an HTTP response header for complete coverage. This report does not assess the meta policy contents.',
+        reference: REFERENCE,
+      });
+    } else if (reportOnlyValue !== undefined) {
+      findings.push({
+        ruleId: 'CSP-001',
+        category: 'header',
+        severity: 'high',
+        title: 'Only Content-Security-Policy-Report-Only is present; no enforcing CSP is configured',
+        impact:
+          'Report-Only policies observe violations but do not block unsafe content, so they do not provide CSP enforcement.',
+        evidence: sanitizeEvidence(reportOnlyValue),
+        recommendation:
+          'After validating reports, deploy the intended policy as Content-Security-Policy. Keep Report-Only separately if continued monitoring is desired.',
+        reference: REFERENCE,
+      });
+    } else {
+      findings.push({
+        ruleId: 'CSP-001',
+        category: 'header',
+        severity: 'high',
+        title: 'Content-Security-Policy header is missing',
+        impact:
+          'Without a CSP, any Cross-Site Scripting (XSS) vulnerability can execute malicious scripts, steal login cookies, or take over user accounts.',
+        evidence: sanitizeEvidence('(header absent)'),
+        recommendation:
+          'Add a Content-Security-Policy header. Start with a strict base policy ' +
+          "such as \"default-src 'none'; script-src 'self'; object-src 'none'; base-uri 'none'\".",
+        reference: REFERENCE,
+      });
+    }
     // Without a CSP there is nothing more to parse.
     return { findings, directives: new Map() };
   }
 
   // Parse the header value into a directive map.
   const directives = parseCspDirectives(cspValue);
+
+  if (!directives.has('default-src') && !directives.has('script-src')) {
+    findings.push({
+      ruleId: 'CSP-010', category: 'header', severity: 'info',
+      title: 'CSP has no default-src or script-src fallback',
+      impact: 'The policy does not establish a general resource fallback or an explicit script source policy.',
+      evidence: sanitizeEvidence(cspValue),
+      recommendation: "Add default-src as a baseline and define script-src explicitly where script loading needs a different policy.",
+      reference: REFERENCE,
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Script-src checks (falls back to default-src)
@@ -118,6 +195,22 @@ export function checkCsp(finalHop: Hop): CspResult {
 
   if (effectiveScriptSrc !== undefined) {
     const { isModernStrict } = hasCspBypassProtection(effectiveScriptSrc);
+    const bypassProneHosts = isModernStrict ? [] : findBypassProneHosts(effectiveScriptSrc);
+
+    if (bypassProneHosts.length > 0) {
+      findings.push({
+        ruleId: 'CSP-009',
+        category: 'header',
+        severity: 'info',
+        title: 'CSP script-src trusts host(s) with historically bypass-prone endpoints or libraries',
+        impact:
+          'Some allowlisted hosts expose JSONP endpoints or host libraries with script gadgets; actual exploitability depends on the specific endpoint, path, and version.',
+        evidence: sanitizeEvidence(bypassProneHosts.join(', ')),
+        recommendation:
+          'Review whether each host is required, restrict paths where practical, pin library versions, and prefer nonces or hashes. This curated host match is a heuristic, not proof of a bypass.',
+        reference: 'https://csp-evaluator.withgoogle.com/',
+      });
+    }
 
     // CSP-002 — 'unsafe-inline' in effective script-src.
     if (effectiveScriptSrc.includes("'unsafe-inline'")) {

@@ -55,8 +55,8 @@ export interface Hop {
    */
   capturedAt: CapturePoint;
   /**
-   * True when onHeadersReceived and onResponseStarted produced different
-   * header sets, indicating another extension modified the headers in flight.
+  * True when onHeadersReceived and onResponseStarted produced different
+  * header sets. webRequest does not expose which extension, if any, caused it.
    */
   headersDiffer: boolean;
   timestamp: number;
@@ -158,8 +158,13 @@ export interface TabState {
   hops: Hop[];
   cookies: CookieRecord[];
   findings: Finding[];
+  /** Diagnostics tied to the latest captured response, such as unobserved cookies. */
+  captureFindings?: Finding[];
   grade: Grade;
   score: number;
+  /** Advisory hardening/configuration quality sub-score, separate from security score. */
+  qualityScore?: number;
+  qualityGrade?: Grade;
   scoreVersion: string;
   scoreBreakdown: ScoreBreakdown[];
   coverage: CoverageInfo;
@@ -178,4 +183,6 @@ export interface Settings {
   allowedOrigins: string[];
   severityFilter: Severity[];
   retainHistoryDays: number;
+  alwaysSensitiveCookies: string[];
+  alwaysIgnoreCookies: string[];
 }

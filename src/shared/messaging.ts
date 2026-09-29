@@ -35,6 +35,20 @@ export interface ServiceWorkerStatusMessage {
   serviceWorkerUrl: string | null;
 }
 
+export interface MetaCspFoundMessage {
+  type: 'META_CSP_FOUND';
+}
+
+export interface SriScanMessage {
+  type: 'SRI_SCAN';
+  externalScripts: number;
+  missingIntegrity: number;
+  /** External stylesheets (<link rel="stylesheet">) found on the page. */
+  externalStylesheets?: number;
+  /** Stylesheets missing an integrity attribute. */
+  missingStyleIntegrity?: number;
+}
+
 /** All messages that cross the service worker ↔ UI boundary. */
 export type ExtensionMessage =
   | TabStateUpdateMessage
@@ -42,7 +56,9 @@ export type ExtensionMessage =
   | StateResponseMessage
   | PermissionsChangedMessage
   | SettingsChangedMessage
-  | ServiceWorkerStatusMessage;
+  | ServiceWorkerStatusMessage
+  | MetaCspFoundMessage
+  | SriScanMessage;
 
 // ─── Port registry ────────────────────────────────────────────────────────────
 

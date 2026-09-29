@@ -10,26 +10,15 @@
     ],
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "js": [
-        "chunks/service-worker-detection.ts-ZG0dyj9U.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ],
-      "run_at": "document_start"
-    }
-  ],
   "action": {
-    "default_popup": "src/popup/popup.html",
     "default_title": "Security Checker",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
-    }
+    },
+    "default_popup": "src/popup/popup.html"
   },
   "options_ui": {
     "page": "src/options/options.html",
@@ -42,7 +31,8 @@
     "webNavigation",
     "tabs",
     "alarms",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "optional_host_permissions": [
     "<all_urls>"
@@ -56,18 +46,6 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "web_accessible_resources": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "resources": [
-        "chunks/service-worker-detection.ts-ZG0dyj9U.js",
-        "chunks/service-worker-detection.ts-ZG0dyj9U.js.map"
-      ],
-      "use_dynamic_url": false
-    }
-  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "seccheck@security-checker.local",
