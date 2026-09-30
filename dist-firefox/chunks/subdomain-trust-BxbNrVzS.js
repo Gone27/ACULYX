@@ -38,22 +38,58 @@ function checkDuplicateHeaders(hop) {
 	return findings;
 }
 /**
+* Redact the secret cookie value from a Set-Cookie header string,
+* preserving the cookie name and all attributes (Path, Domain, SameSite, Secure, HttpOnly, etc.).
+* e.g. "session=V2_CANARY; Path=/; Secure; HttpOnly" -> "session=[REDACTED]; Path=/; Secure; HttpOnly"
+*/
+function redactSetCookieHeader(headerValue) {
+	if (!headerValue) return headerValue;
+	const eqIdx = headerValue.indexOf("=");
+	const semiIdx = headerValue.indexOf(";");
+	if (eqIdx !== -1 && (semiIdx === -1 || eqIdx < semiIdx)) return `${headerValue.slice(0, eqIdx).trim()}=[REDACTED]${semiIdx !== -1 ? headerValue.slice(semiIdx) : ""}`;
+	if (semiIdx !== -1) return `${headerValue.slice(0, semiIdx).trim()}=[REDACTED]${headerValue.slice(semiIdx)}`;
+	return `${headerValue.trim()}=[REDACTED]`;
+}
+/**
+* Redact secret cookie values from a Cookie request header string.
+* e.g. "a=secret1; b=secret2" -> "a=[REDACTED]; b=[REDACTED]"
+*/
+function redactCookieHeader(headerValue) {
+	if (!headerValue) return headerValue;
+	return headerValue.split(";").map((part) => {
+		const trimmed = part.trim();
+		const eqIdx = trimmed.indexOf("=");
+		if (eqIdx !== -1) return `${trimmed.slice(0, eqIdx).trim()}=[REDACTED]`;
+		return trimmed ? `${trimmed}=[REDACTED]` : "";
+	}).filter((s) => s.length > 0).join("; ");
+}
+/**
+* Redact sensitive header values (Set-Cookie, Cookie, Authorization, Proxy-Authorization).
+*/
+function redactHeaderValue(name, value) {
+	const lower = name.toLowerCase();
+	if (lower === "set-cookie") return redactSetCookieHeader(value);
+	if (lower === "cookie") return redactCookieHeader(value);
+	if (lower === "authorization" || lower === "proxy-authorization") return "[REDACTED]";
+	return value;
+}
+/**
 * Build a lowercase-keyed header map from the raw WebRequest header array.
-* For most headers last-value-wins; Set-Cookie is handled separately by the
-* correlate module since it's always multi-valued.
+* Sensitive values (Set-Cookie, Cookie, Authorization) are automatically redacted.
+* For most headers last-value-wins.
 */
 function normalizeHeaders(raw) {
 	const map = {};
-	for (const { name, value } of raw) if (value != null) map[name.toLowerCase()] = value;
+	for (const { name, value } of raw) if (value != null) map[name.toLowerCase()] = redactHeaderValue(name, value);
 	return map;
 }
 /**
-* Collect every Set-Cookie header value as a raw string array.
+* Collect every Set-Cookie header value as a raw string array with values redacted.
 * The webRequest API may present them as a single joined header or
 * as multiple entries depending on Chrome version.
 */
 function extractSetCookieHeaders(raw) {
-	return raw.filter((h) => h.name.toLowerCase() === "set-cookie" && h.value != null).map((h) => h.value);
+	return raw.filter((h) => h.name.toLowerCase() === "set-cookie" && h.value != null).map((h) => redactSetCookieHeader(h.value));
 }
 /**
 * Compare two header maps and return true if they differ in any key or value.
@@ -704,6 +740,6 @@ function checkSubdomainTrust(finalHop, cookies, alwaysSensitive = [], alwaysIgno
 	};
 }
 //#endregion
-export { hasCspBypassProtection as a, normalizeHeaders as c, redactUrlPath as d, redactUrlQueryParams as f, extractSetCookieHeaders as i, originFromUrl as l, registrableDomain as n, headersDiffer as o, sanitizeEvidence as p, checkDuplicateHeaders as r, isSensitiveCookie as s, checkSubdomainTrust as t, parseCspDirectives as u };
+export { hasCspBypassProtection as a, normalizeHeaders as c, redactHeaderValue as d, redactUrlPath as f, extractSetCookieHeaders as i, originFromUrl as l, sanitizeEvidence as m, registrableDomain as n, headersDiffer as o, redactUrlQueryParams as p, checkDuplicateHeaders as r, isSensitiveCookie as s, checkSubdomainTrust as t, parseCspDirectives as u };
 
-//# sourceMappingURL=subdomain-trust-DrWlzpgv.js.map
+//# sourceMappingURL=subdomain-trust-BxbNrVzS.js.map

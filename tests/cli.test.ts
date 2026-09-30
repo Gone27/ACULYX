@@ -167,6 +167,34 @@ describe('SecCheck CLI report', () => {
     expect(diff.currentScore).toBeGreaterThan(diff.baselineScore ?? 0);
   });
 
+  it('preserves duplicate rule findings and tracks modified findings in diff', () => {
+    const baseline = buildCliReport({
+      url: 'https://example.com',
+      headers: {
+        'server': 'Apache/2.4.51',
+        'x-powered-by': 'PHP/8.1.0',
+      },
+    });
+
+    // Current report fixes one leak (removes x-powered-by), keeps the other, and modifies an evidence
+    const current = buildCliReport({
+      url: 'https://example.com',
+      headers: {
+        'server': 'Apache/2.4.52',
+      },
+    });
+
+    const diff = computeFindingDiff(baseline, current);
+
+    // Baseline had 2 LEAK-001 findings; one was resolved, one was modified/unchanged
+    const leakFixes = diff.fixes.filter((f) => f.ruleId === 'LEAK-001');
+    expect(leakFixes.length).toBeGreaterThanOrEqual(1);
+
+    // Verify changed or unchanged preserves the other instance without collapsing
+    const hasPersistentLeak = diff.unchanged.some((f) => f.ruleId === 'LEAK-001') || diff.changed.some((c) => c.after.ruleId === 'LEAK-001');
+    expect(hasPersistentLeak).toBe(true);
+  });
+
   it('generates an audit bundle with an integrity checksum and verified authenticity', () => {
     const report = buildCliReport({ url: 'https://example.com', headers: { 'x-frame-options': 'DENY' } });
     const bundle = buildAuditBundle(report, { 'x-frame-options': 'DENY' });

@@ -22,7 +22,8 @@ export function reportPageSignals(): void {
       if (meta.getAttribute('http-equiv')?.trim().toLowerCase() === 'content-security-policy') {
         const content = meta.getAttribute('content')?.trim();
         if (content !== undefined && content.length > 0) {
-          policies.push(content);
+          policies.push(content.slice(0, 2048));
+          if (policies.length >= 5) break;
         }
       }
     }

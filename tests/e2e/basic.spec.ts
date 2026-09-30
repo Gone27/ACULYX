@@ -19,10 +19,14 @@
  * are marked with a skip comment and left as future work.
  */
 
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { test, expect, chromium } from '@playwright/test';
 import { startServer } from '../server/index';
 
-// NOTE (Phase 3): Path imports and extensionPath for persistent-context loading will go here.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const extensionPath = path.resolve(__dirname, '../../dist');
 
 // ==========================================================================
 // Test suite: Test server header scenarios
@@ -224,6 +228,75 @@ test.describe('Extension e2e (requires built dist/)', () => {
 
       await browser.close();
     } finally {
+      server.close();
+    }
+  });
+});
+
+// ==========================================================================
+// Test suite: Real Chrome extension loading & UI inspection
+// ==========================================================================
+
+test.describe('Extension Loading & Storage Redaction E2E', () => {
+  test('loads built extension in persistent context, renders UI, and verifies zero cookie canary leak in session storage', async () => {
+    const { server, baseUrl } = await startServer(3464);
+
+    let context;
+    try {
+      context = await chromium.launchPersistentContext('', {
+        headless: false,
+        args: [
+          '--headless=new',
+          `--disable-extensions-except=${extensionPath}`,
+          `--load-extension=${extensionPath}`,
+        ],
+      });
+
+      // Wait for extension background service worker
+      let [background] = context.serviceWorkers();
+      if (!background) {
+        background = await context.waitForEvent('serviceworker', { timeout: 10_000 });
+      }
+
+      expect(background).toBeDefined();
+      const extensionId = background.url().split('/')[2];
+      expect(extensionId).toBeDefined();
+
+      // 1. Visit options page and verify evaluation mode label
+      const optionsPage = await context.newPage();
+      await optionsPage.goto(`chrome-extension://${extensionId}/src/options/options.html`);
+      await expect(optionsPage.locator('.brand')).toContainText('SecCheck');
+      await expect(optionsPage.locator('#section-pro')).toContainText('Evaluation Mode');
+      await optionsPage.close();
+
+      // 2. Visit popup page and verify UI elements
+      const popupPage = await context.newPage();
+      await popupPage.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
+      await expect(popupPage.locator('.popup-title')).toContainText('SecCheck');
+      await expect(popupPage.locator('#settings-link')).toBeVisible();
+      await expect(popupPage.locator('#open-graph-btn')).toBeAttached();
+      await popupPage.close();
+
+      // 3. Visit sidepanel page directly (Firefox fallback mode) and verify graph UI
+      const sidepanelPage = await context.newPage();
+      await sidepanelPage.goto(`chrome-extension://${extensionId}/src/sidepanel/sidepanel.html?apex=example.com`);
+      await expect(sidepanelPage.locator('#tier-badge')).toBeVisible();
+      await sidepanelPage.close();
+
+      // 4. Test synthetic Set-Cookie canary by visiting test route
+      const page = await context.newPage();
+      await page.goto(`${baseUrl}/cookie-test`);
+      await page.close();
+
+      // 5. Query session storage from service worker to verify no cookie secret or canary leaked
+      const storageDump = await background.evaluate(async () => {
+        return await chrome.storage.session.get(null);
+      });
+      const serialized = JSON.stringify(storageDump);
+      expect(serialized).not.toContain('V2_SYNTHETIC_CANARY');
+      expect(serialized).not.toContain('REDACTED_IN_TEST');
+    } finally {
+      if (context) await context.close();
       server.close();
     }
   });

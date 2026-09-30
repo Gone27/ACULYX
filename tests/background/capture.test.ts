@@ -223,4 +223,75 @@ describe('redirect response capture', () => {
     expect(apiHops[0]?.normalizedPath).toBe('https://api.example.com/v1/auth/[token]/verify');
     expect(apiHops[0]?.url).toBe('https://api.example.com/v1/auth/[token]/verify');
   });
+
+  it('redacts Set-Cookie, Cookie, and Authorization header values in captured main_frame and API responses (synthetic canary test)', () => {
+    const hops: Hop[] = [];
+    const apiHops: ApiHop[] = [];
+    registerCaptureListeners(
+      (_tabId, hop) => hops.push(hop),
+      (apiHop) => apiHops.push(apiHop),
+    );
+
+    const canaryCookie = 'session=V2_SYNTHETIC_CANARY; Path=/; Secure; HttpOnly; SameSite=Lax';
+    const canaryAuth = 'Bearer V2_SYNTHETIC_CANARY_AUTH';
+
+    // 1. Navigation request setting the canary cookie
+    listeners['onHeadersReceived']?.({
+      type: 'main_frame',
+      tabId: 7,
+      requestId: 'doc-canary-1',
+      url: 'https://example.com/login',
+      statusCode: 200,
+      responseHeaders: [
+        { name: 'Set-Cookie', value: canaryCookie },
+        { name: 'Authorization', value: canaryAuth },
+      ],
+      timeStamp: 500,
+    });
+    listeners['onResponseStarted']?.({
+      type: 'main_frame',
+      tabId: 7,
+      requestId: 'doc-canary-1',
+      url: 'https://example.com/login',
+      statusCode: 200,
+      responseHeaders: [
+        { name: 'Set-Cookie', value: canaryCookie },
+        { name: 'Authorization', value: canaryAuth },
+      ],
+      fromCache: false,
+      timeStamp: 501,
+    });
+
+    expect(hops).toHaveLength(1);
+    const hop = hops[0];
+    expect(hop).toBeDefined();
+    if (hop === undefined) throw new Error('Expected hop to be defined');
+    expect(hop.headers['set-cookie']).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
+    expect(hop.headers['set-cookie']).not.toContain('V2_SYNTHETIC_CANARY');
+    expect(hop.headers['authorization']).toBe('[REDACTED]');
+    expect(hop.rawHeaders.find((h) => h.name.toLowerCase() === 'set-cookie')?.value).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
+    expect(JSON.stringify(hop)).not.toContain('V2_SYNTHETIC_CANARY');
+
+    // 2. API response setting canary cookie
+    listeners['onResponseStarted']?.({
+      type: 'xmlhttprequest',
+      tabId: 7,
+      requestId: 'api-canary-1',
+      url: 'https://example.com/api/user',
+      statusCode: 200,
+      responseHeaders: [
+        { name: 'Set-Cookie', value: canaryCookie },
+      ],
+      fromCache: false,
+      timeStamp: 502,
+    });
+
+    expect(apiHops).toHaveLength(1);
+    const apiHop = apiHops[0];
+    expect(apiHop).toBeDefined();
+    if (apiHop === undefined) throw new Error('Expected apiHop to be defined');
+    expect(apiHop.headers['set-cookie']).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
+    expect(apiHop.rawHeaders.find((h) => h.name.toLowerCase() === 'set-cookie')?.value).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
+    expect(JSON.stringify(apiHop)).not.toContain('V2_SYNTHETIC_CANARY');
+  });
 });

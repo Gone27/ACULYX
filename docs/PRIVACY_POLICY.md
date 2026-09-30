@@ -12,7 +12,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 
 ## 2. Information We Do NOT Collect
 - **Zero Remote Telemetry:** SecCheck does not have any external tracking servers, analytics endpoints, or cloud backends. Extension pages enforce `connect-src 'none'`. The page-signal script also makes no network requests; it uses extension runtime messaging only to report locally.
-- **Never Stores Cookie Values:** SecCheck inspects cookie attributes (such as `Secure`, `HttpOnly`, `SameSite`, and prefix naming) for compliance. **Cookie values and contents are never read, copied, or stored in browser storage.** Only cookie names, domain scopes, and flag metadata are evaluated.
+- **Never Stores Cookie Values:** SecCheck inspects cookie attributes (such as `Secure`, `HttpOnly`, `SameSite`, and prefix naming) for compliance. **Cookie values and contents are never read, copied, or stored in browser storage.** Only cookie names, domain scopes, and flag metadata are evaluated. Any `Set-Cookie` or `Cookie` response/request headers captured in network hops have their secret cookie values automatically redacted before local session storage or display.
 - **No Personal Identifiers:** We do not collect names, email addresses, IP addresses, search queries, or browsing history.
 
 ---
@@ -21,7 +21,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 When you choose to monitor an origin, SecCheck temporarily processes network headers and cookie attributes locally:
 - **HTTP Response Headers:** Evaluated against security standards (HSTS, CSP, X-Content-Type-Options, CORS, etc.) for top-level navigations and in-page API (`xmlhttprequest`/`fetch`) calls on permitted origins. Passive sub-resources (such as images, scripts, stylesheets, and third-party iframes) and request/response bodies are not captured or analyzed.
 - **Sensitive URL Redaction:** Query parameters in captured API URLs (such as tokens, auth keys, and passwords) are automatically redacted before local display or session storage.
-- **Page signals:** After you grant an origin, a content script checks the top-level document for a non-empty CSP meta tag and reads the service-worker controller status and script URL. It sends only those signals to the extension service worker. It does not collect page HTML or the meta policy text.
+- **Page signals:** After you grant an origin, a content script inspects the top-level document for `<meta http-equiv="Content-Security-Policy">` directives and reads the service-worker controller status and script URL. The policy directives are collected strictly in local memory to evaluate CSP syntax and directive strength, are stored only in temporary tab session storage, and never leave your device. The content script never collects page HTML, DOM tree contents, forms, or user input.
 - **Local Storage (`chrome.storage.local` & `session`):** 
   - User configuration settings (e.g. per-site allowlist, severity filters).
   - Historical domain scores (capped at the last 10 visits per monitored domain to calculate trends).

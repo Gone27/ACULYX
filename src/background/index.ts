@@ -15,13 +15,13 @@
  * work is performed so the module is safe to import during SW startup.
  */
 
-import { tabStates, initLifecycle, hydrateFromSession } from './lifecycle';
+import { tabStates, initLifecycle, hydrateFromSession, originAuthBaselines } from './lifecycle';
 import { registerCaptureListeners, captureMap } from './capture';
 import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
 import { runRules, runApiRules } from '../rules/engine';
 import { extractSetCookieHeaders, originFromUrl } from '../rules/utils';
-import { checkAuthTransition, type AuthBaseline } from '../rules/auth-diff';
+import { checkAuthTransition } from '../rules/auth-diff';
 import { discoverNodes, mergeIntoGraph } from '../rules/graph-discovery';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { SessionStorage, LocalStorage } from '../shared/storage';
@@ -58,7 +58,6 @@ const pendingServiceWorkerReports = new Map<number, {
   serviceWorkerUrl: string | null;
 }>();
 const pendingMetaCspReports = new Set<number>();
-const originAuthBaselines = new Map<string, AuthBaseline>();
 
 let currentSettings: Settings = DEFAULT_SETTINGS;
 LocalStorage.getSettings().then((s) => { currentSettings = s; }).catch(() => {});
@@ -111,6 +110,7 @@ function recomputeTabState(tabId: number, state: TabState): void {
       currentSettings.alwaysIgnoreCookies,
     );
     originAuthBaselines.set(state.origin, newBaseline);
+    void SessionStorage.setAuthBaseline(state.origin, newBaseline);
 
     if (isAuthEvent && record !== null) {
       void LocalStorage.recordAuthDiff(state.origin, record);
@@ -122,7 +122,7 @@ function recomputeTabState(tabId: number, state: TabState): void {
         const u = new URL(state.origin);
         const hostname = u.hostname;
         const apex = registrableDomain(hostname) ?? hostname;
-        const discovered = discoverNodes(hostname, state.hops, state.cookies);
+        const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
         const existingGraph = await LocalStorage.getGraph(apex);
         const updatedGraph = mergeIntoGraph(
           existingGraph,
@@ -564,7 +564,7 @@ chrome.runtime.onMessage.addListener(
           // Store the policy strings so the popup can display them and
           // so we can run csp_evaluator on them separately from the header CSP.
           if (message.policies !== undefined && message.policies.length > 0) {
-            state.coverage.metaCspPolicies = message.policies;
+            state.coverage.metaCspPolicies = message.policies.slice(0, 5).map((p) => p.slice(0, 2048));
             pushLedgerEntry(state, {
               type: 'subresource',
               url: state.url,
@@ -648,10 +648,13 @@ chrome.runtime.onMessage.addListener(
             return;
           }
 
-          if (!isPro && message.tabId !== undefined) {
-            const tabState = tabStates.get(message.tabId);
-            const tabHost = tabState ? (originFromUrl(tabState.url) !== null ? new URL(tabState.origin).hostname : '') : '';
-            const filteredNodes = graph.nodes.filter((n) => n.isApex || n.hostname === tabHost);
+          if (!isPro) {
+            let tabHost = '';
+            if (message.tabId !== undefined) {
+              const tabState = tabStates.get(message.tabId);
+              tabHost = tabState ? (originFromUrl(tabState.url) !== null ? new URL(tabState.origin).hostname : '') : '';
+            }
+            const filteredNodes = graph.nodes.filter((n) => n.isApex || (tabHost.length > 0 && n.hostname === tabHost));
             const nodeHosts = new Set(filteredNodes.map((n) => n.hostname));
             const filteredEdges = graph.edges.filter((e) => nodeHosts.has(e.source) && nodeHosts.has(e.target));
             sendResponse({
@@ -777,6 +780,28 @@ void (async (): Promise<void> => {
 
       state.updatedAt = Date.now();
       void SessionStorage.setTabState(state);
+
+      // Accumulate attack surface graph for API host and CORS endpoints
+      void (async () => {
+        try {
+          const u = new URL(state.origin);
+          const hostname = u.hostname;
+          const apex = registrableDomain(hostname) ?? hostname;
+          const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+          const existingGraph = await LocalStorage.getGraph(apex);
+          const updatedGraph = mergeIntoGraph(
+            existingGraph,
+            hostname,
+            state.score,
+            state.grade,
+            discovered,
+            Boolean(currentSettings.isPro),
+          );
+          await LocalStorage.saveGraph(updatedGraph);
+        } catch {
+          // Silently ignore graph merge errors
+        }
+      })();
 
       portRegistry.broadcast(apiHop.tabId, {
         type: 'TAB_STATE_UPDATE',

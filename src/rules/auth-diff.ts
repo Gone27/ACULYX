@@ -7,18 +7,17 @@
  * findings, scores, and grades.
  */
 
-import type { CookieRecord, Finding, Grade, AuthDiffRecord, AuthDiffFindingChange } from '../shared/types';
+import type {
+  CookieRecord,
+  Finding,
+  Grade,
+  AuthDiffRecord,
+  AuthDiffFindingChange,
+  AuthBaseline,
+} from '../shared/types';
 import { isSensitiveCookie } from './utils';
 
-export interface AuthBaseline {
-  origin: string;
-  cookies: CookieRecord[];
-  findings: Finding[];
-  score: number;
-  grade: Grade;
-  timestamp: number;
-  hasSensitiveCookie: boolean;
-}
+export type { AuthBaseline };
 
 /**
  * Checks if a cookie list contains an authentication or session token.

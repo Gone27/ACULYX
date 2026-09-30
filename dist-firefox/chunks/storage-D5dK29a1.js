@@ -1,4 +1,4 @@
-import { a as DEFAULT_SETTINGS, m as STORAGE_KEYS } from "./messaging-BMItIkAu.js";
+import { a as DEFAULT_SETTINGS, m as STORAGE_KEYS } from "./messaging-BiWicsg3.js";
 //#region src/shared/storage.ts
 function serializeTabState(state) {
 	const { apiEndpoints, ...rest } = state;
@@ -16,6 +16,45 @@ function deserializeTabState(raw) {
 	};
 	return rest;
 }
+function hasUnredactedCookieValue(headerStr) {
+	if (!headerStr) return false;
+	const semiIdx = headerStr.indexOf(";");
+	const firstPart = semiIdx !== -1 ? headerStr.slice(0, semiIdx) : headerStr;
+	const eqIdx = firstPart.indexOf("=");
+	if (eqIdx !== -1) {
+		const val = firstPart.slice(eqIdx + 1).trim();
+		if (val !== "" && val !== "[REDACTED]" && val !== "[redacted]") return true;
+	}
+	return false;
+}
+function assertNoSensitiveSecrets(state) {
+	if (Array.isArray(state.cookies)) {
+		for (const cookie of state.cookies) if ("value" in cookie) throw new Error(`[SecCheck] Cookie value detected on ${cookie.name} — storage aborted.`);
+	}
+	const checkHeaders = (headers, rawHeaders, context) => {
+		if (headers) for (const [k, v] of Object.entries(headers)) {
+			const lower = k.toLowerCase();
+			if (lower === "set-cookie" || lower === "cookie") {
+				if (hasUnredactedCookieValue(v)) throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+			} else if (lower === "authorization" || lower === "proxy-authorization") {
+				if (v !== "[REDACTED]" && v !== "[redacted]") throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+			}
+		}
+		if (rawHeaders) for (const h of rawHeaders) {
+			const lower = h.name.toLowerCase();
+			if (lower === "set-cookie" || lower === "cookie") {
+				if (hasUnredactedCookieValue(h.value)) throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+			} else if (lower === "authorization" || lower === "proxy-authorization") {
+				if (h.value !== "[REDACTED]" && h.value !== "[redacted]") throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+			}
+		}
+	};
+	if (Array.isArray(state.hops)) for (let i = 0; i < state.hops.length; i++) {
+		const hop = state.hops[i];
+		if (hop) checkHeaders(hop.headers, hop.rawHeaders, `hop[${i}]`);
+	}
+	if (state.apiEndpoints instanceof Map) for (const [path, endpoint] of state.apiEndpoints.entries()) checkHeaders(endpoint.lastHop.headers, endpoint.lastHop.rawHeaders, `apiEndpoint[${path}]`);
+}
 var SessionStorage = {
 	async getTabState(tabId) {
 		const key = `${STORAGE_KEYS.TAB_PREFIX}${tabId}`;
@@ -24,7 +63,7 @@ var SessionStorage = {
 		return deserializeTabState(raw);
 	},
 	async setTabState(state) {
-		for (const cookie of state.cookies) if ("value" in cookie) throw new Error(`[SecCheck] Cookie value detected on ${cookie.name} — storage aborted.`);
+		assertNoSensitiveSecrets(state);
 		const serialized = serializeTabState(state);
 		const key = `${STORAGE_KEYS.TAB_PREFIX}${state.tabId}`;
 		await chrome.storage.session.set({ [key]: serialized });
@@ -36,6 +75,25 @@ var SessionStorage = {
 	async getAllTabStates() {
 		const all = await chrome.storage.session.get(null);
 		return Object.entries(all).filter(([k]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX)).map(([, v]) => deserializeTabState(v));
+	},
+	async getAuthBaseline(origin) {
+		if (!origin) return null;
+		const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+		return (await chrome.storage.session.get(key))[key] ?? null;
+	},
+	async setAuthBaseline(origin, baseline) {
+		if (!origin) return;
+		const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+		await chrome.storage.session.set({ [key]: baseline });
+	},
+	async getAllAuthBaselines() {
+		const all = await chrome.storage.session.get(null);
+		const map = /* @__PURE__ */ new Map();
+		for (const [k, v] of Object.entries(all)) if (k.startsWith(STORAGE_KEYS.AUTH_BASELINE_PREFIX)) {
+			const origin = k.slice(STORAGE_KEYS.AUTH_BASELINE_PREFIX.length);
+			map.set(origin, v);
+		}
+		return map;
 	}
 };
 var LocalStorage = {
@@ -102,4 +160,4 @@ var LocalStorage = {
 //#endregion
 export { SessionStorage as n, LocalStorage as t };
 
-//# sourceMappingURL=storage-CAaP-Hcf.js.map
+//# sourceMappingURL=storage-D5dK29a1.js.map

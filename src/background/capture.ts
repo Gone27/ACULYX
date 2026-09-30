@@ -16,7 +16,7 @@
  * to avoid noise. All captures are strictly origin-gated and require user permission.
  */
 
-import { normalizeHeaders, headersDiffer, redactUrlQueryParams, redactUrlPath } from '../rules/utils';
+import { normalizeHeaders, headersDiffer, redactUrlQueryParams, redactUrlPath, redactHeaderValue } from '../rules/utils';
 import type { Hop, ApiHop } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,10 @@ function detectHstsUpgrade(raw: Array<{ name: string; value: string }>): boolean
 function toRawHeaders(
   headers: chrome.webRequest.HttpHeader[],
 ): Array<{ name: string; value: string }> {
-  return headers.map((h) => ({ name: h.name, value: h.value ?? '' }));
+  return headers.map((h) => ({
+    name: h.name,
+    value: redactHeaderValue(h.name, h.value ?? ''),
+  }));
 }
 
 // ---------------------------------------------------------------------------

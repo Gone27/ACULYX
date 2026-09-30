@@ -160,4 +160,77 @@ describe('Graph Discovery — mergeIntoGraph', () => {
     expect(freeTierNodes.map((n) => n.hostname).sort()).toEqual(['admin.corp.com', 'corp.com'].sort());
     expect(freeTierEdges.every((e) => freeNodeHosts.has(e.source) && freeNodeHosts.has(e.target))).toBe(true);
   });
+
+  it('discovers nodes from API endpoints and their CORS headers', () => {
+    const apiEndpoints = new Map<string, import('../../src/shared/types').ApiEndpointState>([
+      [
+        'https://api.example.com/v1/users',
+        {
+          normalizedPath: 'https://api.example.com/v1/users',
+          lastHop: {
+            requestId: 'req-api-1',
+            tabId: 1,
+            url: 'https://api.example.com/v1/users',
+            normalizedPath: 'https://api.example.com/v1/users',
+            method: 'GET',
+            requestOrigin: 'https://app.example.com',
+            status: 200,
+            headers: {
+              'access-control-allow-origin': 'https://gateway.example.com',
+            },
+            rawHeaders: [],
+            timestamp: Date.now(),
+            fromCache: false,
+            isThirdParty: false,
+          },
+          findings: [],
+          isFirstParty: true,
+        },
+      ],
+    ]);
+
+    const nodes = discoverNodes('app.example.com', [], [], apiEndpoints);
+    const hostnames = nodes.map((n) => n.hostname);
+
+    expect(hostnames).toContain('api.example.com');
+    expect(hostnames).toContain('gateway.example.com');
+
+    const apiNode = nodes.find((n) => n.hostname === 'api.example.com');
+    expect(apiNode?.discoveredVia).toBe('api');
+
+    const corsNode = nodes.find((n) => n.hostname === 'gateway.example.com');
+    expect(corsNode?.discoveredVia).toBe('cors');
+  });
+
+  it('assigns observed provenance to CORS edges and inferred to others, and caps nodes at 100', () => {
+    const discovered: import('../../src/shared/types').DiscoveredNode[] = [
+      { hostname: 'cors-node.example.com', discoveredVia: 'cors' },
+      { hostname: 'csp-node.example.com', discoveredVia: 'csp' },
+      { hostname: 'cookie-node.example.com', discoveredVia: 'cookie' },
+    ];
+
+    const graph = mergeIntoGraph(null, 'app.example.com', 90, 'A', discovered, true);
+    const corsEdge = graph.edges.find((e) => e.source === 'cors-node.example.com');
+    expect(corsEdge?.provenance).toBe('observed');
+
+    const cspEdge = graph.edges.find((e) => e.source === 'csp-node.example.com');
+    expect(cspEdge?.provenance).toBe('inferred');
+
+    const cookieEdge = graph.edges.find((e) => e.source === 'cookie-node.example.com');
+    expect(cookieEdge?.provenance).toBe('inferred');
+
+    // Test 100-node cap
+    const manyDiscovered: import('../../src/shared/types').DiscoveredNode[] = [];
+    for (let i = 0; i < 150; i++) {
+      manyDiscovered.push({
+        hostname: `sub-${i}.example.com`,
+        discoveredVia: 'csp',
+      });
+    }
+
+    const cappedGraph = mergeIntoGraph(null, 'app.example.com', 90, 'A', manyDiscovered, true);
+    expect(cappedGraph.nodes.length).toBeLessThanOrEqual(100);
+    expect(cappedGraph.nodes.some((n) => n.isApex)).toBe(true);
+    expect(cappedGraph.nodes.some((n) => n.hostname === 'app.example.com')).toBe(true);
+  });
 });

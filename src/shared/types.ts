@@ -240,6 +240,16 @@ export interface ApiEndpointState {
 
 // ─── Posture diff (Pre-login vs. Post-login) ──────────────────────────────────
 
+export interface AuthBaseline {
+  origin: string;
+  cookies: CookieRecord[];
+  findings: Finding[];
+  score: number;
+  grade: Grade;
+  timestamp: number;
+  hasSensitiveCookie: boolean;
+}
+
 export interface AuthDiffFindingChange {
   ruleId: string;
   title: string;
@@ -263,7 +273,7 @@ export interface AuthDiffRecord {
 
 // ─── Attack Surface Graph ─────────────────────────────────────────────────────
 
-export type DiscoveredVia = 'csp' | 'cookie' | 'cors' | 'navigation';
+export type DiscoveredVia = 'csp' | 'cookie' | 'cors' | 'navigation' | 'api';
 
 export interface DiscoveredNode {
   hostname: string;
@@ -284,6 +294,7 @@ export interface GraphEdge {
   target: string;
   type: 'cookie' | 'csp' | 'cors' | 'frame';
   severity: Severity;
+  provenance?: 'observed' | 'inferred';
 }
 
 export interface AttackSurfaceGraph {

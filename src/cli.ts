@@ -355,29 +355,55 @@ export interface FindingDiff {
   regressions: Finding[];
   fixes: Finding[];
   unchanged: Finding[];
+  changed: Array<{ before: Finding; after: Finding }>;
 }
 
 export function computeFindingDiff(baselineReport: CliReport, currentReport: CliReport): FindingDiff {
-  const baselineMap = new Map(baselineReport.findings.map((f) => [f.ruleId, f]));
-  const currentMap = new Map(currentReport.findings.map((f) => [f.ruleId, f]));
+  const fullKey = (f: Finding) => `${f.ruleId}::${f.sourceUrl ?? ''}::${(f.evidence ?? '').slice(0, 80)}`;
+  const ruleKey = (f: Finding) => `${f.ruleId}::${f.sourceUrl ?? ''}`;
+
+  const remainingBaseline = [...baselineReport.findings];
+  const remainingCurrent = [...currentReport.findings];
 
   const regressions: Finding[] = [];
   const unchanged: Finding[] = [];
   const fixes: Finding[] = [];
+  const changed: Array<{ before: Finding; after: Finding }> = [];
 
-  for (const [id, finding] of currentMap.entries()) {
-    if (baselineMap.has(id)) {
-      unchanged.push(finding);
-    } else {
-      regressions.push(finding);
+  // 1. Exact matches (same identity & severity)
+  for (let i = remainingCurrent.length - 1; i >= 0; i--) {
+    const curr = remainingCurrent[i];
+    if (curr === undefined) continue;
+    const matchIdx = remainingBaseline.findIndex(
+      (base) => fullKey(base) === fullKey(curr) && base.severity === curr.severity,
+    );
+    if (matchIdx !== -1) {
+      unchanged.push(curr);
+      remainingCurrent.splice(i, 1);
+      remainingBaseline.splice(matchIdx, 1);
     }
   }
 
-  for (const [id, finding] of baselineMap.entries()) {
-    if (!currentMap.has(id)) {
-      fixes.push(finding);
+  // 2. Modified matches (same rule and source, but severity or evidence evolved)
+  for (let i = remainingCurrent.length - 1; i >= 0; i--) {
+    const curr = remainingCurrent[i];
+    if (curr === undefined) continue;
+    const matchIdx = remainingBaseline.findIndex((base) => ruleKey(base) === ruleKey(curr));
+    if (matchIdx !== -1) {
+      const before = remainingBaseline[matchIdx];
+      if (before !== undefined) {
+        changed.push({ before, after: curr });
+      }
+      remainingCurrent.splice(i, 1);
+      remainingBaseline.splice(matchIdx, 1);
     }
   }
+
+  // 3. New findings in current (regressions)
+  regressions.push(...remainingCurrent);
+
+  // 4. Resolved findings from baseline (fixes)
+  fixes.push(...remainingBaseline);
 
   return {
     target: currentReport.target,
@@ -389,6 +415,7 @@ export function computeFindingDiff(baselineReport: CliReport, currentReport: Cli
     regressions,
     fixes,
     unchanged,
+    changed,
   };
 }
 
@@ -604,6 +631,11 @@ async function main(args: string[]): Promise<void> {
         `## Resolved (Fixed Findings): ${diff.fixes.length}`,
         ...(diff.fixes.length === 0 ? ['No previously flagged findings were resolved.'] : diff.fixes.map((f) => `- [FIXED] ${f.ruleId}: ${f.title}`)),
         '',
+        ...(diff.changed.length > 0 ? [
+          `## Modified Findings: ${diff.changed.length}`,
+          ...diff.changed.map((c) => `- [${c.before.severity.toUpperCase()} -> ${c.after.severity.toUpperCase()}] ${c.after.ruleId}: ${c.after.title}`),
+          '',
+        ] : []),
         `## Persistent Findings: ${diff.unchanged.length}`,
       ];
       process.stdout.write(`${md.join('\n')}\n`);

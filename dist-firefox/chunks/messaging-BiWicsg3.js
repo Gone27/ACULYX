@@ -53,6 +53,7 @@ var STORAGE_KEYS = {
 	TAB_PREFIX: "tab:",
 	HISTORY_PREFIX: "hist:",
 	AUTH_DIFF_PREFIX: "authdiff:",
+	AUTH_BASELINE_PREFIX: "authbase:",
 	GRAPH_PREFIX: "graph:",
 	ONBOARDING_DISMISSED: "onboarding_dismissed"
 };
@@ -137,4 +138,4 @@ function sendToBackground(msg) {
 //#endregion
 export { DEFAULT_SETTINGS as a, KEEPALIVE_PERIOD_MINUTES as c, SCORE_VERSION as d, SEVERITY_ORDER as f, BADGE_COLORS as i, POPUP_PORT_NAME as l, STORAGE_KEYS as m, portSend as n, GRADE_THRESHOLDS as o, SIDEPANEL_PORT_NAME as p, sendToBackground as r, KEEPALIVE_ALARM as s, PortRegistry as t, RESTRICTED_SCHEMES as u };
 
-//# sourceMappingURL=messaging-BMItIkAu.js.map
+//# sourceMappingURL=messaging-BiWicsg3.js.map

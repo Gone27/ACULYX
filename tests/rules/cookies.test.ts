@@ -210,3 +210,133 @@ describe('Multiple cookies', () => {
     expect(checkCookies([], true)).toHaveLength(0);
   });
 });
+
+describe('Header & Set-Cookie value redaction (P1 privacy)', () => {
+  it('redacts cookie values while preserving name and attributes in Set-Cookie', async () => {
+    const { redactSetCookieHeader, extractSetCookieHeaders, normalizeHeaders } = await import('../../src/rules/utils');
+
+    const raw = 'session=V2_SYNTHETIC_CANARY; Path=/; Secure; HttpOnly; SameSite=Lax';
+    const redacted = redactSetCookieHeader(raw);
+    expect(redacted).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
+    expect(redacted).not.toContain('V2_SYNTHETIC_CANARY');
+
+    // Multi-attribute with domain and max-age
+    const raw2 = 'auth_token=supersecret123; Domain=example.com; Max-Age=3600; Secure';
+    expect(redactSetCookieHeader(raw2)).toBe('auth_token=[REDACTED]; Domain=example.com; Max-Age=3600; Secure');
+
+    // extractSetCookieHeaders produces redacted entries
+    const extracted = extractSetCookieHeaders([
+      { name: 'Set-Cookie', value: raw },
+      { name: 'Content-Type', value: 'text/html' },
+    ]);
+    expect(extracted).toEqual(['session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax']);
+
+    // normalizeHeaders produces redacted lowercase entries
+    const normalized = normalizeHeaders([
+      { name: 'Set-Cookie', value: raw },
+      { name: 'Authorization', value: 'Bearer MY_BEARER_TOKEN' },
+      { name: 'Cookie', value: 'user=admin; token=xyz789' },
+    ]);
+    expect(normalized['set-cookie']).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
+    expect(normalized['authorization']).toBe('[REDACTED]');
+    expect(normalized['cookie']).toBe('user=[REDACTED]; token=[REDACTED]');
+  });
+
+  it('assertNoSensitiveSecrets throws if unredacted cookie canaries or credentials are in state', async () => {
+    const { assertNoSensitiveSecrets } = await import('../../src/shared/storage');
+    const validState: import('../../src/shared/types').TabState = {
+      tabId: 1,
+      origin: 'https://example.com',
+      url: 'https://example.com/',
+      hops: [
+        {
+          requestId: 'r1',
+          url: 'https://example.com/',
+          status: 200,
+          headers: {
+            'set-cookie': 'session=[REDACTED]; Path=/; Secure; HttpOnly',
+            'authorization': '[REDACTED]',
+          },
+          rawHeaders: [
+            { name: 'Set-Cookie', value: 'session=[REDACTED]; Path=/; Secure; HttpOnly' },
+            { name: 'Authorization', value: '[REDACTED]' },
+          ],
+          fromCache: false,
+          isHstsUpgrade: false,
+          capturedAt: 'onResponseStarted',
+          headersDiffer: false,
+          timestamp: Date.now(),
+        },
+      ],
+      cookies: [
+        {
+          name: 'session',
+          domain: 'example.com',
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'strict',
+          session: true,
+          expiresAt: null,
+          partitioned: false,
+          setByJs: false,
+          isThirdParty: false,
+          domainAttributePresent: true,
+        },
+      ],
+      findings: [],
+      grade: 'A',
+      score: 100,
+      qualityScore: 100,
+      qualityGrade: 'A',
+      scoreVersion: '1.7.0',
+      scoreBreakdown: [],
+      coverage: {
+        hopsExpected: 1,
+        hopsCaptured: 1,
+        hasCache: false,
+        hasServiceWorker: false,
+        serviceWorkerStatus: 'not-controlled',
+        serviceWorkerUrl: null,
+        isRestricted: false,
+        metaCspFound: false,
+      },
+      subdomainTrust: { hasEscalationPath: false, vectors: [] },
+      monitoredByUser: true,
+      updatedAt: Date.now(),
+    };
+
+    // Valid state passes assertion
+    expect(() => assertNoSensitiveSecrets(validState)).not.toThrow();
+
+    // State with unredacted Set-Cookie canary in hop headers throws
+    const leakedHeaderState = structuredClone(validState);
+    const hop0 = leakedHeaderState.hops[0];
+    if (hop0 !== undefined) {
+      hop0.headers['set-cookie'] = 'session=V2_SYNTHETIC_CANARY; Path=/';
+    }
+    expect(() => assertNoSensitiveSecrets(leakedHeaderState)).toThrow(/Unredacted/);
+
+    // State with unredacted Set-Cookie in hop rawHeaders throws
+    const leakedRawState = structuredClone(validState);
+    const rawHop0 = leakedRawState.hops[0];
+    const rawH0 = rawHop0?.rawHeaders[0];
+    if (rawH0 !== undefined) {
+      rawH0.value = 'session=V2_SYNTHETIC_CANARY; Path=/';
+    }
+    expect(() => assertNoSensitiveSecrets(leakedRawState)).toThrow(/Unredacted/);
+
+    // State with unredacted Authorization header throws
+    const leakedAuthState = structuredClone(validState);
+    const authHop0 = leakedAuthState.hops[0];
+    if (authHop0 !== undefined) {
+      authHop0.headers['authorization'] = 'Bearer secret-canary-token';
+    }
+    expect(() => assertNoSensitiveSecrets(leakedAuthState)).toThrow(/Unredacted/);
+
+    // State with cookie record having value throws
+    const leakedCookieRecordState = structuredClone(validState);
+    (leakedCookieRecordState.cookies[0] as unknown as { value: string }).value = 'V2_SYNTHETIC_CANARY';
+    expect(() => assertNoSensitiveSecrets(leakedCookieRecordState)).toThrow(/Cookie value detected/);
+  });
+});

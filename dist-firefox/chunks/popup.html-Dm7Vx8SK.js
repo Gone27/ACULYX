@@ -1,5 +1,5 @@
-import { f as SEVERITY_ORDER, l as POPUP_PORT_NAME, r as sendToBackground } from "./messaging-BMItIkAu.js";
-import { t as LocalStorage } from "./storage-CAaP-Hcf.js";
+import { f as SEVERITY_ORDER, l as POPUP_PORT_NAME, r as sendToBackground } from "./messaging-BiWicsg3.js";
+import { t as LocalStorage } from "./storage-D5dK29a1.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/popup/popup.ts
 var gradeBadge;
@@ -712,18 +712,30 @@ function wireCopyReportButton() {
 		});
 	});
 }
+function openGraphInTab() {
+	let apex = "";
+	if (currentOrigin) try {
+		apex = new URL(currentOrigin).hostname;
+	} catch {}
+	const tabParam = currentTabId !== null ? `&tabId=${currentTabId}` : "";
+	const apexParam = apex ? `?apex=${encodeURIComponent(apex)}` : "";
+	const url = chrome.runtime.getURL(`src/sidepanel/sidepanel.html${apexParam}${tabParam}`);
+	chrome.tabs.create({ url });
+}
 function wireOpenGraphButton() {
 	openGraphBtn.addEventListener("click", () => {
 		if (chrome.sidePanel !== void 0 && typeof chrome.sidePanel.open === "function") {
 			if (currentTabId !== null) chrome.sidePanel.open({ tabId: currentTabId }).catch(() => {
 				chrome.windows.getCurrent((win) => {
-					if (win.id !== void 0 && chrome.sidePanel !== void 0) chrome.sidePanel.open({ windowId: win.id }).catch(() => void 0);
+					if (win.id !== void 0 && chrome.sidePanel !== void 0) chrome.sidePanel.open({ windowId: win.id }).catch(() => openGraphInTab());
+					else openGraphInTab();
 				});
 			});
 			else chrome.windows.getCurrent((win) => {
-				if (win.id !== void 0 && chrome.sidePanel !== void 0) chrome.sidePanel.open({ windowId: win.id }).catch(() => void 0);
+				if (win.id !== void 0 && chrome.sidePanel !== void 0) chrome.sidePanel.open({ windowId: win.id }).catch(() => openGraphInTab());
+				else openGraphInTab();
 			});
-		}
+		} else openGraphInTab();
 	});
 }
 async function initOnboarding() {
@@ -906,4 +918,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Dp9ZpZdm.js.map
+//# sourceMappingURL=popup.html-Dm7Vx8SK.js.map

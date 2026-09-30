@@ -1,5 +1,5 @@
-import { p as SIDEPANEL_PORT_NAME, r as sendToBackground } from "./messaging-BMItIkAu.js";
-import { n as registrableDomain } from "./subdomain-trust-DrWlzpgv.js";
+import { p as SIDEPANEL_PORT_NAME, r as sendToBackground } from "./messaging-BiWicsg3.js";
+import { n as registrableDomain } from "./subdomain-trust-BxbNrVzS.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region node_modules/d3-force/src/center.js
 function center_default(x, y) {
@@ -881,11 +881,26 @@ document.addEventListener("DOMContentLoaded", () => {
 	});
 	(async () => {
 		try {
+			const urlParams = new URLSearchParams(window.location.search);
+			const paramApex = urlParams.get("apex");
+			const paramTabId = urlParams.get("tabId");
+			if (paramApex !== null && paramApex.length > 0) {
+				const cleanApex = registrableDomain(paramApex) ?? paramApex;
+				activeApexDomain = cleanApex;
+				const tabIdNum = paramTabId !== null && paramTabId.length > 0 ? parseInt(paramTabId, 10) : null;
+				activeTabId = Number.isNaN(tabIdNum) ? null : tabIdNum;
+				if (activeTabId !== null) port.postMessage({
+					type: "REQUEST_STATE",
+					tabId: activeTabId
+				});
+				fetchAndRenderGraph(cleanApex, activeTabId);
+				return;
+			}
 			const tab = (await chrome.tabs.query({
 				active: true,
 				currentWindow: true
 			}))[0];
-			if (tab !== void 0 && tab.id !== void 0 && tab.url !== void 0 && tab.url.length > 0) {
+			if (tab !== void 0 && tab.id !== void 0 && tab.url !== void 0 && tab.url.length > 0 && !tab.url.startsWith("chrome-extension://") && !tab.url.startsWith("moz-extension://")) {
 				activeTabId = tab.id;
 				port.postMessage({
 					type: "REQUEST_STATE",
@@ -1067,4 +1082,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-CV8QRYXP.js.map
+//# sourceMappingURL=sidepanel.html-CKap0G-x.js.map

@@ -1,6 +1,6 @@
-import { a as DEFAULT_SETTINGS, c as KEEPALIVE_PERIOD_MINUTES, d as SCORE_VERSION, i as BADGE_COLORS, l as POPUP_PORT_NAME, n as portSend, o as GRADE_THRESHOLDS, p as SIDEPANEL_PORT_NAME, s as KEEPALIVE_ALARM, t as PortRegistry, u as RESTRICTED_SCHEMES } from "./messaging-BMItIkAu.js";
-import { n as SessionStorage, t as LocalStorage } from "./storage-CAaP-Hcf.js";
-import { a as hasCspBypassProtection, c as normalizeHeaders, d as redactUrlPath, f as redactUrlQueryParams, i as extractSetCookieHeaders, l as originFromUrl, n as registrableDomain, o as headersDiffer, p as sanitizeEvidence, r as checkDuplicateHeaders, s as isSensitiveCookie, t as checkSubdomainTrust, u as parseCspDirectives } from "./subdomain-trust-DrWlzpgv.js";
+import { a as DEFAULT_SETTINGS, c as KEEPALIVE_PERIOD_MINUTES, d as SCORE_VERSION, i as BADGE_COLORS, l as POPUP_PORT_NAME, n as portSend, o as GRADE_THRESHOLDS, p as SIDEPANEL_PORT_NAME, s as KEEPALIVE_ALARM, t as PortRegistry, u as RESTRICTED_SCHEMES } from "./messaging-BiWicsg3.js";
+import { n as SessionStorage, t as LocalStorage } from "./storage-D5dK29a1.js";
+import { a as hasCspBypassProtection, c as normalizeHeaders, d as redactHeaderValue, f as redactUrlPath, i as extractSetCookieHeaders, l as originFromUrl, m as sanitizeEvidence, n as registrableDomain, o as headersDiffer, p as redactUrlQueryParams, r as checkDuplicateHeaders, s as isSensitiveCookie, t as checkSubdomainTrust, u as parseCspDirectives } from "./subdomain-trust-BxbNrVzS.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -21,6 +21,11 @@ var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).expor
 * survives SW restarts; re-hydrated via hydrateFromSession().
 */
 var tabStates = /* @__PURE__ */ new Map();
+/**
+* In-memory cache for origin pre/post auth baselines.
+* Persisted to chrome.storage.session so it survives SW restarts.
+*/
+var originAuthBaselines = /* @__PURE__ */ new Map();
 /**
 * Registers the recurring keepalive alarm and its listener.
 *
@@ -44,6 +49,8 @@ function initLifecycle() {
 async function hydrateFromSession() {
 	const all = await SessionStorage.getAllTabStates();
 	for (const state of all) tabStates.set(state.tabId, state);
+	const baselines = await SessionStorage.getAllAuthBaselines();
+	for (const [origin, baseline] of baselines) originAuthBaselines.set(origin, baseline);
 }
 //#endregion
 //#region src/background/capture.ts
@@ -83,7 +90,7 @@ function detectHstsUpgrade(raw) {
 function toRawHeaders(headers) {
 	return headers.map((h) => ({
 		name: h.name,
-		value: h.value ?? ""
+		value: redactHeaderValue(h.name, h.value ?? "")
 	}));
 }
 /**
@@ -437,7 +444,10 @@ function reportPageSignals() {
 		const policies = [];
 		for (const meta of Array.from(document.querySelectorAll("meta[http-equiv]"))) if (meta.getAttribute("http-equiv")?.trim().toLowerCase() === "content-security-policy") {
 			const content = meta.getAttribute("content")?.trim();
-			if (content !== void 0 && content.length > 0) policies.push(content);
+			if (content !== void 0 && content.length > 0) {
+				policies.push(content.slice(0, 2048));
+				if (policies.length >= 5) break;
+			}
 		}
 		return policies;
 	}
@@ -3311,7 +3321,7 @@ function extractHostnameFromCspToken(token) {
 /**
 * Scans captured hops and cookies for concrete hostnames belonging to the apex domain.
 */
-function discoverNodes(currentHostname, hops, cookies) {
+function discoverNodes(currentHostname, hops, cookies, apiEndpoints) {
 	const apex = registrableDomain(currentHostname) ?? currentHostname;
 	const discoveredMap = /* @__PURE__ */ new Map();
 	discoveredMap.set(currentHostname.toLowerCase(), "navigation");
@@ -3334,6 +3344,22 @@ function discoverNodes(currentHostname, hops, cookies) {
 		}
 	}
 	for (const hop of hops) {
+		const acao = hop.headers["access-control-allow-origin"]?.trim();
+		if (acao != null && acao.length > 0 && acao !== "*" && acao !== "null") try {
+			const host = new URL(acao).hostname.toLowerCase();
+			if (host === apex || host.endsWith(`.${apex}`)) {
+				if (!discoveredMap.has(host)) discoveredMap.set(host, "cors");
+			}
+		} catch {}
+	}
+	if (apiEndpoints != null) for (const endpoint of apiEndpoints.values()) {
+		const hop = endpoint.lastHop;
+		try {
+			const host = new URL(hop.url).hostname.toLowerCase();
+			if (host === apex || host.endsWith(`.${apex}`)) {
+				if (!discoveredMap.has(host)) discoveredMap.set(host, "api");
+			}
+		} catch {}
 		const acao = hop.headers["access-control-allow-origin"]?.trim();
 		if (acao != null && acao.length > 0 && acao !== "*" && acao !== "null") try {
 			const host = new URL(acao).hostname.toLowerCase();
@@ -3386,6 +3412,15 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 			discoveredVia: [d.discoveredVia]
 		});
 	}
+	const MAX_GRAPH_NODES = 100;
+	if (nodeMap.size > MAX_GRAPH_NODES) {
+		const allNodes = Array.from(nodeMap.values());
+		const essentialNodes = allNodes.filter((n) => n.isApex || n.hostname === currentHostname);
+		const nonEssentialNodes = allNodes.filter((n) => !n.isApex && n.hostname !== currentHostname).sort((a, b) => b.lastSeen - a.lastSeen);
+		const retained = [...essentialNodes, ...nonEssentialNodes.slice(0, MAX_GRAPH_NODES - essentialNodes.length)];
+		nodeMap.clear();
+		for (const n of retained) nodeMap.set(n.hostname, n);
+	}
 	const edges = [];
 	const edgeSet = /* @__PURE__ */ new Set();
 	for (const node of nodeMap.values()) {
@@ -3396,21 +3431,30 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 				edgeSet.add(edgeKey);
 				let severity = "low";
 				let edgeType = "csp";
+				let provenance = "inferred";
 				if (via === "cookie") {
 					edgeType = "cookie";
 					severity = "high";
+					provenance = "inferred";
 				} else if (via === "cors") {
 					edgeType = "cors";
 					severity = "medium";
+					provenance = "observed";
 				} else if (via === "csp") {
 					edgeType = "csp";
 					severity = "medium";
+					provenance = "inferred";
+				} else if (via === "api") {
+					edgeType = "cors";
+					severity = "low";
+					provenance = "inferred";
 				}
 				edges.push({
 					source: node.hostname,
 					target: apex,
 					type: edgeType,
-					severity
+					severity,
+					provenance
 				});
 			}
 		}
@@ -3444,7 +3488,6 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 var portRegistry = new PortRegistry();
 var pendingServiceWorkerReports = /* @__PURE__ */ new Map();
 var pendingMetaCspReports = /* @__PURE__ */ new Set();
-var originAuthBaselines = /* @__PURE__ */ new Map();
 var currentSettings = DEFAULT_SETTINGS;
 LocalStorage.getSettings().then((s) => {
 	currentSettings = s;
@@ -3482,12 +3525,13 @@ function recomputeTabState(tabId, state) {
 		const baseline = originAuthBaselines.get(state.origin);
 		const { isAuthEvent, record, newBaseline } = checkAuthTransition(state.origin, baseline, state.cookies, state.findings, state.score, state.grade, currentSettings.alwaysSensitiveCookies, currentSettings.alwaysIgnoreCookies);
 		originAuthBaselines.set(state.origin, newBaseline);
+		SessionStorage.setAuthBaseline(state.origin, newBaseline);
 		if (isAuthEvent && record !== null) LocalStorage.recordAuthDiff(state.origin, record);
 		(async () => {
 			try {
 				const hostname = new URL(state.origin).hostname;
 				const apex = registrableDomain(hostname) ?? hostname;
-				const discovered = discoverNodes(hostname, state.hops, state.cookies);
+				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
 				const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
 				await LocalStorage.saveGraph(updatedGraph);
 			} catch {}
@@ -3750,7 +3794,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 			if (state) {
 				state.coverage.metaCspFound = true;
 				if (message.policies !== void 0 && message.policies.length > 0) {
-					state.coverage.metaCspPolicies = message.policies;
+					state.coverage.metaCspPolicies = message.policies.slice(0, 5).map((p) => p.slice(0, 2048));
 					pushLedgerEntry(state, {
 						type: "subresource",
 						url: state.url,
@@ -3827,10 +3871,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					});
 					return;
 				}
-				if (!isPro && message.tabId !== void 0) {
-					const tabState = tabStates.get(message.tabId);
-					const tabHost = tabState ? originFromUrl(tabState.url) !== null ? new URL(tabState.origin).hostname : "" : "";
-					const filteredNodes = graph.nodes.filter((n) => n.isApex || n.hostname === tabHost);
+				if (!isPro) {
+					let tabHost = "";
+					if (message.tabId !== void 0) {
+						const tabState = tabStates.get(message.tabId);
+						tabHost = tabState ? originFromUrl(tabState.url) !== null ? new URL(tabState.origin).hostname : "" : "";
+					}
+					const filteredNodes = graph.nodes.filter((n) => n.isApex || tabHost.length > 0 && n.hostname === tabHost);
 					const nodeHosts = new Set(filteredNodes.map((n) => n.hostname));
 					const filteredEdges = graph.edges.filter((e) => nodeHosts.has(e.source) && nodeHosts.has(e.target));
 					sendResponse({
@@ -3926,6 +3973,15 @@ chrome.storage.local.onChanged.addListener((changes) => {
 		});
 		state.updatedAt = Date.now();
 		SessionStorage.setTabState(state);
+		(async () => {
+			try {
+				const hostname = new URL(state.origin).hostname;
+				const apex = registrableDomain(hostname) ?? hostname;
+				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+				const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
+				await LocalStorage.saveGraph(updatedGraph);
+			} catch {}
+		})();
 		portRegistry.broadcast(apiHop.tabId, {
 			type: "TAB_STATE_UPDATE",
 			state
@@ -3934,4 +3990,4 @@ chrome.storage.local.onChanged.addListener((changes) => {
 })();
 //#endregion
 
-//# sourceMappingURL=index.ts-BPzJfZry.js.map
+//# sourceMappingURL=index.ts-CAm77PDx.js.map

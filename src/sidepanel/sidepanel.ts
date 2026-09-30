@@ -100,12 +100,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Query active tab initially
+  // Query active tab initially or check URL params (e.g. when opened as a full tab in Firefox)
   void (async () => {
     try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramApex = urlParams.get('apex');
+      const paramTabId = urlParams.get('tabId');
+
+      if (paramApex !== null && paramApex.length > 0) {
+        const cleanApex = registrableDomain(paramApex) ?? paramApex;
+        activeApexDomain = cleanApex;
+        const tabIdNum = paramTabId !== null && paramTabId.length > 0 ? parseInt(paramTabId, 10) : null;
+        activeTabId = Number.isNaN(tabIdNum) ? null : tabIdNum;
+        if (activeTabId !== null) {
+          port.postMessage({ type: 'REQUEST_STATE', tabId: activeTabId });
+        }
+        void fetchAndRenderGraph(cleanApex, activeTabId);
+        return;
+      }
+
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const tab = tabs[0];
-      if (tab !== undefined && tab.id !== undefined && tab.url !== undefined && tab.url.length > 0) {
+      if (
+        tab !== undefined &&
+        tab.id !== undefined &&
+        tab.url !== undefined &&
+        tab.url.length > 0 &&
+        !tab.url.startsWith('chrome-extension://') &&
+        !tab.url.startsWith('moz-extension://')
+      ) {
         activeTabId = tab.id;
         port.postMessage({ type: 'REQUEST_STATE', tabId: tab.id });
         const origin = new URL(tab.url).origin;

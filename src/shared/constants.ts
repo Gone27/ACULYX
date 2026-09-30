@@ -66,6 +66,7 @@ export const STORAGE_KEYS = {
   TAB_PREFIX: 'tab:',
   HISTORY_PREFIX: 'hist:',
   AUTH_DIFF_PREFIX: 'authdiff:',
+  AUTH_BASELINE_PREFIX: 'authbase:',
   GRAPH_PREFIX: 'graph:',
   ONBOARDING_DISMISSED: 'onboarding_dismissed',
 } as const;

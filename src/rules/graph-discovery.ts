@@ -47,7 +47,8 @@ export function extractHostnameFromCspToken(token: string): string | null {
 export function discoverNodes(
   currentHostname: string,
   hops: Hop[],
-  cookies: CookieRecord[]
+  cookies: CookieRecord[],
+  apiEndpoints?: Map<string, import('../shared/types').ApiEndpointState>,
 ): DiscoveredNode[] {
   const apex = registrableDomain(currentHostname) ?? currentHostname;
   const discoveredMap = new Map<string, DiscoveredNode['discoveredVia']>();
@@ -83,7 +84,7 @@ export function discoverNodes(
     }
   }
 
-  // 4. Discover from CORS Access-Control-Allow-Origin
+  // 4. Discover from CORS Access-Control-Allow-Origin on document hops
   for (const hop of hops) {
     const acao = hop.headers['access-control-allow-origin']?.trim();
     if (acao != null && acao.length > 0 && acao !== '*' && acao !== 'null') {
@@ -97,6 +98,40 @@ export function discoverNodes(
         }
       } catch {
         // Not a full URL, skip
+      }
+    }
+  }
+
+  // 5. Discover from captured API endpoints (endpoint host and CORS headers)
+  if (apiEndpoints != null) {
+    for (const endpoint of apiEndpoints.values()) {
+      const hop = endpoint.lastHop;
+
+      try {
+        const u = new URL(hop.url);
+        const host = u.hostname.toLowerCase();
+        if (host === apex || host.endsWith(`.${apex}`)) {
+          if (!discoveredMap.has(host)) {
+            discoveredMap.set(host, 'api');
+          }
+        }
+      } catch {
+        // Not a valid URL
+      }
+
+      const acao = hop.headers['access-control-allow-origin']?.trim();
+      if (acao != null && acao.length > 0 && acao !== '*' && acao !== 'null') {
+        try {
+          const u = new URL(acao);
+          const host = u.hostname.toLowerCase();
+          if (host === apex || host.endsWith(`.${apex}`)) {
+            if (!discoveredMap.has(host)) {
+              discoveredMap.set(host, 'cors');
+            }
+          }
+        } catch {
+          // Not a valid URL
+        }
       }
     }
   }
@@ -175,6 +210,21 @@ export function mergeIntoGraph(
     }
   }
 
+  // Cap graph nodes to prevent unbounded memory/storage growth (max 100 nodes per apex)
+  const MAX_GRAPH_NODES = 100;
+  if (nodeMap.size > MAX_GRAPH_NODES) {
+    const allNodes = Array.from(nodeMap.values());
+    const essentialNodes = allNodes.filter((n) => n.isApex || n.hostname === currentHostname);
+    const nonEssentialNodes = allNodes
+      .filter((n) => !n.isApex && n.hostname !== currentHostname)
+      .sort((a, b) => b.lastSeen - a.lastSeen);
+    const retained = [...essentialNodes, ...nonEssentialNodes.slice(0, MAX_GRAPH_NODES - essentialNodes.length)];
+    nodeMap.clear();
+    for (const n of retained) {
+      nodeMap.set(n.hostname, n);
+    }
+  }
+
   // Build edges: connect each non-apex node to apex and/or current host
   const edges: GraphEdge[] = [];
   const edgeSet = new Set<string>();
@@ -189,16 +239,24 @@ export function mergeIntoGraph(
         edgeSet.add(edgeKey);
         let severity: Severity = 'low';
         let edgeType: GraphEdge['type'] = 'csp';
+        let provenance: GraphEdge['provenance'] = 'inferred';
 
         if (via === 'cookie') {
           edgeType = 'cookie';
           severity = 'high';
+          provenance = 'inferred';
         } else if (via === 'cors') {
           edgeType = 'cors';
           severity = 'medium';
+          provenance = 'observed';
         } else if (via === 'csp') {
           edgeType = 'csp';
           severity = 'medium';
+          provenance = 'inferred';
+        } else if (via === 'api') {
+          edgeType = 'cors';
+          severity = 'low';
+          provenance = 'inferred';
         }
 
         edges.push({
@@ -206,6 +264,7 @@ export function mergeIntoGraph(
           target: apex,
           type: edgeType,
           severity,
+          provenance,
         });
       }
     }

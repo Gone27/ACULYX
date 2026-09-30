@@ -210,4 +210,61 @@ describe('Auth Posture Diff — checkAuthTransition', () => {
     expect(newBaseline.hasSensitiveCookie).toBe(false);
     expect(newBaseline.score).toBe(80);
   });
+
+  it('persists and hydrates auth baselines via SessionStorage', async () => {
+    const { SessionStorage } = await import('../../src/shared/storage');
+    const { originAuthBaselines, hydrateFromSession } = await import('../../src/background/lifecycle');
+
+    const storageMock: Record<string, unknown> = {};
+    const chromeMock = {
+      storage: {
+        session: {
+          get: (keys: string | string[] | null) => {
+            if (keys === null) return Promise.resolve(storageMock);
+            if (typeof keys === 'string') return Promise.resolve({ [keys]: storageMock[keys] });
+            const res: Record<string, unknown> = {};
+            for (const k of keys) res[k] = storageMock[k];
+            return Promise.resolve(res);
+          },
+          set: (items: Record<string, unknown>) => {
+            Object.assign(storageMock, items);
+            return Promise.resolve();
+          },
+          remove: (keys: string | string[]) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            for (const k of list) delete storageMock[k];
+            return Promise.resolve();
+          },
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const originalChrome = globalThis.chrome;
+    globalThis.chrome = chromeMock;
+
+    try {
+      const sampleBaseline: AuthBaseline = {
+        origin: 'https://hydrated.example.com',
+        cookies: [makeCookie({ name: 'sid', httpOnly: true, session: true })],
+        findings: [makeFinding('HSTS-001')],
+        score: 75,
+        grade: 'B',
+        timestamp: Date.now(),
+        hasSensitiveCookie: true,
+      };
+
+      await SessionStorage.setAuthBaseline('https://hydrated.example.com', sampleBaseline);
+      const fetched = await SessionStorage.getAuthBaseline('https://hydrated.example.com');
+      expect(fetched).toEqual(sampleBaseline);
+
+      // Verify lifecycle hydration restores into in-memory map
+      originAuthBaselines.clear();
+      expect(originAuthBaselines.has('https://hydrated.example.com')).toBe(false);
+
+      await hydrateFromSession();
+      expect(originAuthBaselines.get('https://hydrated.example.com')).toEqual(sampleBaseline);
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
 });

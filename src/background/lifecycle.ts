@@ -11,7 +11,7 @@
 
 import { KEEPALIVE_ALARM, KEEPALIVE_PERIOD_MINUTES } from '../shared/constants';
 import { SessionStorage } from '../shared/storage';
-import type { TabState } from '../shared/types';
+import type { TabState, AuthBaseline } from '../shared/types';
 
 // ---------------------------------------------------------------------------
 // In-memory store
@@ -23,6 +23,12 @@ import type { TabState } from '../shared/types';
  * survives SW restarts; re-hydrated via hydrateFromSession().
  */
 export const tabStates: Map<number, TabState> = new Map();
+
+/**
+ * In-memory cache for origin pre/post auth baselines.
+ * Persisted to chrome.storage.session so it survives SW restarts.
+ */
+export const originAuthBaselines: Map<string, AuthBaseline> = new Map();
 
 // ---------------------------------------------------------------------------
 // Keepalive
@@ -66,5 +72,10 @@ export async function hydrateFromSession(): Promise<void> {
 
   for (const state of all) {
     tabStates.set(state.tabId, state);
+  }
+
+  const baselines = await SessionStorage.getAllAuthBaselines();
+  for (const [origin, baseline] of baselines) {
+    originAuthBaselines.set(origin, baseline);
   }
 }

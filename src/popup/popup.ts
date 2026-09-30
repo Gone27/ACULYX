@@ -982,6 +982,21 @@ function wireCopyReportButton(): void {
   });
 }
 
+function openGraphInTab(): void {
+  let apex = '';
+  if (currentOrigin) {
+    try {
+      apex = new URL(currentOrigin).hostname;
+    } catch {
+      // ignore
+    }
+  }
+  const tabParam = currentTabId !== null ? `&tabId=${currentTabId}` : '';
+  const apexParam = apex ? `?apex=${encodeURIComponent(apex)}` : '';
+  const url = chrome.runtime.getURL(`src/sidepanel/sidepanel.html${apexParam}${tabParam}`);
+  void chrome.tabs.create({ url });
+}
+
 function wireOpenGraphButton(): void {
   openGraphBtn.addEventListener('click', () => {
     if (chrome.sidePanel !== undefined && typeof chrome.sidePanel.open === 'function') {
@@ -989,17 +1004,24 @@ function wireOpenGraphButton(): void {
         chrome.sidePanel.open({ tabId: currentTabId }).catch(() => {
           chrome.windows.getCurrent((win) => {
             if (win.id !== undefined && chrome.sidePanel !== undefined) {
-              chrome.sidePanel.open({ windowId: win.id }).catch(() => undefined);
+              chrome.sidePanel.open({ windowId: win.id }).catch(() => openGraphInTab());
+            } else {
+              openGraphInTab();
             }
           });
         });
       } else {
         chrome.windows.getCurrent((win) => {
           if (win.id !== undefined && chrome.sidePanel !== undefined) {
-            chrome.sidePanel.open({ windowId: win.id }).catch(() => undefined);
+            chrome.sidePanel.open({ windowId: win.id }).catch(() => openGraphInTab());
+          } else {
+            openGraphInTab();
           }
         });
       }
+    } else {
+      // Firefox MV3 fallback: open graph in a new tab
+      openGraphInTab();
     }
   });
 }
