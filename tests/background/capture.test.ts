@@ -174,4 +174,53 @@ describe('redirect response capture', () => {
     expect(capturedApi).not.toBeNull();
     expect((capturedApi as unknown as ApiHop)?.requestOrigin).toBeUndefined();
   });
+
+  it('redacts sensitive path segments in normalizedPath and hop URLs', () => {
+    const hops: Hop[] = [];
+    const apiHops: ApiHop[] = [];
+    registerCaptureListeners(
+      (_tabId, hop) => hops.push(hop),
+      (apiHop) => apiHops.push(apiHop),
+    );
+
+    // Main frame navigation with sensitive path segment and query parameter
+    listeners['onHeadersReceived']?.({
+      type: 'main_frame',
+      tabId: 6,
+      requestId: 'doc-reset-1',
+      url: 'https://example.com/reset/4f53cda18c2baa0c0354bb5f9a?token=supersecret',
+      statusCode: 200,
+      responseHeaders: [],
+      timeStamp: 400,
+    });
+    listeners['onResponseStarted']?.({
+      type: 'main_frame',
+      tabId: 6,
+      requestId: 'doc-reset-1',
+      url: 'https://example.com/reset/4f53cda18c2baa0c0354bb5f9a?token=supersecret',
+      statusCode: 200,
+      responseHeaders: [],
+      fromCache: false,
+      timeStamp: 401,
+    });
+
+    expect(hops).toHaveLength(1);
+    expect(hops[0]?.url).toBe('https://example.com/reset/[token]?token=%5Bredacted%5D');
+
+    // API request with UUID and secret path keyword
+    listeners['onResponseStarted']?.({
+      type: 'xmlhttprequest',
+      tabId: 6,
+      requestId: 'api-reset-1',
+      url: 'https://api.example.com/v1/auth/a1b2c3d4e5f6a7b8c9d0e1f2/verify',
+      statusCode: 200,
+      responseHeaders: [],
+      fromCache: false,
+      timeStamp: 402,
+    });
+
+    expect(apiHops).toHaveLength(1);
+    expect(apiHops[0]?.normalizedPath).toBe('https://api.example.com/v1/auth/[token]/verify');
+    expect(apiHops[0]?.url).toBe('https://api.example.com/v1/auth/[token]/verify');
+  });
 });

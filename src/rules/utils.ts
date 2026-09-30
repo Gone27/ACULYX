@@ -206,14 +206,72 @@ const SENSITIVE_PARAM_NAMES = new Set([
   'sessionid', 'sessid', 'sig', 'signature', 'code', 'ticket', 'credential',
 ]);
 
+const SENSITIVE_PATH_KEYWORDS = new Set([
+  'reset', 'token', 'tokens', 'auth', 'password', 'passwords', 'passwd', 'pwd',
+  'invite', 'invites', 'invitation', 'verify', 'verification', 'confirm',
+  'confirmation', 'session', 'sessions', 'secret', 'secrets', 'key', 'keys',
+  'apikey', 'otp', 'code', 'codes', 'recovery',
+]);
+
+const COMMON_SAFE_SUBPATHS = new Set([
+  'login', 'logout', 'signin', 'signout', 'signup', 'register', 'status',
+  'check', 'user', 'users', 'me', 'profile', 'settings', 'account', 'callback',
+  'refresh', 'new', 'edit', 'delete', 'update', 'create', 'view', 'list',
+]);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const JWT_RE = /^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/;
+const LONG_OPAQUE_RE = /^[a-zA-Z0-9_.-]{20,}$/;
+
 /**
- * Redacts common sensitive query parameters from URLs to prevent credentials,
- * API keys, and session tokens from being persisted in storage or displayed in the UI.
+ * Redacts sensitive path segments (tokens, UUIDs, JWTs, opaque hashes, and parameters following
+ * keywords like /reset/ or /token/) from URL paths to prevent credential persistence in storage/UI.
+ */
+export function redactUrlPath(pathname: string): string {
+  const segments = pathname.split('/');
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg === undefined || seg.length === 0) continue;
+
+    // 1. UUID
+    if (UUID_RE.test(seg)) {
+      segments[i] = '[id]';
+      continue;
+    }
+
+    // 2. JWT
+    if (JWT_RE.test(seg)) {
+      segments[i] = '[token]';
+      continue;
+    }
+
+    // 3. Preceding segment keyword indicates a secret, token, or one-time code
+    const prev = i > 0 ? segments[i - 1]?.toLowerCase() : undefined;
+    if (prev !== undefined && SENSITIVE_PATH_KEYWORDS.has(prev)) {
+      if (!COMMON_SAFE_SUBPATHS.has(seg.toLowerCase())) {
+        segments[i] = '[token]';
+        continue;
+      }
+    }
+
+    // 4. Long opaque alphanumeric/hex/hash token (e.g. >= 20 chars)
+    if (LONG_OPAQUE_RE.test(seg)) {
+      segments[i] = '[token]';
+      continue;
+    }
+  }
+
+  return segments.join('/');
+}
+
+/**
+ * Redacts common sensitive query parameters and sensitive URL path tokens
+ * to prevent credentials, API keys, and session tokens from being persisted in storage or displayed in the UI.
  */
 export function redactUrlQueryParams(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);
-    let modified = false;
+    url.pathname = redactUrlPath(url.pathname);
     for (const key of Array.from(url.searchParams.keys())) {
       const lower = key.toLowerCase();
       if (
@@ -225,10 +283,9 @@ export function redactUrlQueryParams(rawUrl: string): string {
         lower.includes('pass')
       ) {
         url.searchParams.set(key, '[redacted]');
-        modified = true;
       }
     }
-    return modified ? url.href : rawUrl;
+    return url.href;
   } catch {
     return rawUrl;
   }

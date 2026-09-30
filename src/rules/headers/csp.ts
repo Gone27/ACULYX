@@ -376,7 +376,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
           existingRules.add('CSP-002S');
         }
       } else if (f.type === Type.SCRIPT_ALLOWLIST_BYPASS || f.type === Type.OBJECT_ALLOWLIST_BYPASS) {
-        if (f.value !== "'self'") {
+        if (f.value !== "'self'" && !existingRules.has('CSP-009')) {
           findings.push({
             ruleId: 'CSP-009',
             category: 'header',
@@ -385,10 +385,20 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
             impact: f.description,
             evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ''}`),
             recommendation: 'Remove the bypass host or use strict-dynamic / nonces instead of an allowlist.',
-            reference: 'https://csp-evaluator.withgoogle.com/'
+            reference: 'https://csp-evaluator.withgoogle.com/',
           });
+          existingRules.add('CSP-009');
         }
-      } else if (f.severity === Severity.SYNTAX || f.type === Type.NONCE_CHARSET || f.type === Type.NONCE_LENGTH || f.type === Type.STATIC_NONCE || f.type === Type.MISSING_SEMICOLON || f.type === Type.UNKNOWN_DIRECTIVE || f.type === Type.INVALID_KEYWORD) {
+      } else if (
+        (f.severity === Severity.SYNTAX ||
+          f.type === Type.NONCE_CHARSET ||
+          f.type === Type.NONCE_LENGTH ||
+          f.type === Type.STATIC_NONCE ||
+          f.type === Type.MISSING_SEMICOLON ||
+          f.type === Type.UNKNOWN_DIRECTIVE ||
+          f.type === Type.INVALID_KEYWORD) &&
+        !existingRules.has('CSP-SYNTAX-001')
+      ) {
         findings.push({
           ruleId: 'CSP-SYNTAX-001',
           category: 'header',
@@ -397,8 +407,9 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
           impact: f.description,
           evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ''}`),
           recommendation: 'Review CSP syntax.',
-          reference: 'https://csp-evaluator.withgoogle.com/'
+          reference: 'https://csp-evaluator.withgoogle.com/',
         });
+        existingRules.add('CSP-SYNTAX-001');
       }
     }
   } catch {

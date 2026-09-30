@@ -403,6 +403,7 @@ export function checkSubdomainTrust(
       ruleId: varyOnlyHeuristic ? 'SUB-003H' : 'SUB-003',
       category: 'cors',
       severity: varyOnlyHeuristic ? 'medium' : 'high',
+      confidence: varyOnlyHeuristic ? 'heuristic' : 'deterministic',
       title: varyOnlyHeuristic
         ? 'Vary: Origin with no explicit CORS policy — possible dynamic origin reflection (heuristic)'
         : 'CORS policy trusts subdomain origin — cross-subdomain API data exposure possible',

@@ -229,6 +229,18 @@ describe('checkCsp — explicit cases', () => {
     expect(strictDynamic.some((finding) => finding.ruleId === 'CSP-009')).toBe(false);
   });
 
+  it('deduplicates CSP evaluator findings (CSP-009 and CSP-SYNTAX-001)', () => {
+    const { findings } = checkCsp(makeHop({ headers: {
+      'content-security-policy': "default-src 'self' 'invalid-kw-1' 'invalid-kw-2'; script-src 'self' https://www.google.com https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+    } }));
+
+    const csp009 = findings.filter((f) => f.ruleId === 'CSP-009');
+    expect(csp009).toHaveLength(1);
+
+    const syntax = findings.filter((f) => f.ruleId === 'CSP-SYNTAX-001');
+    expect(syntax).toHaveLength(1);
+  });
+
   it('reports headers removed by an intermediate redirect response', () => {
     const first = makeHop({ url: 'https://first.example/path', headers: { 'content-security-policy': "default-src 'self'" }, timestamp: 1 });
     const next = makeHop({ url: 'https://next.example/path', headers: {}, timestamp: 2 });

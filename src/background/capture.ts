@@ -16,7 +16,7 @@
  * to avoid noise. All captures are strictly origin-gated and require user permission.
  */
 
-import { normalizeHeaders, headersDiffer, redactUrlQueryParams } from '../rules/utils';
+import { normalizeHeaders, headersDiffer, redactUrlQueryParams, redactUrlPath } from '../rules/utils';
 import type { Hop, ApiHop } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -189,9 +189,9 @@ export function registerCaptureListeners(
           let normalizedPath: string;
           try {
             const u = new URL(details.url);
-            normalizedPath = u.origin + u.pathname;
+            normalizedPath = u.origin + redactUrlPath(u.pathname);
           } catch {
-            normalizedPath = details.url;
+            normalizedPath = redactUrlQueryParams(details.url);
           }
           const sanitizedUrl = redactUrlQueryParams(details.url);
           const apiHop: ApiHop = {
@@ -225,7 +225,7 @@ export function registerCaptureListeners(
         // Build a minimal partial so we can still emit a hop.
         partial = {
           tabId: details.tabId,
-          url: details.url,
+          url: redactUrlQueryParams(details.url),
           status: details.statusCode,
           headersReceived: null,
           rawHeadersReceived: [],
@@ -238,12 +238,14 @@ export function registerCaptureListeners(
         };
       }
 
+      const sanitizedUrl = redactUrlQueryParams(details.url);
+
       // Fill in stage-2 data.
       partial.headersStarted = normalised;
       partial.rawHeadersStarted = rawHeaders;
       partial.fromCache = details.fromCache ?? false;
       partial.status = details.statusCode;
-      partial.url = details.url;
+      partial.url = sanitizedUrl;
 
       // Decide which raw-header snapshot to expose as the canonical one.
       // We prefer the stage-2 (onResponseStarted) snapshot as the final truth.
@@ -259,7 +261,7 @@ export function registerCaptureListeners(
       // Construct the completed Hop.
       const hop: Hop = {
         requestId: details.requestId,
-        url: details.url,
+        url: sanitizedUrl,
         status: details.statusCode,
         headers: canonicalNormalised,
         rawHeaders: canonicalRaw,
@@ -298,7 +300,7 @@ export function registerCaptureListeners(
       const beforeHeaders = existing?.headersReceived;
       const hop: Hop = {
         requestId: details.requestId,
-        url: details.url,
+        url: redactUrlQueryParams(details.url),
         status: details.statusCode,
         headers,
         rawHeaders,

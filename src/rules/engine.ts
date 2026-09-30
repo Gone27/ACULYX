@@ -185,7 +185,7 @@ export function runRules(input: RuleInput): RuleOutput {
     'CSP-META-001',
     'SUB-001',
     'SUB-002',
-    'SUB-003',
+    'SUB-003H',
     'SUB-004',
     'SUB-005',
     'SUB-006',

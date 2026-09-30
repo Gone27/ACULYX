@@ -173,7 +173,24 @@ describe('Vector 3: CORS & Framing / Opener Trust', () => {
     const sub003 = result.findings.find((f) => f.ruleId === 'SUB-003');
     expect(sub003).toBeDefined();
     expect(sub003?.severity).toBe('high');
+    expect(sub003?.confidence).toBe('deterministic');
     expect(sub003?.evidence).toContain('user-content.example.com');
+  });
+
+  it('flags Vary: Origin with no ACAO as heuristic (SUB-003H)', () => {
+    const hop = makeHop({
+      url: 'https://example.com/api',
+      headers: {
+        vary: 'Origin, Accept-Encoding',
+      },
+    });
+
+    const result = checkSubdomainTrust(hop, []);
+    expect(result.hasEscalationPath).toBe(true);
+    const sub003h = result.findings.find((f) => f.ruleId === 'SUB-003H');
+    expect(sub003h).toBeDefined();
+    expect(sub003h?.severity).toBe('medium');
+    expect(sub003h?.confidence).toBe('heuristic');
   });
 
   it('does not duplicate blanket missing framing protection as SUB-004', () => {
