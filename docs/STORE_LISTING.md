@@ -5,7 +5,7 @@
 ## 1. Title & Short Name
 - **Extension Name:** Header & Cookie Security Checker (SecCheck)
 - **Short Name:** SecCheck
-- **Version:** 0.1.0
+- **Version:** 1.0.0
 
 ---
 

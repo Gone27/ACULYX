@@ -54,4 +54,4 @@ SecCheck is open source. You can audit the codebase directly on GitHub to verify
 For questions regarding this privacy policy or SecCheck security practices:
 - **Project Maintainer:** Dhyan Patel
 - **Email:** Dhyanpatel884@gmail.com
-- **Issue Tracker:** https://github.com/dhyanpatel/header-cookie-security-checker/issues
+- **Issue Tracker:** https://github.com/Gone27/Cookie-and-header-reader-extention/issues

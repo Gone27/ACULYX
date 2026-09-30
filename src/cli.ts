@@ -301,7 +301,7 @@ export function formatSarif(report: CliReport): SarifLog {
         driver: {
           name: 'SecCheck',
           version: packageInfo.version,
-          informationUri: 'https://github.com/dhyanpatel/header-cookie-security-checker',
+          informationUri: 'https://github.com/Gone27/Cookie-and-header-reader-extention',
           rules: ruleList.map(([ruleId, finding]) => ({
             id: ruleId,
             name: ruleId,
