@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-09-30
+
+### Added
+- **Pre-login vs. Post-login Posture Diff**: Automatically snapshots and diffs security findings on authenticated transitions (`authdiff:`), identifying newly exposed weaknesses or resolved issues when sensitive auth cookies are established.
+- **Attack-Surface Graph (Side Panel)**: Dedicated sidepanel powered by `d3-force` interactive SVG visualization mapping apex domains, subdomains, and trust vectors (CSP, Cookie `Domain=`, CORS `Access-Control-Allow-Origin`) with Free and Pro tier view modes.
+- **Client-Side Verification Sandbox (PoC Generator)**: MV3 sandboxed verification environment (`src/sandbox/poc.html`) for defensive security verification, featuring interactive Clickjacking framing analysis and Cross-Origin-Opener-Policy (COOP) reverse-tabnabbing decoupling demonstrations with ethical authorization gating.
+- **SecCheck Pro Mode**: Settings toggle to enable full accumulated cross-session multi-host attack surface mapping.
+
 ## [Unreleased]
 
 ### Added
