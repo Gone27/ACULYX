@@ -64,19 +64,19 @@ The following are intentionally excluded:
 
 ### Prerequisites
 
-- Node.js ≥ 20
-- pnpm ≥ 9
+- Node.js ≥ 22.12.0
+- npm ≥ 10
 
 ### Setup
 
 ```bash
-pnpm install
+npm install
 ```
 
 ### Development build (with HMR)
 
 ```bash
-pnpm dev
+npm run dev
 ```
 
 Load the unpacked extension from `dist/` in `chrome://extensions`.
@@ -84,25 +84,31 @@ Load the unpacked extension from `dist/` in `chrome://extensions`.
 ### Production build
 
 ```bash
-pnpm build
+npm run build
+```
+
+### Firefox production build
+
+```bash
+npm run build:firefox
 ```
 
 ### Type checking
 
 ```bash
-pnpm typecheck
+npm run typecheck
 ```
 
 ### Linting
 
 ```bash
-pnpm lint
+npm run lint
 ```
 
 ### Unit tests (rule engine)
 
 ```bash
-pnpm test
+npm test
 ```
 
 ### CLI audit
@@ -116,7 +122,7 @@ Exit codes: `0` means no finding met the threshold, `1` means a finding met or e
 ### E2e tests (requires built extension)
 
 ```bash
-pnpm build && pnpm test:e2e
+npm run build && npm run test:e2e
 ```
 
 ## Project Structure
@@ -148,8 +154,9 @@ The `scoreVersion` field is stored with every result so historical comparisons r
 - **Restricted pages** (`chrome://`, the Web Store, `about:`) cannot be inspected — the extension shows an explicit "restricted" state rather than a misleading empty report
 - **Cache and service-worker responses** are flagged with a coverage warning; the headers shown are "what the browser received from cache," not necessarily the current server headers
 - **HSTS preloaded sites** redirect internally before any request leaves the browser, so the HTTP→HTTPS hop is invisible; Chrome's `Non-Authoritative-Reason: HSTS` header is used to label these hops
-- **Meta-tag CSP** is detected, but its policy contents are not evaluated; the popup and report call out this coverage limit
-- **Embedded content** is not inspected: only top-level (`main_frame`) navigation responses are captured, so third-party iframe and sub-resource headers are outside the audit
+- **Meta-tag CSP** is detected and collected, but its policy contents are not evaluated against HTTP response header directives; the popup and report call out this coverage limit
+- **Subresource & API capture** passively observes first-party and third-party XHR/fetch endpoints; findings are displayed in a dedicated API section and do not alter the top-level document security grade
+- **Embedded content** is not inspected: only top-level (`main_frame`) navigation responses and same-session XHR/fetch calls are captured, so third-party iframe document headers are outside the audit
 - **CSP analysis is heuristic** — the tool flags known-weak patterns but cannot prove a policy is secure
 - **Scores are opinionated** — weights are documented and versioned, not objective truth
 
@@ -158,10 +165,10 @@ The `scoreVersion` field is stored with every result so historical comparisons r
 | Phase | Status | Deliverable |
 |---|---|---|
 | 1 | ✅ | Header capture, 8 header rules, badge, popup |
-| 2 | ✅ | Cookie store integration, cookie rules, JS-set detection, subdomain trust analysis |
+| 2 | ✅ | Cookie store integration, cookie rules, cookie correlation & origin tracking, subdomain trust analysis |
 | 3 | ✅ | Score breakdown, JSON/Markdown audit reports, historical score trend |
-| 4 | ✅ | Side panel, redirect-chain analysis, SRI coverage, historical score trend, CI pipeline, full automated test suite (146 tests), Firefox build, CLI/SARIF export |
-| 5 | Stretch | Opt-in iframe subresource coverage, meta-CSP content evaluation, DevTools panel, mixed-content detection, signed remote rule updates |
+| 4 | ✅ | Side panel, redirect-chain analysis, SRI coverage, historical score trend, CI pipeline, full automated test suite (150+ tests), Firefox build, CLI/SARIF export, audit bundles & finding diffs |
+| 5 | Stretch | Opt-in iframe subresource coverage, semantic meta-CSP evaluation, DevTools panel, mixed-content detection, signed remote rule updates |
 
 ## License
 

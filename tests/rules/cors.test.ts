@@ -38,7 +38,7 @@ describe('checkCors', () => {
     expect(findings[0]?.title).toContain("'null'");
   });
 
-  it('flags reflected Origin with credentials as CORS-001 high', () => {
+  it('flags reflected Origin with credentials as CORS-001 medium with heuristic confidence', () => {
     const apiHop = {
       ...makeHop({
         'access-control-allow-origin': 'https://evil.example.com',
@@ -52,7 +52,24 @@ describe('checkCors', () => {
     };
     const findings = checkCors(apiHop);
     expect(findings.length).toBe(1);
-    expect(findings[0]?.severity).toBe('high');
-    expect(findings[0]?.title).toContain('reflects arbitrary request Origin');
+    expect(findings[0]?.severity).toBe('medium');
+    expect(findings[0]?.confidence).toBe('heuristic');
+    expect(findings[0]?.title).toContain('potential reflection');
+  });
+
+  it('does not skip HTML responses for API hops with ACAO: *', () => {
+    const apiHop = {
+      ...makeHop({
+        'access-control-allow-origin': '*',
+        'content-type': 'text/html; charset=utf-8',
+      }),
+      tabId: 1,
+      normalizedPath: 'https://example.com/api/fragment',
+      method: 'GET',
+      requestOrigin: 'https://example.com',
+    };
+    const findings = checkCors(apiHop);
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.ruleId).toBe('CORS-001');
   });
 });

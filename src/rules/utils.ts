@@ -200,3 +200,38 @@ export function hasCspBypassProtection(sourceList: string): {
   return { hasNonce, hasHash, hasStrictDynamic, isModernStrict };
 }
 
+const SENSITIVE_PARAM_NAMES = new Set([
+  'token', 'access_token', 'id_token', 'refresh_token', 'auth', 'authentication',
+  'api_key', 'apikey', 'key', 'secret', 'password', 'passwd', 'pwd', 'session',
+  'sessionid', 'sessid', 'sig', 'signature', 'code', 'ticket', 'credential',
+]);
+
+/**
+ * Redacts common sensitive query parameters from URLs to prevent credentials,
+ * API keys, and session tokens from being persisted in storage or displayed in the UI.
+ */
+export function redactUrlQueryParams(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    let modified = false;
+    for (const key of Array.from(url.searchParams.keys())) {
+      const lower = key.toLowerCase();
+      if (
+        SENSITIVE_PARAM_NAMES.has(lower) ||
+        lower.includes('token') ||
+        lower.includes('secret') ||
+        lower.includes('auth') ||
+        lower.includes('key') ||
+        lower.includes('pass')
+      ) {
+        url.searchParams.set(key, '[redacted]');
+        modified = true;
+      }
+    }
+    return modified ? url.href : rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
+

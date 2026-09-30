@@ -8,9 +8,10 @@ const REF_CORS = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS';
 export function checkCors(hop: Hop | ApiHop): Finding[] {
   // CDNs frequently apply ACAO: * to all resources, including HTML documents.
   // Since top-level HTML navigation isn't gated by CORS anyway, this is usually 
-  // harmless noise on public pages. We only flag non-HTML responses.
+  // harmless noise on public pages. We only skip HTML responses on document navigation.
+  const isApi = 'method' in hop || 'normalizedPath' in hop;
   const contentType = hop.headers['content-type']?.toLowerCase() ?? '';
-  if (contentType.includes('text/html')) {
+  if (!isApi && contentType.includes('text/html')) {
     return [];
   }
 
@@ -26,12 +27,12 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
     return [{
       ruleId: 'CORS-001',
       category: 'cors',
-      severity: 'high',
-      confidence: 'deterministic',
-      title: 'CORS reflects arbitrary request Origin with credentials allowed',
-      impact: 'Any website can induce a user browser to make requests to this endpoint and read the response using the victim ambient credentials (cookies/auth).',
+      severity: 'medium',
+      confidence: 'heuristic',
+      title: 'CORS allows request Origin with credentials (potential reflection)',
+      impact: 'Any website can induce a user browser to make requests to this endpoint and read the response using the victim ambient credentials (cookies/auth) if the server dynamically reflects the origin.',
       evidence: sanitizeEvidence(`Request Origin: ${requestOrigin} -> ACAO: ${allowOrigin}; ACAC: true`),
-      recommendation: 'Do not dynamically reflect the request Origin header when Access-Control-Allow-Credentials is true. Validate against a strict, static allowlist.',
+      recommendation: 'Verify that the server does not dynamically reflect arbitrary Origin headers when Access-Control-Allow-Credentials is true. Validate incoming Origin headers against a strict, static allowlist.',
       reference: REF_CORS,
     }];
   }

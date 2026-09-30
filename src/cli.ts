@@ -47,10 +47,26 @@ export interface SarifLog {
 const ruleFixes = fixesData.rules as Record<string, FixSuggestion>;
 const severityOrder = ['critical', 'high', 'medium', 'low', 'info'] as const;
 
+export function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower === 'set-cookie' || lower === 'authorization' || lower === 'proxy-authorization') {
+      result[lower] = '[redacted]';
+    } else {
+      result[lower] = value;
+    }
+  }
+  return result;
+}
+
 export function redactResponseHeaders(source: Headers): Record<string, string> {
   const headers: Record<string, string> = {};
   source.forEach((value, name) => {
-    headers[name] = name.toLowerCase() === 'set-cookie' ? '[redacted]' : value;
+    const lower = name.toLowerCase();
+    headers[lower] = (lower === 'set-cookie' || lower === 'authorization' || lower === 'proxy-authorization')
+      ? '[redacted]'
+      : value;
   });
   return headers;
 }
@@ -388,20 +404,33 @@ export interface AuditBundle {
   findings: Array<Finding & { fix?: FixSuggestion }>;
   redactedHeaders: Record<string, string>;
   subdomainTrust: SubdomainTrustAnalysis;
-  integrityHash: string;
+  /** SHA-256 content checksum of the canonical representation of all bundle fields. */
+  integrityChecksum: string;
+  /** Backward-compatible alias for integrityChecksum. */
+  integrityHash?: string;
+}
+
+export function computeBundleChecksum(payload: Omit<AuditBundle, 'integrityChecksum' | 'integrityHash'>): string {
+  const canonicalJson = JSON.stringify(payload, (_key, val: unknown) => {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      const obj = val as Record<string, unknown>;
+      return Object.keys(obj)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, k) => {
+          acc[k] = obj[k];
+          return acc;
+        }, {});
+    }
+    return val;
+  });
+  return createHash('sha256').update(canonicalJson).digest('hex');
 }
 
 export function buildAuditBundle(report: CliReport, headers: Record<string, string>): AuditBundle {
-  const payloadToHash = JSON.stringify({
-    target: report.target,
-    score: report.score,
-    grade: report.grade,
-    findings: report.findings.map((f) => ({ ruleId: f.ruleId, severity: f.severity })),
-    headers,
-  });
-  const integrityHash = createHash('sha256').update(payloadToHash).digest('hex');
+  // Always guarantee case-insensitive redaction of Set-Cookie and sensitive headers
+  const cleanHeaders = redactHeaders(headers);
 
-  return {
+  const payload: Omit<AuditBundle, 'integrityChecksum' | 'integrityHash'> = {
     bundleVersion: '1.0.0',
     generatedAt: report.generatedAt,
     target: report.target,
@@ -411,10 +440,24 @@ export function buildAuditBundle(report: CliReport, headers: Record<string, stri
     qualityGrade: report.qualityGrade,
     scoreVersion: report.scoreVersion,
     findings: report.findings,
-    redactedHeaders: headers,
+    redactedHeaders: cleanHeaders,
     subdomainTrust: report.subdomainTrust,
-    integrityHash,
   };
+  const integrityChecksum = computeBundleChecksum(payload);
+
+  return {
+    ...payload,
+    integrityChecksum,
+    integrityHash: integrityChecksum,
+  };
+}
+
+export function verifyAuditBundle(bundle: AuditBundle): boolean {
+  const payload: Record<string, unknown> = { ...bundle };
+  delete payload.integrityChecksum;
+  delete payload.integrityHash;
+  const expected = computeBundleChecksum(payload as unknown as Omit<AuditBundle, 'integrityChecksum' | 'integrityHash'>);
+  return bundle.integrityChecksum === expected;
 }
 
 export function shouldFail(findings: Finding[], failOn: string): boolean {

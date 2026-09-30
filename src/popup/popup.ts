@@ -20,6 +20,7 @@ import type {
   ScoreBreakdown,
   SubdomainTrustAnalysis,
   SubdomainTrustVector,
+  ApiEndpointState,
 } from '../shared/types';
 import { sendToBackground } from '../shared/messaging';
 import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
@@ -47,6 +48,9 @@ let subdomainSection:    HTMLDetailsElement; // E
 let subdomainBadge:      HTMLSpanElement;    // E
 let vectorList:          HTMLUListElement;   // E
 let trustGraph:          SVGSVGElement;
+let apiEndpointsSection: HTMLDetailsElement;
+let apiEndpointsBadge:   HTMLSpanElement;
+let apiEndpointsList:    HTMLUListElement;
 let onboardingCard:      HTMLDivElement;     // 5. Onboarding
 let onboardingCloseBtn:  HTMLButtonElement;
 let onboardingActionBtn: HTMLButtonElement;
@@ -88,6 +92,9 @@ document.addEventListener('DOMContentLoaded', () => {
   subdomainBadge      = getEl<HTMLSpanElement>('subdomain-badge');         // E
   vectorList          = getEl<HTMLUListElement>('vector-list');            // E
   trustGraph          = getEl<SVGSVGElement>('trust-graph');
+  apiEndpointsSection = getEl<HTMLDetailsElement>('api-endpoints-section');
+  apiEndpointsBadge   = getEl<HTMLSpanElement>('api-endpoints-badge');
+  apiEndpointsList    = getEl<HTMLUListElement>('api-endpoints-list');
   onboardingCard      = getEl<HTMLDivElement>('onboarding-card');
   onboardingCloseBtn  = getEl<HTMLButtonElement>('onboarding-close-btn');
   onboardingActionBtn = getEl<HTMLButtonElement>('onboarding-action-btn');
@@ -245,6 +252,9 @@ function renderState(state: TabState): void {
   // E: Subdomain trust analysis
   renderSubdomainTrust(state.subdomainTrust);
 
+  // API endpoints analysis
+  renderApiEndpoints(state);
+
   // 4. Export & Copy buttons
   exportBtn.hidden = false;
   copyReportBtn.hidden = false;
@@ -269,6 +279,14 @@ function renderCoverage(
 
   const headersDiffer = hops.some((h) => h.headersDiffer);
   if (headersDiffer) warnings.push('⚠ Headers differ between capture points; source cannot be attributed');
+
+  if (Array.isArray(coverage.blindSpots)) {
+    for (const spot of coverage.blindSpots) {
+      if (!warnings.some((w) => w.toLowerCase().includes(spot.slice(0, 15).toLowerCase()))) {
+        warnings.push(`⚠ ${spot}`);
+      }
+    }
+  }
 
   coverageBar.textContent = warnings.join(' | ');
   coverageBar.hidden = false;
@@ -576,6 +594,128 @@ function buildVectorItem(vector: SubdomainTrustVector): HTMLLIElement {
   return li;
 }
 
+/* ── API endpoints analysis ──────────────────────────────────── */
+
+function getApiEndpointsList(state: TabState): ApiEndpointState[] {
+  const endpoints: unknown = state.apiEndpoints;
+  if (endpoints === undefined || endpoints === null) return [];
+  if (endpoints instanceof Map) {
+    const list: ApiEndpointState[] = [];
+    for (const val of endpoints.values()) {
+      if (val !== null && typeof val === 'object' && 'normalizedPath' in val) {
+        list.push(val as ApiEndpointState);
+      }
+    }
+    return list;
+  }
+  if (Array.isArray(endpoints)) {
+    const list: ApiEndpointState[] = [];
+    for (const entry of endpoints as unknown[]) {
+      if (Array.isArray(entry) && entry.length >= 2 && entry[1] !== null && typeof entry[1] === 'object') {
+        list.push(entry[1] as ApiEndpointState);
+      } else if (entry !== null && typeof entry === 'object' && 'normalizedPath' in entry) {
+        list.push(entry as ApiEndpointState);
+      }
+    }
+    return list;
+  }
+  if (typeof endpoints === 'object') {
+    const list: ApiEndpointState[] = [];
+    for (const val of Object.values(endpoints as Record<string, unknown>)) {
+      if (val !== null && typeof val === 'object' && 'normalizedPath' in val) {
+        list.push(val as ApiEndpointState);
+      }
+    }
+    return list;
+  }
+  return [];
+}
+
+function renderApiEndpoints(state: TabState): void {
+  const endpoints = getApiEndpointsList(state);
+  if (endpoints.length === 0) {
+    apiEndpointsSection.hidden = true;
+    return;
+  }
+
+  while (apiEndpointsList.firstChild) {
+    apiEndpointsList.removeChild(apiEndpointsList.firstChild);
+  }
+
+  let totalFindings = 0;
+  for (const ep of endpoints) {
+    totalFindings += ep.findings.length;
+  }
+
+  apiEndpointsBadge.textContent = `${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'}${totalFindings > 0 ? ` (${totalFindings} finding${totalFindings === 1 ? '' : 's'})` : ''}`;
+  if (totalFindings > 0) {
+    apiEndpointsBadge.classList.add('has-findings');
+  } else {
+    apiEndpointsBadge.classList.remove('has-findings');
+  }
+
+  for (const ep of endpoints) {
+    const card = document.createElement('li');
+    card.className = 'api-endpoint-card';
+
+    const header = document.createElement('div');
+    header.className = 'api-endpoint-header';
+
+    const pathSpan = document.createElement('span');
+    pathSpan.className = 'api-endpoint-path';
+    pathSpan.textContent = ep.normalizedPath;
+    pathSpan.title = ep.normalizedPath;
+
+    const badges = document.createElement('div');
+    badges.style.display = 'flex';
+    badges.style.gap = '4px';
+
+    const methodBadge = document.createElement('span');
+    methodBadge.className = 'api-method-badge';
+    methodBadge.textContent = ep.lastHop.method ?? 'GET';
+
+    const partyBadge = document.createElement('span');
+    partyBadge.className = 'api-party-badge';
+    partyBadge.textContent = ep.isFirstParty ? '1st party' : '3rd party';
+
+    badges.appendChild(methodBadge);
+    badges.appendChild(partyBadge);
+
+    header.appendChild(pathSpan);
+    header.appendChild(badges);
+    card.appendChild(header);
+
+    if (ep.findings.length > 0) {
+      const findingsContainer = document.createElement('div');
+      findingsContainer.className = 'api-endpoint-findings';
+      for (const finding of ep.findings) {
+        const pill = document.createElement('div');
+        pill.className = `api-finding-pill severity-${finding.severity}`;
+
+        const ruleSpan = document.createElement('strong');
+        ruleSpan.textContent = finding.ruleId;
+
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = finding.title;
+
+        pill.appendChild(ruleSpan);
+        pill.appendChild(titleSpan);
+        findingsContainer.appendChild(pill);
+      }
+      card.appendChild(findingsContainer);
+    } else {
+      const noFindings = document.createElement('div');
+      noFindings.className = 'api-no-findings';
+      noFindings.textContent = '✔ No header or CORS issues detected';
+      card.appendChild(noFindings);
+    }
+
+    apiEndpointsList.appendChild(card);
+  }
+
+  apiEndpointsSection.hidden = false;
+}
+
 /* ================================================================
    C: Stop monitoring
    ================================================================ */
@@ -604,6 +744,7 @@ function wireStopMonitoringButton(): void {
           breakdownSection.hidden = true;
           findingsSection.hidden = true;
           subdomainSection.hidden = true;
+          apiEndpointsSection.hidden = true;
           setBadgeState('locked', undefined, 'Site access locked');
           scoreText.textContent = '';
           qualityScoreText.textContent = '';
@@ -640,6 +781,7 @@ function wireExportButton(): void {
       cookies: currentState.cookies, // metadata only — no values
       coverage: currentState.coverage,
       subdomainTrust: currentState.subdomainTrust, // E: include escalation analysis
+      apiEndpoints: getApiEndpointsList(currentState),
     };
 
     const json = JSON.stringify(exportData, null, 2);

@@ -16,7 +16,7 @@
  * allowed to observe.
  */
 
-import { normalizeHeaders, headersDiffer } from '../rules/utils';
+import { normalizeHeaders, headersDiffer, redactUrlQueryParams } from '../rules/utils';
 import type { Hop, ApiHop } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -113,10 +113,16 @@ export function registerCaptureListeners(
   try {
     chrome.webRequest.onBeforeSendHeaders.addListener(
       (details: chrome.webRequest.WebRequestHeadersDetails): void => {
-        if (details.tabId < 0) return;
+        // ONLY track XHR/fetch requests
+        if (details.type !== 'xmlhttprequest' || details.tabId < 0) return;
         const originHeader = details.requestHeaders?.find(
           (h) => h.name.toLowerCase() === 'origin',
         )?.value;
+        // Bound the map size to prevent memory leaks if responses never finish
+        if (inFlightRequests.size > 100) {
+          const oldestKey = inFlightRequests.keys().next().value;
+          if (oldestKey !== undefined) inFlightRequests.delete(oldestKey);
+        }
         inFlightRequests.set(details.requestId, {
           method: details.method,
           origin: originHeader,
@@ -126,6 +132,14 @@ export function registerCaptureListeners(
       filter,
       ['requestHeaders', 'extraHeaders'],
     );
+
+    // Clean up in-flight request tracking on error or completion
+    chrome.webRequest.onErrorOccurred.addListener((details) => {
+      inFlightRequests.delete(details.requestId);
+    }, filter);
+    chrome.webRequest.onCompleted.addListener((details) => {
+      inFlightRequests.delete(details.requestId);
+    }, filter);
   } catch {
     // extraHeaders may be restricted in some environments; fall back gracefully
   }
@@ -179,10 +193,11 @@ export function registerCaptureListeners(
           } catch {
             normalizedPath = details.url;
           }
+          const sanitizedUrl = redactUrlQueryParams(details.url);
           const apiHop: ApiHop = {
             requestId: details.requestId,
             tabId: details.tabId,
-            url: details.url,
+            url: sanitizedUrl,
             normalizedPath,
             method: reqMeta?.method ?? 'GET',
             requestOrigin: reqMeta?.origin,

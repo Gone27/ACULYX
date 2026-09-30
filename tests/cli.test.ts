@@ -4,11 +4,13 @@ import {
   formatMarkdown,
   formatSarif,
   redactResponseHeaders,
+  redactHeaders,
   selectHarInput,
   shouldFail,
   computeFindingFingerprint,
   computeFindingDiff,
   buildAuditBundle,
+  verifyAuditBundle,
 } from '../src/cli';
 import fixes from '../fixes.json';
 import packageInfo from '../package.json';
@@ -165,13 +167,50 @@ describe('SecCheck CLI report', () => {
     expect(diff.currentScore).toBeGreaterThan(diff.baselineScore ?? 0);
   });
 
-  it('generates an authenticated audit bundle with an integrity checksum', () => {
+  it('generates an audit bundle with an integrity checksum and verified authenticity', () => {
     const report = buildCliReport({ url: 'https://example.com', headers: { 'x-frame-options': 'DENY' } });
     const bundle = buildAuditBundle(report, { 'x-frame-options': 'DENY' });
 
     expect(bundle.bundleVersion).toBe('1.0.0');
     expect(bundle.target).toBe('https://example.com/');
-    expect(bundle.integrityHash).toHaveLength(64);
+    expect(bundle.integrityChecksum).toHaveLength(64);
     expect(bundle.redactedHeaders['x-frame-options']).toBe('DENY');
+    expect(verifyAuditBundle(bundle)).toBe(true);
+
+    // Tampering with any field must invalidate verification
+    const tampered = { ...bundle, score: 99 };
+    expect(verifyAuditBundle(tampered)).toBe(false);
+  });
+
+  it('never leaks Set-Cookie canary values in --bundle output across mixed-case inputs', () => {
+    const canary = 'CANARY_SECRET_COOKIE_VAL_999888';
+    const testCases: Array<Record<string, string>> = [
+      { 'Set-Cookie': `session=${canary}; Secure; HttpOnly` },
+      { 'set-cookie': `id=${canary}; Path=/` },
+      { 'SET-COOKIE': `token=${canary}; SameSite=Strict` },
+      { 'Authorization': `Bearer ${canary}` },
+      { 'Proxy-Authorization': `Basic ${canary}` },
+    ];
+
+    for (const headers of testCases) {
+      const report = buildCliReport({ url: 'https://example.com', headers });
+      const bundle = buildAuditBundle(report, headers);
+      const serialized = JSON.stringify(bundle);
+
+      expect(serialized).not.toContain(canary);
+      expect(bundle.redactedHeaders['set-cookie'] ?? bundle.redactedHeaders['authorization'] ?? bundle.redactedHeaders['proxy-authorization']).toBe('[redacted]');
+    }
+  });
+
+  it('redacts sensitive headers via redactHeaders helper directly', () => {
+    const raw = {
+      'Set-Cookie': 'secret=123',
+      'X-Custom': 'safe',
+      'AUTHORIZATION': 'secret-auth',
+    };
+    const clean = redactHeaders(raw);
+    expect(clean['set-cookie']).toBe('[redacted]');
+    expect(clean['authorization']).toBe('[redacted]');
+    expect(clean['x-custom']).toBe('safe');
   });
 });

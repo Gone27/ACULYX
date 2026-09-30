@@ -34,9 +34,10 @@ import type {
   TabState,
   Grade,
   CoverageInfo,
+  CoverageLedgerEntry,
   Settings,
   ApiHop,
-  ApiEndpointState
+  ApiEndpointState,
 } from '../shared/types';
 import type {
   ExtensionMessage,
@@ -140,6 +141,14 @@ function computeBlindSpots(coverage: CoverageInfo): string[] {
   return spots;
 }
 
+function pushLedgerEntry(state: TabState, entry: CoverageLedgerEntry): void {
+  const ledger = state.coverage.ledger ?? (state.coverage.ledger = []);
+  ledger.push(entry);
+  if (ledger.length > 50) {
+    state.coverage.ledger = ledger.slice(-50);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Default TabState factory
 // ---------------------------------------------------------------------------
@@ -239,9 +248,11 @@ async function onHopComplete(
   // 4. Append the new hop.
   // ------------------------------------------------------------------
   state.hops = [...state.hops, hop].sort((left, right) => left.timestamp - right.timestamp);
+  const isRedirect = hop.status >= 300 && hop.status < 400;
+  const minExpectedHops = isRedirect ? state.hops.length + 1 : state.hops.length;
   state.coverage.hopsExpected = Math.max(
     state.coverage.hopsExpected,
-    state.hops.length,
+    minExpectedHops,
   );
   state.coverage.hopsCaptured = state.hops.length;
   state.coverage.hasCache = state.coverage.hasCache || hop.fromCache;
@@ -249,7 +260,7 @@ async function onHopComplete(
   const ledgerSource: 'network' | 'cache' | 'hsts-upgrade' = hop.fromCache
     ? 'cache'
     : (hop.isHstsUpgrade ? 'hsts-upgrade' : 'network');
-  (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+  pushLedgerEntry(state, {
     type: hop.isHstsUpgrade ? 'redirect' : 'navigation',
     url: hop.url,
     source: ledgerSource,
@@ -485,7 +496,7 @@ chrome.runtime.onMessage.addListener(
           state.coverage.serviceWorkerUrl = report.serviceWorkerUrl;
           state.coverage.hasServiceWorker = report.status === 'controlled';
           if (report.status === 'controlled') {
-            (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+            pushLedgerEntry(state, {
               type: 'service-worker',
               url: report.serviceWorkerUrl ?? state.url,
               source: 'service-worker',
@@ -510,7 +521,7 @@ chrome.runtime.onMessage.addListener(
           // so we can run csp_evaluator on them separately from the header CSP.
           if (message.policies !== undefined && message.policies.length > 0) {
             state.coverage.metaCspPolicies = message.policies;
-            (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+            pushLedgerEntry(state, {
               type: 'subresource',
               url: state.url,
               source: 'dom',
@@ -631,7 +642,7 @@ void (async (): Promise<void> => {
         }
       }
 
-      (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+      pushLedgerEntry(state, {
         type: 'api',
         url: apiHop.url,
         source: apiHop.fromCache === true ? 'cache' : 'network',
