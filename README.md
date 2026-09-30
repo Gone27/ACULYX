@@ -28,7 +28,7 @@ The engine evaluates responses against over a dozen targeted security rules. Key
 - **Transport Security (HSTS)**: Checks for `Strict-Transport-Security`, `includeSubDomains`, and ensures `max-age` is sufficient for preload readiness.
 - **Content Security (CSP)**: Flags missing policies, `unsafe-inline`/`unsafe-eval` in script directives, wildcard origins, and missing framing (`frame-ancestors`) or `base-uri` protections. Warns on weak hosts (heuristic).
 - **Cookie Security**: Flags missing `Secure` or `HttpOnly` flags on sensitive tokens (detected via regex heuristics or user overrides), validates `__Host-`/`__Secure-` prefixes, and checks `SameSite` enforcement.
-- **Subdomain Trust & CORS**: Detects wildcard `Access-Control-Allow-Origin` on private API endpoints, credentialed CORS wildcards, and overly permissive subdomain cookie scoping (e.g., setting a sensitive cookie to `.example.com` instead of a specific host).
+- **Subdomain Trust & CORS**: Detects wildcard or null `Access-Control-Allow-Origin` on API responses, credentialed CORS wildcards, and overly permissive subdomain cookie scoping (e.g., setting a sensitive cookie to `.example.com` instead of a specific host).
 - **Information Leakage**: Detects known product/version strings (e.g., `Express 4.x`, `PHP/8.1`, `nginx/1.24`) in headers like `Server` and `X-Powered-By`.
 - **Legacy & Cache**: Flags deprecated headers (`X-XSS-Protection`) and ensures responses setting cookies enforce `Cache-Control: no-store`.
 - **Subresource Integrity (SRI)**: Verifies that `<script>` and `<link rel="stylesheet">` tags in the HTML payload use `integrity` attributes.

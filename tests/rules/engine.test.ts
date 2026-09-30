@@ -24,7 +24,7 @@ import { checkDeprecated } from '../../src/rules/headers/deprecated';
 import { checkInfoLeak } from '../../src/rules/headers/info-leak';
 import { checkCacheCookie } from '../../src/rules/headers/cache-cookie';
 import { computeScore } from '../../src/rules/scoring';
-import { sanitizeEvidence } from '../../src/rules/utils';
+import { sanitizeEvidence, isSensitiveParamName, redactUrlQueryParams } from '../../src/rules/utils';
 import { runRules } from '../../src/rules/engine';
 import type { Hop, Finding } from '../../src/shared/types';
 
@@ -567,6 +567,41 @@ describe('sanitizeEvidence', () => {
     const result = sanitizeEvidence(controlled);
     // Control chars (0x00–0x1F except common whitespace) must be removed/escaped
     expect(result).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f]/);
+  });
+});
+
+// ==========================================================================
+// redactUrlQueryParams and isSensitiveParamName — parameter sanitization
+// ==========================================================================
+
+describe('redactUrlQueryParams and isSensitiveParamName', () => {
+  it('does not redact harmless parameters like keyword, author, passenger, compass, or bypass', () => {
+    const url = 'https://example.com/search?keyword=security&author=alice&passenger=bob&compass=north&bypass=false&page=2';
+    const redacted = redactUrlQueryParams(url);
+    expect(redacted).toBe(url);
+  });
+
+  it('redacts sensitive parameters like token, api_key, apiKey, secret, password, and auth_token', () => {
+    const url = 'https://example.com/api?apiKey=secret123&token=tok456&password=pass789&author=alice';
+    const redacted = redactUrlQueryParams(url);
+    expect(redacted).toContain('apiKey=%5Bredacted%5D');
+    expect(redacted).toContain('token=%5Bredacted%5D');
+    expect(redacted).toContain('password=%5Bredacted%5D');
+    expect(redacted).toContain('author=alice');
+  });
+
+  it('accurately identifies sensitive vs harmless param names', () => {
+    expect(isSensitiveParamName('keyword')).toBe(false);
+    expect(isSensitiveParamName('author')).toBe(false);
+    expect(isSensitiveParamName('passenger')).toBe(false);
+    expect(isSensitiveParamName('compass')).toBe(false);
+    expect(isSensitiveParamName('bypass')).toBe(false);
+
+    expect(isSensitiveParamName('token')).toBe(true);
+    expect(isSensitiveParamName('api_key')).toBe(true);
+    expect(isSensitiveParamName('clientSecret')).toBe(true);
+    expect(isSensitiveParamName('authToken')).toBe(true);
+    expect(isSensitiveParamName('user_pass')).toBe(true);
   });
 });
 

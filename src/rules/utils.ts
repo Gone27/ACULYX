@@ -204,6 +204,7 @@ const SENSITIVE_PARAM_NAMES = new Set([
   'token', 'access_token', 'id_token', 'refresh_token', 'auth', 'authentication',
   'api_key', 'apikey', 'key', 'secret', 'password', 'passwd', 'pwd', 'session',
   'sessionid', 'sessid', 'sig', 'signature', 'code', 'ticket', 'credential',
+  'pass', 'passphrase', 'user_pass',
 ]);
 
 const SENSITIVE_PATH_KEYWORDS = new Set([
@@ -264,6 +265,48 @@ export function redactUrlPath(pathname: string): string {
   return segments.join('/');
 }
 
+const SENSITIVE_PARAM_WORD_TOKENS = new Set([
+  'token', 'tokens', 'secret', 'secrets', 'key', 'keys', 'apikey', 'apikeys',
+  'auth', 'oauth', 'passwd', 'password', 'passwords', 'pwd', 'pass', 'passphrase',
+  'credential', 'credentials', 'session', 'signature',
+]);
+
+const SENSITIVE_PARAM_PATTERN =
+  /^(?:api|secret|access|app|client|user|auth|private)?(?:key|token|secret|password|pwd)$/i;
+const SENSITIVE_TOKEN_SUFFIX_PATTERN =
+  /^(?:access|refresh|id|csrf|xsrf|session)?token$/i;
+const SENSITIVE_PASS_PATTERN =
+  /^(?:pass(word|wd)?|pwd)$/i;
+
+/**
+ * Checks whether a query parameter name represents sensitive credential data
+ * (API keys, secrets, tokens, passwords, sessions) while avoiding false positives
+ * on harmless names like keyword, author, passenger, compass, or bypass.
+ */
+export function isSensitiveParamName(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (SENSITIVE_PARAM_NAMES.has(lower)) return true;
+
+  const tokens = name
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/);
+
+  for (const t of tokens) {
+    if (SENSITIVE_PARAM_WORD_TOKENS.has(t)) return true;
+  }
+
+  if (
+    SENSITIVE_PARAM_PATTERN.test(lower) ||
+    SENSITIVE_TOKEN_SUFFIX_PATTERN.test(lower) ||
+    SENSITIVE_PASS_PATTERN.test(lower)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Redacts common sensitive query parameters and sensitive URL path tokens
  * to prevent credentials, API keys, and session tokens from being persisted in storage or displayed in the UI.
@@ -273,15 +316,7 @@ export function redactUrlQueryParams(rawUrl: string): string {
     const url = new URL(rawUrl);
     url.pathname = redactUrlPath(url.pathname);
     for (const key of Array.from(url.searchParams.keys())) {
-      const lower = key.toLowerCase();
-      if (
-        SENSITIVE_PARAM_NAMES.has(lower) ||
-        lower.includes('token') ||
-        lower.includes('secret') ||
-        lower.includes('auth') ||
-        lower.includes('key') ||
-        lower.includes('pass')
-      ) {
+      if (isSensitiveParamName(key)) {
         url.searchParams.set(key, '[redacted]');
       }
     }

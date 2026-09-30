@@ -1,0 +1,15 @@
+# Normalize line endings to LF across repository
+* text=auto eol=lf
+
+# Declare explicit binary file extensions
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary

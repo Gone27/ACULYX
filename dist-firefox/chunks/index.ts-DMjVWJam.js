@@ -220,7 +220,10 @@ var SENSITIVE_PARAM_NAMES = /* @__PURE__ */ new Set([
 	"signature",
 	"code",
 	"ticket",
-	"credential"
+	"credential",
+	"pass",
+	"passphrase",
+	"user_pass"
 ]);
 var SENSITIVE_PATH_KEYWORDS = /* @__PURE__ */ new Set([
 	"reset",
@@ -309,6 +312,44 @@ function redactUrlPath(pathname) {
 	}
 	return segments.join("/");
 }
+var SENSITIVE_PARAM_WORD_TOKENS = /* @__PURE__ */ new Set([
+	"token",
+	"tokens",
+	"secret",
+	"secrets",
+	"key",
+	"keys",
+	"apikey",
+	"apikeys",
+	"auth",
+	"oauth",
+	"passwd",
+	"password",
+	"passwords",
+	"pwd",
+	"pass",
+	"passphrase",
+	"credential",
+	"credentials",
+	"session",
+	"signature"
+]);
+var SENSITIVE_PARAM_PATTERN = /^(?:api|secret|access|app|client|user|auth|private)?(?:key|token|secret|password|pwd)$/i;
+var SENSITIVE_TOKEN_SUFFIX_PATTERN = /^(?:access|refresh|id|csrf|xsrf|session)?token$/i;
+var SENSITIVE_PASS_PATTERN = /^(?:pass(word|wd)?|pwd)$/i;
+/**
+* Checks whether a query parameter name represents sensitive credential data
+* (API keys, secrets, tokens, passwords, sessions) while avoiding false positives
+* on harmless names like keyword, author, passenger, compass, or bypass.
+*/
+function isSensitiveParamName(name) {
+	const lower = name.toLowerCase();
+	if (SENSITIVE_PARAM_NAMES.has(lower)) return true;
+	const tokens = name.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
+	for (const t of tokens) if (SENSITIVE_PARAM_WORD_TOKENS.has(t)) return true;
+	if (SENSITIVE_PARAM_PATTERN.test(lower) || SENSITIVE_TOKEN_SUFFIX_PATTERN.test(lower) || SENSITIVE_PASS_PATTERN.test(lower)) return true;
+	return false;
+}
 /**
 * Redacts common sensitive query parameters and sensitive URL path tokens
 * to prevent credentials, API keys, and session tokens from being persisted in storage or displayed in the UI.
@@ -317,10 +358,7 @@ function redactUrlQueryParams(rawUrl) {
 	try {
 		const url = new URL(rawUrl);
 		url.pathname = redactUrlPath(url.pathname);
-		for (const key of Array.from(url.searchParams.keys())) {
-			const lower = key.toLowerCase();
-			if (SENSITIVE_PARAM_NAMES.has(lower) || lower.includes("token") || lower.includes("secret") || lower.includes("auth") || lower.includes("key") || lower.includes("pass")) url.searchParams.set(key, "[redacted]");
-		}
+		for (const key of Array.from(url.searchParams.keys())) if (isSensitiveParamName(key)) url.searchParams.set(key, "[redacted]");
 		return url.href;
 	} catch {
 		return rawUrl;
@@ -4273,4 +4311,4 @@ chrome.storage.local.onChanged.addListener((changes) => {
 })();
 //#endregion
 
-//# sourceMappingURL=index.ts-C8jVf4DE.js.map
+//# sourceMappingURL=index.ts-DMjVWJam.js.map
