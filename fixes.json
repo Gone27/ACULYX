@@ -326,6 +326,11 @@
       "summary": "Fix CSP syntax or nonce issues.",
       "snippet": "Content-Security-Policy: default-src 'self'",
       "note": "Review CSP syntax."
+    },
+    "CSP-META-001": {
+      "summary": "Move CSP from a <meta> tag to a Content-Security-Policy HTTP response header.",
+      "recommendation": "Move the CSP policy from a <meta> tag to a Content-Security-Policy HTTP response header. The HTTP header provides broader enforcement (navigation, workers, plugins) and should be the primary delivery mechanism. Keep the meta tag as a supplementary signal only.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#meta"
     }
   }
 }

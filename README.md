@@ -8,7 +8,7 @@ Since analysis observes the browser's own responses, it can inspect pages you re
 
 - **Live In-Browser Analysis**: Audits headers and cookies in real-time as you navigate. Inspects authenticated pages locally without requiring external crawls or bypassing authentication.
 - **Two-Stage Redirect Tracking**: Captures headers before and after browser processing to detect internal HSTS upgrades and redirect degradation (headers present on one hop but dropped on the next).
-- **Cookie Jar Correlation (Phase 2)**: Matches `Set-Cookie` response headers with the live browser cookie jar to detect JS-set cookies, CHIPS (partitioning), and persistence issues, without ever storing sensitive cookie values.
+- **Cookie Jar Correlation (Phase 2)**: Correlates `Set-Cookie` response headers with the live browser cookie jar. Cookies present in the jar but absent from the current response's headers are marked as **unknown origin** (possibly JS-set or set by a prior navigation). Also detects CHIPS (partitioning) and persistence issues, without ever storing sensitive cookie values.
 - **Cookie Name Overrides**: Customise sensitive/ignored cookie heuristics via the extension's options page.
 - **Scoring & Historical Trends**: Computes a strict A-F grade with penalties based on a versioned weighting model. Tracks per-origin score trends over time in a local graphical timeline.
 - **CLI & CI Integrations**: Export findings to JSON, Markdown, or GitHub-compatible SARIF 2.1.0 formats. Supports offline HAR file analysis and CI severity thresholds (`--fail-on high`).
@@ -34,10 +34,11 @@ The engine evaluates responses against over a dozen targeted security rules. Key
 - **Subresource Integrity (SRI)**: Verifies that `<script>` and `<link rel="stylesheet">` tags in the HTML payload use `integrity` attributes.
 ## Privacy
 
-- Cookie **values are never stored, displayed, or exported** — only attributes (name, flags, domain, path, expiry)
+- Cookie values are not accessed, persisted, displayed, or exported by this extension. Chrome's `cookies.getAll()` API returns cookie objects that include a `value` property; this extension reads only metadata fields and never accesses `cookie.value`.
 - The extension manifest declares `connect-src 'none'` in its Content Security Policy, making outbound network requests from extension pages impossible (and easily verifiable in the source).
 - No remote code, no analytics, no telemetry
 - All storage is local: `chrome.storage.session` for live tab state, `chrome.storage.local` for settings
+- **CLI network contact**: The CLI `--url` mode intentionally contacts the target URL to fetch headers. This is the only operation that sends a network request outside the browser.
 
 ## Permissions
 

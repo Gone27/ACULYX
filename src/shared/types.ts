@@ -147,6 +147,12 @@ export interface CoverageInfo {
   isRestricted: boolean;
   /** A <meta http-equiv="Content-Security-Policy"> was found by content script. */
   metaCspFound: boolean;
+  /**
+   * The actual policy strings extracted from meta CSP tags (in document order).
+   * The browser applies ALL of them simultaneously (intersection semantics).
+   * Populated when metaCspFound is true.
+   */
+  metaCspPolicies?: string[];
 }
 
 // ─── Tab state ────────────────────────────────────────────────────────────────

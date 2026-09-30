@@ -12,22 +12,37 @@ export function reportPageSignals(): void {
     serviceWorkerUrl: controller?.scriptURL ?? null,
   }).catch(() => undefined);
 
-  function containsMetaCsp(): boolean {
-    return Array.from(document.querySelectorAll('meta[http-equiv]')).some(
-      (meta) => meta.getAttribute('http-equiv')?.trim().toLowerCase() === 'content-security-policy'
-        && (meta.getAttribute('content')?.trim().length ?? 0) > 0,
-    );
+  // ── Meta CSP ──────────────────────────────────────────────────────────────
+  // Collect all <meta http-equiv="Content-Security-Policy"> policies in document
+  // order. The browser intersects multiple policies (most-restrictive per directive).
+  // We send the full list so the background can run csp_evaluator on each policy.
+  function getMetaCspPolicies(): string[] {
+    const policies: string[] = [];
+    for (const meta of Array.from(document.querySelectorAll('meta[http-equiv]'))) {
+      if (meta.getAttribute('http-equiv')?.trim().toLowerCase() === 'content-security-policy') {
+        const content = meta.getAttribute('content')?.trim();
+        if (content !== undefined && content.length > 0) {
+          policies.push(content);
+        }
+      }
+    }
+    return policies;
   }
 
   function reportMetaCsp(): void {
-    void chrome.runtime.sendMessage({ type: 'META_CSP_FOUND' }).catch(() => undefined);
+    const policies = getMetaCspPolicies();
+    if (policies.length === 0) return;
+    void chrome.runtime.sendMessage({
+      type: 'META_CSP_FOUND',
+      policies, // full policy strings — NOT injected into DOM, sent over runtime message
+    }).catch(() => undefined);
   }
 
-  if (containsMetaCsp()) {
+  if (getMetaCspPolicies().length > 0) {
     reportMetaCsp();
   } else {
     const observer = new MutationObserver(() => {
-      if (containsMetaCsp()) {
+      if (getMetaCspPolicies().length > 0) {
         reportMetaCsp();
         observer.disconnect();
       }
@@ -35,6 +50,11 @@ export function reportPageSignals(): void {
     observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['http-equiv', 'content'] });
   }
 
+  // ── SRI scan ──────────────────────────────────────────────────────────────
+  // Scans current DOM for external <script src> and <link stylesheet href>
+  // that lack integrity= attributes. NOTE: this audits only elements present
+  // at scan time; dynamically injected subresources after this point may not
+  // be captured. The observer below re-runs on DOM mutations to catch SPAs.
   function reportSri(): void {
     const externalScripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'))
       .filter((script) => {

@@ -463,8 +463,32 @@ chrome.runtime.onMessage.addListener(
       if (senderTabId !== undefined) {
         pendingMetaCspReports.add(senderTabId);
         const state = tabStates.get(senderTabId);
-        if (state && !state.coverage.metaCspFound) {
+        if (state) {
           state.coverage.metaCspFound = true;
+          // Store the policy strings so the popup can display them and
+          // so we can run csp_evaluator on them separately from the header CSP.
+          if (message.policies !== undefined && message.policies.length > 0) {
+            state.coverage.metaCspPolicies = message.policies;
+            // Generate meta-CSP findings if the page has no header CSP
+            // (meta-CSP cannot restrict navigation or workers, unlike header CSP).
+            const hasHeaderCsp = state.hops.at(-1)?.headers['content-security-policy'] !== undefined;
+            if (!hasHeaderCsp) {
+              // Record an informational finding that the policy is via meta tag only
+              const existing = state.captureFindings ?? [];
+              if (!existing.some((f) => f.ruleId === 'CSP-META-001')) {
+                (state.captureFindings ?? (state.captureFindings = [])).push({
+                  ruleId: 'CSP-META-001',
+                  category: 'header',
+                  severity: 'info',
+                  title: 'CSP delivered via <meta> tag, not HTTP header',
+                  impact: 'Meta-tag CSP cannot restrict navigation, workers, or plugin content. HTTP header CSP provides broader enforcement.',
+                  evidence: `${message.policies.length} meta-CSP policy/policies found`,
+                  recommendation: 'Prefer Content-Security-Policy HTTP response header; keep the meta tag as a fallback only.',
+                  reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#meta',
+                });
+              }
+            }
+          }
           recomputeTabState(senderTabId, state);
         }
       }

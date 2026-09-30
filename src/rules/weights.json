@@ -294,6 +294,10 @@
     "DEP-012": {
       "penalty": 1,
       "rationale": "Legacy Internet Explorer download header remains configured"
+    },
+    "CSP-META-001": {
+      "penalty": 0,
+      "rationale": "Meta-tag CSP is informational: documents a real limitation without penalising the security score."
     }
   }
 }

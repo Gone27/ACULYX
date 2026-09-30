@@ -37,6 +37,8 @@ export interface ServiceWorkerStatusMessage {
 
 export interface MetaCspFoundMessage {
   type: 'META_CSP_FOUND';
+  /** Raw CSP policy strings found in <meta http-equiv="Content-Security-Policy"> tags. */
+  policies?: string[];
 }
 
 export interface SriScanMessage {
