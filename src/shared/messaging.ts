@@ -51,6 +51,30 @@ export interface SriScanMessage {
   missingStyleIntegrity?: number;
 }
 
+export interface RequestGraphMessage {
+  type: 'REQUEST_GRAPH';
+  apexDomain: string;
+  tabId?: number;
+}
+
+export interface GraphResponseMessage {
+  type: 'GRAPH_RESPONSE';
+  graph: import('./types').AttackSurfaceGraph;
+}
+
+export interface GeneratePocMessage {
+  type: 'GENERATE_POC';
+  tabId: number;
+  pocType: 'clickjacking' | 'coop';
+}
+
+export interface GeneratePocResponse {
+  type: 'GENERATE_POC_RESPONSE';
+  success: boolean;
+  error?: string;
+  url?: string;
+}
+
 /** All messages that cross the service worker ↔ UI boundary. */
 export type ExtensionMessage =
   | TabStateUpdateMessage
@@ -60,7 +84,11 @@ export type ExtensionMessage =
   | SettingsChangedMessage
   | ServiceWorkerStatusMessage
   | MetaCspFoundMessage
-  | SriScanMessage;
+  | SriScanMessage
+  | RequestGraphMessage
+  | GraphResponseMessage
+  | GeneratePocMessage
+  | GeneratePocResponse;
 
 // ─── Port registry ────────────────────────────────────────────────────────────
 

@@ -26,6 +26,7 @@ let allowlistEmptyMsg: HTMLParagraphElement;
 let saveBtn: HTMLButtonElement;
 let saveStatus: HTMLSpanElement;
 let sectionAllowlist: HTMLElement;
+let proModeToggle: HTMLInputElement;
 
 /**
  * In-memory working copy of the allowedOrigins array.
@@ -49,6 +50,7 @@ alwaysIgnoreInput  = getEl<HTMLTextAreaElement>('always-ignore');
   saveBtn              = getEl<HTMLButtonElement>('save-btn');
   saveStatus           = getEl<HTMLSpanElement>('save-status');
   sectionAllowlist     = getEl<HTMLElement>('section-allowlist');
+  proModeToggle        = getEl<HTMLInputElement>('pro-mode-toggle');
 
   wireModeRadios();
   wireSaveButton();
@@ -84,6 +86,7 @@ async function loadAndPopulate(): Promise<void> {
   retainDaysInput.value = String(settings.retainHistoryDays);
   alwaysSensitiveInput.value = settings.alwaysSensitiveCookies.join(', ');
   alwaysIgnoreInput.value = settings.alwaysIgnoreCookies.join(', ');
+  proModeToggle.checked = Boolean(settings.isPro);
 
   // ── Allowlist ────────────────────────────────────────────────
   workingOrigins = [...settings.allowedOrigins];
@@ -165,6 +168,7 @@ function readFormValues(): Settings {
     retainHistoryDays,
     alwaysSensitiveCookies,
     alwaysIgnoreCookies,
+    isPro: proModeToggle.checked,
   };
 }
 

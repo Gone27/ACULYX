@@ -21,6 +21,9 @@ import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
 import { runRules, runApiRules } from '../rules/engine';
 import { extractSetCookieHeaders, originFromUrl } from '../rules/utils';
+import { checkAuthTransition, type AuthBaseline } from '../rules/auth-diff';
+import { discoverNodes, mergeIntoGraph } from '../rules/graph-discovery';
+import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { SessionStorage, LocalStorage } from '../shared/storage';
 import { PortRegistry, portSend } from '../shared/messaging';
 import {
@@ -55,6 +58,7 @@ const pendingServiceWorkerReports = new Map<number, {
   serviceWorkerUrl: string | null;
 }>();
 const pendingMetaCspReports = new Set<number>();
+const originAuthBaselines = new Map<string, AuthBaseline>();
 
 let currentSettings: Settings = DEFAULT_SETTINGS;
 LocalStorage.getSettings().then((s) => { currentSettings = s; }).catch(() => {});
@@ -93,6 +97,46 @@ function recomputeTabState(tabId: number, state: TabState): void {
       score: state.score,
       grade: state.grade,
     });
+
+    // Pre-login vs. post-login posture diff
+    const baseline = originAuthBaselines.get(state.origin);
+    const { isAuthEvent, record, newBaseline } = checkAuthTransition(
+      state.origin,
+      baseline,
+      state.cookies,
+      state.findings,
+      state.score,
+      state.grade,
+      currentSettings.alwaysSensitiveCookies,
+      currentSettings.alwaysIgnoreCookies,
+    );
+    originAuthBaselines.set(state.origin, newBaseline);
+
+    if (isAuthEvent && record !== null) {
+      void LocalStorage.recordAuthDiff(state.origin, record);
+    }
+
+    // Accumulate attack surface graph
+    void (async () => {
+      try {
+        const u = new URL(state.origin);
+        const hostname = u.hostname;
+        const apex = registrableDomain(hostname) ?? hostname;
+        const discovered = discoverNodes(hostname, state.hops, state.cookies);
+        const existingGraph = await LocalStorage.getGraph(apex);
+        const updatedGraph = mergeIntoGraph(
+          existingGraph,
+          hostname,
+          state.score,
+          state.grade,
+          discovered,
+          Boolean(currentSettings.isPro),
+        );
+        await LocalStorage.saveGraph(updatedGraph);
+      } catch {
+        // Silently ignore graph merge errors
+      }
+    })();
   }
 
   setBadgeForTab(tabId, state.grade);
@@ -581,6 +625,86 @@ chrome.runtime.onMessage.addListener(
         recomputeTabState(senderTabId, state);
       }
       return false;
+    }
+
+    if (message.type === 'REQUEST_GRAPH') {
+      void (async () => {
+        try {
+          const apex = message.apexDomain;
+          const graph = await LocalStorage.getGraph(apex);
+          const isPro = Boolean(currentSettings.isPro);
+
+          if (!graph) {
+            sendResponse({
+              type: 'GRAPH_RESPONSE',
+              graph: {
+                apexDomain: apex,
+                nodes: [{ hostname: apex, isApex: true, lastSeen: Date.now(), discoveredVia: ['navigation'] }],
+                edges: [],
+                isPro,
+                lastUpdated: Date.now(),
+              },
+            });
+            return;
+          }
+
+          if (!isPro && message.tabId !== undefined) {
+            const tabState = tabStates.get(message.tabId);
+            const tabHost = tabState ? (originFromUrl(tabState.url) !== null ? new URL(tabState.origin).hostname : '') : '';
+            const filteredNodes = graph.nodes.filter((n) => n.isApex || n.hostname === tabHost);
+            const nodeHosts = new Set(filteredNodes.map((n) => n.hostname));
+            const filteredEdges = graph.edges.filter((e) => nodeHosts.has(e.source) && nodeHosts.has(e.target));
+            sendResponse({
+              type: 'GRAPH_RESPONSE',
+              graph: {
+                ...graph,
+                nodes: filteredNodes,
+                edges: filteredEdges,
+                isPro: false,
+              },
+            });
+            return;
+          }
+
+          sendResponse({
+            type: 'GRAPH_RESPONSE',
+            graph: { ...graph, isPro },
+          });
+        } catch {
+          // Send fallback on error
+        }
+      })();
+      return true;
+    }
+
+    if (message.type === 'GENERATE_POC') {
+      const state = tabStates.get(message.tabId);
+      if (!state || !state.monitoredByUser) {
+        sendResponse({
+          type: 'GENERATE_POC_RESPONSE',
+          success: false,
+          error: 'Site must be monitored before generating verification sandbox.',
+        });
+        return false;
+      }
+
+      const pocUrl = chrome.runtime.getURL('src/sandbox/poc.html') +
+        `?target=${encodeURIComponent(state.url)}&type=${encodeURIComponent(message.pocType)}`;
+
+      chrome.tabs.create({ url: pocUrl }).then(() => {
+        sendResponse({
+          type: 'GENERATE_POC_RESPONSE',
+          success: true,
+          url: pocUrl,
+        });
+      }).catch((err: Error) => {
+        sendResponse({
+          type: 'GENERATE_POC_RESPONSE',
+          success: false,
+          error: err.message,
+        });
+      });
+      return true;
     }
 
     return false;

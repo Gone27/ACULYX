@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecCheck — Attack Surface Graph</title>
+  <script type="module" crossorigin src="/chunks/sidepanel.html-CV8QRYXP.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-BMItIkAu.js">
+  <link rel="modulepreload" crossorigin href="/chunks/subdomain-trust-DrWlzpgv.js">
+  <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
+  <link rel="stylesheet" crossorigin href="/assets/sidepanel-CB-CKrYD.css">
+</head>
+<body>
+  <!-- Header bar -->
+  <header class="sidepanel-header" role="banner">
+    <div class="header-main">
+      <span class="sidepanel-title">Attack Surface Graph</span>
+      <span class="tier-badge" id="tier-badge">Free Tier</span>
+    </div>
+    <div class="header-actions">
+      <button class="icon-btn" id="refresh-btn" title="Refresh Graph" aria-label="Refresh Graph">🔄</button>
+      <a href="" id="options-link" class="icon-btn" title="Settings" aria-label="Settings">⚙</a>
+    </div>
+  </header>
+
+  <!-- Pro Upsell Banner (when on free tier) -->
+  <div class="pro-banner" id="pro-banner" hidden>
+    <div class="pro-banner-content">
+      <span class="pro-icon">⭐</span>
+      <div class="pro-text">
+        <strong>Free Tier View</strong>
+        <p id="pro-banner-text">Showing active host and apex node. Upgrade to Pro in Settings to explore the full accumulated attack surface graph.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apex and statistics summary bar -->
+  <div class="summary-bar">
+    <div class="summary-item">
+      <span class="summary-label">Apex Domain</span>
+      <span class="summary-val" id="apex-domain-val">—</span>
+    </div>
+    <div class="summary-item">
+      <span class="summary-label">Discovered Nodes</span>
+      <span class="summary-val" id="nodes-count-val">0</span>
+    </div>
+    <div class="summary-item">
+      <span class="summary-label">Trust Vectors</span>
+      <span class="summary-val" id="edges-count-val">0</span>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend-panel">
+    <div class="legend-group">
+      <span class="legend-title">Nodes:</span>
+      <span class="legend-item"><span class="legend-dot apex-dot"></span> Apex</span>
+      <span class="legend-item"><span class="legend-dot sub-dot"></span> Subdomain</span>
+    </div>
+    <div class="legend-group">
+      <span class="legend-title">Vectors:</span>
+      <span class="legend-item"><span class="legend-line cookie-line"></span> Cookie</span>
+      <span class="legend-item"><span class="legend-line csp-line"></span> CSP</span>
+      <span class="legend-item"><span class="legend-line cors-line"></span> CORS</span>
+    </div>
+  </div>
+
+  <!-- SVG Graph Canvas -->
+  <main class="graph-canvas-container" id="canvas-container">
+    <div class="graph-loading" id="graph-loading">Loading graph…</div>
+    <div class="graph-empty" id="graph-empty" hidden>
+      No attack surface nodes discovered yet for this domain. Browse pages on this origin to accumulate trust vectors.
+    </div>
+    <svg id="graph-svg" class="graph-svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Attack Surface Node Graph">
+      <g id="edges-group"></g>
+      <g id="nodes-group"></g>
+    </svg>
+  </main>
+
+  <!-- Selected Node Details Drawer -->
+  <section class="node-details" id="node-details" hidden>
+    <div class="node-details-header">
+      <h2 class="node-title" id="node-hostname">hostname</h2>
+      <button class="close-details-btn" id="close-details-btn" title="Close" aria-label="Close details">✕</button>
+    </div>
+    <div class="node-details-body">
+      <div class="detail-row">
+        <span class="detail-label">Role:</span>
+        <span class="detail-value" id="node-role">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Discovered Via:</span>
+        <span class="detail-value" id="node-discovered-via">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Security Grade:</span>
+        <span class="detail-value" id="node-grade">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Last Seen:</span>
+        <span class="detail-value" id="node-last-seen">—</span>
+      </div>
+    </div>
+  </section>
+
+</body>
+</html>

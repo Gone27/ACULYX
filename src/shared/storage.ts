@@ -104,6 +104,39 @@ export const LocalStorage = {
     await chrome.storage.local.set({ [key]: updated });
   },
 
+  async getAuthDiffHistory(origin: string): Promise<import('./types').AuthDiffRecord[]> {
+    if (!origin) return [];
+    const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
+    const result = await chrome.storage.local.get(key);
+    return (result[key] as import('./types').AuthDiffRecord[] | undefined) ?? [];
+  },
+
+  async getLatestAuthDiff(origin: string): Promise<import('./types').AuthDiffRecord | null> {
+    const list = await this.getAuthDiffHistory(origin);
+    return list.length > 0 ? (list[list.length - 1] ?? null) : null;
+  },
+
+  async recordAuthDiff(origin: string, diff: import('./types').AuthDiffRecord): Promise<void> {
+    if (!origin) return;
+    const history = await this.getAuthDiffHistory(origin);
+    const updated = [...history, diff].slice(-MAX_HISTORY_PER_ORIGIN);
+    const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
+    await chrome.storage.local.set({ [key]: updated });
+  },
+
+  async getGraph(apexDomain: string): Promise<import('./types').AttackSurfaceGraph | null> {
+    if (!apexDomain) return null;
+    const key = `${STORAGE_KEYS.GRAPH_PREFIX}${apexDomain}`;
+    const result = await chrome.storage.local.get(key);
+    return (result[key] as import('./types').AttackSurfaceGraph | undefined) ?? null;
+  },
+
+  async saveGraph(graph: import('./types').AttackSurfaceGraph): Promise<void> {
+    if (!graph.apexDomain) return;
+    const key = `${STORAGE_KEYS.GRAPH_PREFIX}${graph.apexDomain}`;
+    await chrome.storage.local.set({ [key]: graph });
+  },
+
   async isOnboardingDismissed(): Promise<boolean> {
     const result = await chrome.storage.local.get(STORAGE_KEYS.ONBOARDING_DISMISSED);
     return Boolean(result[STORAGE_KEYS.ONBOARDING_DISMISSED]);

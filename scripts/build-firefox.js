@@ -13,7 +13,10 @@ if (!fs.existsSync(distDir)) {
   process.exit(1);
 }
 
-// 1. Copy dist/ to dist-firefox/ recursively
+// 1. Clean and copy dist/ to dist-firefox/ recursively
+if (fs.existsSync(firefoxDistDir)) {
+  fs.rmSync(firefoxDistDir, { recursive: true, force: true });
+}
 fs.cpSync(distDir, firefoxDistDir, { recursive: true });
 
 // 2. Read compiled manifest
@@ -41,7 +44,7 @@ if (manifest.optional_host_permissions && !manifest.optional_permissions) {
 }
 
 delete manifest.minimum_chrome_version;
-if (manifest.side_panel && manifest.action) {
+if (manifest.side_panel && manifest.action && !manifest.action.default_popup) {
   manifest.action.default_popup = manifest.side_panel.default_path;
 }
 delete manifest.side_panel;

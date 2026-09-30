@@ -205,8 +205,6 @@ export interface TabState {
   updatedAt: number;
 }
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
 export interface Settings {
   monitoringMode: MonitoringMode;
   /** Effective when monitoringMode === 'per-site'. */
@@ -215,6 +213,7 @@ export interface Settings {
   retainHistoryDays: number;
   alwaysSensitiveCookies: string[];
   alwaysIgnoreCookies: string[];
+  isPro?: boolean;
 }
 
 export interface ApiHop {
@@ -237,4 +236,60 @@ export interface ApiEndpointState {
   lastHop: ApiHop;
   findings: Finding[];
   isFirstParty: boolean;
+}
+
+// ─── Posture diff (Pre-login vs. Post-login) ──────────────────────────────────
+
+export interface AuthDiffFindingChange {
+  ruleId: string;
+  title: string;
+  severity: Severity;
+  type: 'added' | 'removed';
+}
+
+export interface AuthDiffRecord {
+  origin: string;
+  timestamp: number;
+  triggeredByCookie: string;
+  preAuthScore: number;
+  postAuthScore: number;
+  scoreDelta: number;
+  preAuthGrade: Grade;
+  postAuthGrade: Grade;
+  preAuthFindings: Finding[];
+  postAuthFindings: Finding[];
+  changes: AuthDiffFindingChange[];
+}
+
+// ─── Attack Surface Graph ─────────────────────────────────────────────────────
+
+export type DiscoveredVia = 'csp' | 'cookie' | 'cors' | 'navigation';
+
+export interface DiscoveredNode {
+  hostname: string;
+  discoveredVia: DiscoveredVia;
+}
+
+export interface GraphNode {
+  hostname: string;
+  isApex: boolean;
+  score?: number;
+  grade?: Grade;
+  lastSeen: number;
+  discoveredVia: DiscoveredVia[];
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: 'cookie' | 'csp' | 'cors' | 'frame';
+  severity: Severity;
+}
+
+export interface AttackSurfaceGraph {
+  apexDomain: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  isPro: boolean;
+  lastUpdated: number;
 }

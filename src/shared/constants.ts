@@ -65,6 +65,8 @@ export const STORAGE_KEYS = {
   SETTINGS: 'settings',
   TAB_PREFIX: 'tab:',
   HISTORY_PREFIX: 'hist:',
+  AUTH_DIFF_PREFIX: 'authdiff:',
+  GRAPH_PREFIX: 'graph:',
   ONBOARDING_DISMISSED: 'onboarding_dismissed',
 } as const;
 
@@ -94,5 +96,6 @@ export const DEFAULT_SETTINGS: Settings = {
   retainHistoryDays: 7,
   alwaysSensitiveCookies: [],
   alwaysIgnoreCookies: [],
+  isPro: false,
 };
 

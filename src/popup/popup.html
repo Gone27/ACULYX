@@ -89,6 +89,17 @@
     </table>
   </details>
 
+  <!-- Auth Posture Diff (pre-login vs post-login) -->
+  <details class="auth-diff-section" id="auth-diff-section" hidden>
+    <summary class="auth-diff-summary" id="auth-diff-summary">
+      Posture after login: <span id="auth-diff-delta" class="auth-diff-delta">0 pts</span>
+    </summary>
+    <div class="auth-diff-content">
+      <div class="auth-diff-meta" id="auth-diff-meta"></div>
+      <ul class="auth-diff-list" id="auth-diff-list" role="list"></ul>
+    </div>
+  </details>
+
   <!-- E: Subdomain Trust Analysis (collapsible) -->
   <details class="subdomain-section" id="subdomain-section" hidden>
     <summary class="subdomain-summary">
@@ -100,6 +111,7 @@
       <desc id="trust-graph-description">Spokes connect the analyzed page to each subdomain trust vector.</desc>
     </svg>
     <ul class="vector-list" id="vector-list" role="list"></ul>
+    <button class="open-graph-btn" id="open-graph-btn" type="button">Open Attack Surface Graph (Side Panel) →</button>
   </details>
 
   <!-- API endpoints (collapsible) -->

@@ -58,6 +58,11 @@ let trendIndicator:      HTMLDivElement;     // 3. Trend over time
 let trendChart:          SVGSVGElement;
 let trendText:           HTMLSpanElement;
 let specialNotice:       HTMLDivElement;     // 8. Graceful edge cases
+let authDiffSection:     HTMLDetailsElement;
+let authDiffDelta:       HTMLSpanElement;
+let authDiffMeta:        HTMLDivElement;
+let authDiffList:        HTMLUListElement;
+let openGraphBtn:        HTMLButtonElement;
 
 /** The tab ID currently being inspected by the popup. */
 let currentTabId: number | null = null;
@@ -102,12 +107,18 @@ document.addEventListener('DOMContentLoaded', () => {
   trendChart          = getEl<SVGSVGElement>('trend-chart');
   trendText           = getEl<HTMLSpanElement>('trend-text');
   specialNotice       = getEl<HTMLDivElement>('special-notice');
+  authDiffSection     = getEl<HTMLDetailsElement>('auth-diff-section');
+  authDiffDelta       = getEl<HTMLSpanElement>('auth-diff-delta');
+  authDiffMeta        = getEl<HTMLDivElement>('auth-diff-meta');
+  authDiffList        = getEl<HTMLUListElement>('auth-diff-list');
+  openGraphBtn        = getEl<HTMLButtonElement>('open-graph-btn');
 
   wireSettingsLink();
   wireMonitorButton();
   wireStopMonitoringButton(); // C
   wireExportButton();         // D
   wireCopyReportButton();     // Markdown export
+  wireOpenGraphButton();
   void initOnboarding();
   void initPopup();
 });
@@ -249,6 +260,9 @@ function renderState(state: TabState): void {
   // B: Score breakdown
   renderBreakdown(state.scoreBreakdown);
 
+  // Auth Posture Diff
+  void renderAuthDiff(state.origin);
+
   // E: Subdomain trust analysis
   renderSubdomainTrust(state.subdomainTrust);
 
@@ -366,6 +380,41 @@ function buildFindingItem(finding: Finding): HTMLLIElement {
   }
 
   body.appendChild(referenceLink);
+
+  if (finding.ruleId === 'XFO-001' || finding.ruleId === 'CSP-005') {
+    const pocBtn = document.createElement('button');
+    pocBtn.className = 'sandbox-poc-btn';
+    pocBtn.textContent = '🧪 Clickjacking PoC';
+    pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
+    pocBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (currentTabId !== null) {
+        void sendToBackground({
+          type: 'GENERATE_POC',
+          tabId: currentTabId,
+          pocType: 'clickjacking',
+        });
+      }
+    });
+    body.appendChild(pocBtn);
+  } else if (finding.ruleId === 'SUB-006') {
+    const pocBtn = document.createElement('button');
+    pocBtn.className = 'sandbox-poc-btn';
+    pocBtn.textContent = '🧪 COOP PoC';
+    pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
+    pocBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (currentTabId !== null) {
+        void sendToBackground({
+          type: 'GENERATE_POC',
+          tabId: currentTabId,
+          pocType: 'coop',
+        });
+      }
+    });
+    body.appendChild(pocBtn);
+  }
+
   li.appendChild(severitySpan);
   li.appendChild(body);
 
@@ -410,6 +459,67 @@ function renderBreakdown(breakdown: ScoreBreakdown[]): void {
   }
 
   breakdownSection.hidden = false;
+}
+
+/* ── Auth Posture Diff ────────────────────────────────────────── */
+
+async function renderAuthDiff(origin: string): Promise<void> {
+  try {
+    const diff = await LocalStorage.getLatestAuthDiff(origin);
+    if (diff === null) {
+      authDiffSection.hidden = true;
+      return;
+    }
+
+    const deltaPrefix = diff.scoreDelta > 0 ? '+' : '';
+    authDiffDelta.textContent = `${deltaPrefix}${diff.scoreDelta} pts`;
+    const deltaClass =
+      diff.scoreDelta > 0 ? 'positive' : diff.scoreDelta < 0 ? 'negative' : 'neutral';
+    authDiffDelta.className = `auth-diff-delta ${deltaClass}`;
+
+    const dateStr = new Date(diff.timestamp).toLocaleTimeString();
+    authDiffMeta.textContent = `Triggered by cookie "${diff.triggeredByCookie}" at ${dateStr} • Pre: ${diff.preAuthScore} (${diff.preAuthGrade}) → Post: ${diff.postAuthScore} (${diff.postAuthGrade})`;
+
+    while (authDiffList.firstChild) {
+      authDiffList.removeChild(authDiffList.firstChild);
+    }
+
+    if (diff.changes.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'auth-diff-item';
+      const text = document.createElement('span');
+      text.className = 'auth-diff-title';
+      text.textContent = 'No finding status changes detected between pre- and post-login.';
+      li.appendChild(text);
+      authDiffList.appendChild(li);
+    } else {
+      for (const change of diff.changes) {
+        const li = document.createElement('li');
+        li.className = 'auth-diff-item';
+
+        const badge = document.createElement('span');
+        badge.className = `auth-diff-badge ${change.type}`;
+        badge.textContent = change.type === 'added' ? '+ NEW' : '- RESOLVED';
+
+        const rule = document.createElement('span');
+        rule.className = 'auth-diff-rule';
+        rule.textContent = change.ruleId;
+
+        const title = document.createElement('span');
+        title.className = 'auth-diff-title';
+        title.textContent = change.title;
+
+        li.appendChild(badge);
+        li.appendChild(rule);
+        li.appendChild(title);
+        authDiffList.appendChild(li);
+      }
+    }
+
+    authDiffSection.hidden = false;
+  } catch {
+    authDiffSection.hidden = true;
+  }
 }
 
 /* ── E: Subdomain trust analysis ──────────────────────────────── */
@@ -869,6 +979,28 @@ function wireCopyReportButton(): void {
     }).catch(() => {
       copyReportBtn.textContent = 'Failed to copy';
     });
+  });
+}
+
+function wireOpenGraphButton(): void {
+  openGraphBtn.addEventListener('click', () => {
+    if (chrome.sidePanel !== undefined && typeof chrome.sidePanel.open === 'function') {
+      if (currentTabId !== null) {
+        chrome.sidePanel.open({ tabId: currentTabId }).catch(() => {
+          chrome.windows.getCurrent((win) => {
+            if (win.id !== undefined && chrome.sidePanel !== undefined) {
+              chrome.sidePanel.open({ windowId: win.id }).catch(() => undefined);
+            }
+          });
+        });
+      } else {
+        chrome.windows.getCurrent((win) => {
+          if (win.id !== undefined && chrome.sidePanel !== undefined) {
+            chrome.sidePanel.open({ windowId: win.id }).catch(() => undefined);
+          }
+        });
+      }
+    }
   });
 }
 

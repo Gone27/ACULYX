@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecCheck — Client-Side Verification Sandbox</title>
+  <link rel="stylesheet" href="poc.css">
+</head>
+<body>
+  <!-- Top Ethical Disclaimer Banner -->
+  <header class="disclaimer-banner" role="banner">
+    <div class="disclaimer-content">
+      <span class="disclaimer-icon">⚠️</span>
+      <div class="disclaimer-text">
+        <strong>ETHICAL SECURITY VERIFICATION ENVIRONMENT</strong>
+        <p>This sandboxed page demonstrates defensive vulnerability verification for sites you are authorized to test. Unauthorized testing against third-party systems is prohibited.</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Authorization Gate Modal (First-use confirmation) -->
+  <div class="gate-overlay" id="gate-overlay" hidden>
+    <div class="gate-modal" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+      <h2 id="gate-title">🛡️ Authorization Required</h2>
+      <p class="gate-intro">
+        Before generating client-side security proofs, you must confirm that you have explicit authorization to assess the target web application.
+      </p>
+      <div class="gate-conditions">
+        <label class="gate-checkbox-label">
+          <input type="checkbox" id="gate-agree-checkbox">
+          <span>I certify that I am the owner or an authorized evaluator of the target application, and will use these proofs strictly for defensive verification and remediation.</span>
+        </label>
+      </div>
+      <div class="gate-actions">
+        <button class="btn-primary" id="gate-proceed-btn" disabled>Proceed to Sandbox</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="sandbox-container">
+    <!-- Target Overview Header -->
+    <div class="target-card">
+      <div class="target-meta">
+        <span class="target-badge" id="poc-type-badge">Verification</span>
+        <h1 class="target-title">Target: <span id="target-url-display" class="target-url">Loading…</span></h1>
+      </div>
+      <div class="poc-tabs">
+        <button class="tab-btn active" id="tab-clickjacking" data-tab="clickjacking">Clickjacking Demo</button>
+        <button class="tab-btn" id="tab-coop" data-tab="coop">COOP Reverse-Tabnabbing Demo</button>
+      </div>
+    </div>
+
+    <!-- Section 1: Clickjacking Demo -->
+    <section class="poc-section" id="section-clickjacking">
+      <div class="controls-panel">
+        <div class="control-group">
+          <label for="opacity-slider">Target Frame Opacity: <span id="opacity-val">50%</span></label>
+          <input type="range" id="opacity-slider" min="0" max="100" value="50" step="5">
+          <span class="control-hint">0% simulates invisible attacker overlay; 100% shows target site directly.</span>
+        </div>
+        <div class="frame-status-box" id="frame-status">
+          <span class="status-indicator">●</span> <span id="frame-status-text">Attempting to load target in iframe…</span>
+        </div>
+      </div>
+
+      <!-- Clickjacking Stage -->
+      <div class="stage-container">
+        <!-- Decoy attacker element underneath or overlayed -->
+        <div class="decoy-layer">
+          <div class="decoy-card">
+            <h3>🎁 Verification Simulation Decoy</h3>
+            <p>Click below to verify framing behavior. If the target has no framing protection, it can be framed seamlessly beneath transparent decoy buttons.</p>
+            <button class="decoy-action-btn" id="decoy-btn">Claim Reward / Confirm Action</button>
+            <div id="decoy-click-counter" class="decoy-feedback">Clicks registered on decoy: 0</div>
+          </div>
+        </div>
+
+        <!-- Target iframe overlay -->
+        <div class="frame-wrapper" id="frame-wrapper">
+          <iframe id="target-iframe" sandbox="allow-scripts allow-forms allow-same-origin" title="Target Verification Frame"></iframe>
+        </div>
+      </div>
+
+      <!-- Remediation Box -->
+      <div class="remediation-box">
+        <h3>🛡️ Defensive Remediation: Framing Protection</h3>
+        <p>To defend against clickjacking (UI redressing), enforce one or both of:</p>
+        <pre><code>Content-Security-Policy: frame-ancestors 'none';
+X-Frame-Options: DENY</code></pre>
+        <p>If the target requires framing by specific partners, use: <code>frame-ancestors 'self' https://partner.example.com;</code></p>
+      </div>
+    </section>
+
+    <!-- Section 2: COOP Demo -->
+    <section class="poc-section" id="section-coop" hidden>
+      <div class="controls-panel">
+        <p class="coop-intro">
+          When <code>Cross-Origin-Opener-Policy (COOP)</code> is missing or not set to <code>same-origin</code>, an external site opening your application retains access to the <code>window.opener</code> object reference.
+        </p>
+        <div class="coop-actions">
+          <button class="btn-primary" id="coop-launch-btn">1. Launch Target with Opener Reference</button>
+          <button class="btn-secondary" id="coop-test-btn" disabled>2. Test Opener Coupling</button>
+        </div>
+        <div class="coop-status-box" id="coop-status">
+          <span id="coop-status-text">Click "Launch Target" above to begin context decoupling evaluation.</span>
+        </div>
+      </div>
+
+      <div class="coop-results-card" id="coop-results" hidden>
+        <h3>Cross-Origin Opener Evaluation Results</h3>
+        <div class="result-row">
+          <span class="result-label">Child Window State:</span>
+          <span id="coop-child-state" class="result-value">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Opener Coupling:</span>
+          <span id="coop-coupling-state" class="result-value">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Vulnerability Assessment:</span>
+          <span id="coop-vuln-assessment" class="result-value">—</span>
+        </div>
+      </div>
+
+      <!-- Remediation Box -->
+      <div class="remediation-box">
+        <h3>🛡️ Defensive Remediation: Opener Isolation</h3>
+        <p>Prevent reverse-tabnabbing and browsing context coupling by setting:</p>
+        <pre><code>Cross-Origin-Opener-Policy: same-origin</code></pre>
+        <p>This enforces process and browsing context group isolation, automatically nullifying <code>window.opener</code> for cross-origin navigation.</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="poc.ts"></script>
+</body>
+</html>
