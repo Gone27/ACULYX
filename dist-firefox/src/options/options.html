@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Settings</title>
-  <script type="module" crossorigin src="/chunks/options.html-UCuAEWfG.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-DaKOjhqt.js">
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-Dte0VQFD.js">
+  <script type="module" crossorigin src="/chunks/options.html-C3b5wsSZ.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-B3-Oxiul.js">
+  <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
   <link rel="stylesheet" crossorigin href="/assets/options-C1g1KjEu.css">
 </head>
 <body>
@@ -133,14 +133,14 @@
       <p class="section-desc">
         All analysis is performed <strong>entirely on your device</strong>. No header
         values, cookie names, URLs, or findings are ever transmitted to any server.
-        The extension has <code>connect-src 'none'</code> in its CSP — it is physically
-        incapable of making network requests.
+        The extension pages use <code>connect-src 'none'</code> in their CSP, so
+        the extension UI cannot make outbound network requests.
       </p>
       <p class="section-desc">
         Source code and issue tracker:
         <a
           id="github-link"
-          href="https://github.com/example/header-cookie-security-checker"
+          href="https://github.com/Gone27/Cookie-and-header-reader-extention"
           target="_blank"
           rel="noopener noreferrer"
           class="text-link"
@@ -160,3 +160,4 @@
   <!-- No inline scripts — CSP requires type="module" in separate file -->
 </body>
 </html>
+

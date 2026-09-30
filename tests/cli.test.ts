@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { buildCliReport, formatMarkdown, formatSarif, redactResponseHeaders, selectHarInput, shouldFail } from '../src/cli';
+import {
+  buildCliReport,
+  formatMarkdown,
+  formatSarif,
+  redactResponseHeaders,
+  selectHarInput,
+  shouldFail,
+  computeFindingFingerprint,
+  computeFindingDiff,
+  buildAuditBundle,
+} from '../src/cli';
 import fixes from '../fixes.json';
 import packageInfo from '../package.json';
 import weights from '../src/rules/weights.json';
@@ -125,5 +135,43 @@ describe('SecCheck CLI report', () => {
     expect(run?.tool.driver.rules.length).toBeGreaterThan(0);
     expect(run?.properties.qualityScore).toBe(report.qualityScore);
     expect(report.qualityScore).toBeLessThan(100);
+    expect(run?.results[0]).toHaveProperty('partialFingerprints');
+    expect(typeof (run?.results[0] as { partialFingerprints?: { primaryLocationLineHash?: string } })?.partialFingerprints?.primaryLocationLineHash).toBe('string');
+  });
+
+  it('computes stable SHA-256 fingerprints for findings', () => {
+    const report = buildCliReport({ url: 'https://example.com', headers: {} });
+    const finding = report.findings[0];
+    expect(finding).toBeDefined();
+    if (finding === undefined) return;
+    const fp1 = computeFindingFingerprint(finding, report.target);
+    const fp2 = computeFindingFingerprint(finding, report.target);
+    expect(fp1).toHaveLength(64);
+    expect(fp1).toBe(fp2);
+  });
+
+  it('detects regressions, fixes, and unchanged findings in diff mode', () => {
+    const baseline = buildCliReport({ url: 'https://example.com', headers: {} });
+    const improved = buildCliReport({
+      url: 'https://example.com',
+      headers: {
+        'strict-transport-security': 'max-age=31536000; includeSubDomains',
+      },
+    });
+
+    const diff = computeFindingDiff(baseline, improved);
+    expect(diff.fixes.some((f) => f.ruleId === 'HSTS-001')).toBe(true);
+    expect(diff.regressions.some((f) => f.ruleId === 'HSTS-005')).toBe(true);
+    expect(diff.currentScore).toBeGreaterThan(diff.baselineScore ?? 0);
+  });
+
+  it('generates an authenticated audit bundle with an integrity checksum', () => {
+    const report = buildCliReport({ url: 'https://example.com', headers: { 'x-frame-options': 'DENY' } });
+    const bundle = buildAuditBundle(report, { 'x-frame-options': 'DENY' });
+
+    expect(bundle.bundleVersion).toBe('1.0.0');
+    expect(bundle.target).toBe('https://example.com/');
+    expect(bundle.integrityHash).toHaveLength(64);
+    expect(bundle.redactedHeaders['x-frame-options']).toBe('DENY');
   });
 });

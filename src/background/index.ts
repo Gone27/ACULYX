@@ -79,6 +79,7 @@ function recomputeTabState(tabId: number, state: TabState): void {
   state.scoreBreakdown = result.breakdown;
   state.scoreVersion = result.scoreVersion;
   state.subdomainTrust = result.subdomainTrust;
+  state.coverage.blindSpots = computeBlindSpots(state.coverage);
   state.updatedAt = Date.now();
 
   tabStates.set(tabId, state);
@@ -122,6 +123,23 @@ function setBadgeForTab(tabId: number, grade: Grade | '?'): void {
   chrome.action.setBadgeBackgroundColor({ color, tabId }).catch(() => undefined);
 }
 
+function computeBlindSpots(coverage: CoverageInfo): string[] {
+  const spots: string[] = [];
+  if (coverage.isRestricted) {
+    spots.push('Restricted URL: browser security policy blocks inspection of internal browser pages.');
+  }
+  if (coverage.hasCache) {
+    spots.push('Cached response: headers reflect browser cache; live server headers may have evolved.');
+  }
+  if (coverage.hasServiceWorker) {
+    spots.push('Active Service Worker: responses may be generated or modified client-side without reaching origin server.');
+  }
+  if (coverage.hopsExpected > coverage.hopsCaptured) {
+    spots.push(`${coverage.hopsExpected - coverage.hopsCaptured} intermediate redirect hop(s) were missed during capture.`);
+  }
+  return spots;
+}
+
 // ---------------------------------------------------------------------------
 // Default TabState factory
 // ---------------------------------------------------------------------------
@@ -139,6 +157,8 @@ function createDefaultTabState(tabId: number, url: string): TabState {
     serviceWorkerUrl: serviceWorkerReport?.serviceWorkerUrl ?? null,
     isRestricted: isRestrictedUrl(url),
     metaCspFound: pendingMetaCspReports.has(tabId),
+    ledger: [],
+    blindSpots: [],
   };
 
   return {
@@ -225,6 +245,18 @@ async function onHopComplete(
   );
   state.coverage.hopsCaptured = state.hops.length;
   state.coverage.hasCache = state.coverage.hasCache || hop.fromCache;
+
+  const ledgerSource: 'network' | 'cache' | 'hsts-upgrade' = hop.fromCache
+    ? 'cache'
+    : (hop.isHstsUpgrade ? 'hsts-upgrade' : 'network');
+  (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+    type: hop.isHstsUpgrade ? 'redirect' : 'navigation',
+    url: hop.url,
+    source: ledgerSource,
+    status: hop.status,
+    timestamp: hop.timestamp,
+    notes: hop.headersDiffer ? 'Headers modified by extension' : undefined,
+  });
 
   // ------------------------------------------------------------------
   // 5. Correlate cookies.
@@ -452,6 +484,15 @@ chrome.runtime.onMessage.addListener(
           state.coverage.serviceWorkerStatus = report.status;
           state.coverage.serviceWorkerUrl = report.serviceWorkerUrl;
           state.coverage.hasServiceWorker = report.status === 'controlled';
+          if (report.status === 'controlled') {
+            (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+              type: 'service-worker',
+              url: report.serviceWorkerUrl ?? state.url,
+              source: 'service-worker',
+              timestamp: Date.now(),
+              notes: 'Page is controlled by active service worker',
+            });
+          }
           recomputeTabState(senderTabId, state);
         }
       }
@@ -469,6 +510,13 @@ chrome.runtime.onMessage.addListener(
           // so we can run csp_evaluator on them separately from the header CSP.
           if (message.policies !== undefined && message.policies.length > 0) {
             state.coverage.metaCspPolicies = message.policies;
+            (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+              type: 'subresource',
+              url: state.url,
+              source: 'dom',
+              timestamp: Date.now(),
+              notes: `${message.policies.length} <meta> CSP tag(s) detected in DOM`,
+            });
             // Generate meta-CSP findings if the page has no header CSP
             // (meta-CSP cannot restrict navigation or workers, unlike header CSP).
             const hasHeaderCsp = state.hops.at(-1)?.headers['content-security-policy'] !== undefined;
@@ -582,6 +630,15 @@ void (async (): Promise<void> => {
           state.apiEndpoints.delete(firstKey);
         }
       }
+
+      (state.coverage.ledger ?? (state.coverage.ledger = [])).push({
+        type: 'api',
+        url: apiHop.url,
+        source: apiHop.fromCache === true ? 'cache' : 'network',
+        status: apiHop.status,
+        timestamp: apiHop.timestamp ?? Date.now(),
+        notes: `${apiHop.method} ${apiHop.isThirdParty === true ? '(third-party)' : '(first-party)'}`,
+      });
 
       state.updatedAt = Date.now();
       void SessionStorage.setTabState(state);

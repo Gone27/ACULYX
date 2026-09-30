@@ -178,10 +178,32 @@ export function runRules(input: RuleInput): RuleOutput {
   );
   findings.push(...subdomainResult.findings);
 
-  const findingsWithSource = findings.map((finding) => ({
-    ...finding,
-    sourceUrl: finding.sourceUrl ?? finalHop.url,
-  }));
+  const heuristicRules = new Set([
+    'LEAK-001',
+    'CSP-009',
+    'CSP-008',
+    'CSP-META-001',
+    'SUB-001',
+    'SUB-002',
+    'SUB-003',
+    'SUB-004',
+    'SUB-005',
+    'SUB-006',
+    'SUB-007',
+    'SUB-008',
+  ]);
+
+  const findingsWithSource: Finding[] = findings.map((finding) => {
+    const isHeuristic =
+      heuristicRules.has(finding.ruleId) ||
+      finding.title.includes('(name-based heuristic)');
+    return {
+      ...finding,
+      sourceUrl: finding.sourceUrl ?? finalHop.url,
+      confidence:
+        finding.confidence ?? (isHeuristic ? 'heuristic' : 'deterministic'),
+    };
+  });
 
   // Compute the aggregate score and grade, taking caching into account.
   const { score, grade, qualityScore, qualityGrade, breakdown, scoreVersion } = computeScore(findingsWithSource, finalHop.fromCache);
@@ -219,10 +241,11 @@ export function runApiRules(
     cookieSettings?.alwaysIgnore
   ));
   
-  // Tag all findings with the specific API source URL
-  return findings.map(f => ({
+  // Tag all findings with the specific API source URL and confidence
+  return findings.map((f) => ({
     ...f,
-    sourceUrl: apiHop.url
+    sourceUrl: apiHop.url,
+    confidence: f.confidence ?? (f.ruleId === 'LEAK-001' ? 'heuristic' : 'deterministic'),
   }));
 }
 

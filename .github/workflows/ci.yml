@@ -33,4 +33,20 @@ jobs:
       - name: Unit tests
         run: npx vitest run
 
-      # E2e tests require a built extension and a real browser — run manually or in a dedicated job
+      - name: Build Chrome extension
+        run: npm run build
+
+      - name: Build Firefox extension
+        run: npm run build:firefox
+
+      - name: Verify CLI & generate SARIF
+        run: npx tsx src/cli.ts --input tests/fixtures/cli-sample.json --format sarif > seccheck.sarif
+
+      - name: Upload SARIF report
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('seccheck.sarif') != ''
+        with:
+          sarif_file: seccheck.sarif
+          category: seccheck-headers
+
+      # E2e tests require a persistent browser context — run manually or in a dedicated Playwright job

@@ -111,6 +111,11 @@ export interface Finding {
   reference: string;
   /** URL of the response that produced this finding. */
   sourceUrl?: string;
+  /**
+   * Finding confidence: deterministic (direct header absence or exact syntax verification)
+   * vs heuristic (name pattern matching, bypass-prone host heuristics, version string regex).
+   */
+  confidence?: 'deterministic' | 'heuristic';
 }
 
 export interface OriginHistoryItem {
@@ -128,7 +133,21 @@ export interface ScoreBreakdown {
   penalty: number;
 }
 
-// ─── Coverage ─────────────────────────────────────────────────────────────────
+// ─── Coverage & Ledger ────────────────────────────────────────────────────────
+
+/**
+ * A single entry in the per-tab coverage ledger documenting where data came from
+ * (network, cache, service worker, redirect, or DOM scan) so security audits
+ * never display a reassuring grade when coverage has blind spots.
+ */
+export interface CoverageLedgerEntry {
+  type: 'navigation' | 'redirect' | 'api' | 'subresource' | 'cookie-jar' | 'service-worker';
+  url: string;
+  source: 'network' | 'cache' | 'hsts-upgrade' | 'service-worker' | 'dom';
+  status?: number | undefined;
+  timestamp: number;
+  notes?: string | undefined;
+}
 
 export interface CoverageInfo {
   /** Total redirects + final response the browser performed. */
@@ -153,6 +172,10 @@ export interface CoverageInfo {
    * Populated when metaCspFound is true.
    */
   metaCspPolicies?: string[];
+  /** Chronological ledger of every hop and signal observed for this tab. */
+  ledger?: CoverageLedgerEntry[];
+  /** Explicit list of blind spots (e.g. cache, service-worker synthesis, restricted scheme). */
+  blindSpots?: string[];
 }
 
 // ─── Tab state ────────────────────────────────────────────────────────────────
@@ -201,10 +224,12 @@ export interface ApiHop {
   normalizedPath: string; // origin + pathname (no query params)
   method: string;
   status: number;
-  requestOrigin?: string; // from request headers
+  requestOrigin?: string | undefined; // from request headers
   headers: Record<string, string>;
   rawHeaders: Array<{ name: string; value: string }>;
-  isThirdParty?: boolean; // computed after capture
+  isThirdParty?: boolean | undefined; // computed after capture
+  timestamp?: number | undefined;
+  fromCache?: boolean | undefined;
 }
 
 export interface ApiEndpointState {

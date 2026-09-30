@@ -29,4 +29,30 @@ describe('checkCors', () => {
     const findings = checkCors(makeHop({ 'access-control-allow-origin': '*', 'content-type': 'text/html; charset=utf-8' }));
     expect(findings.length).toBe(0);
   });
+
+  it("flags ACAO: null as CORS-001 with high/medium severity", () => {
+    const findings = checkCors(makeHop({ 'access-control-allow-origin': 'null', 'content-type': 'application/json' }));
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.ruleId).toBe('CORS-001');
+    expect(findings[0]?.confidence).toBe('deterministic');
+    expect(findings[0]?.title).toContain("'null'");
+  });
+
+  it('flags reflected Origin with credentials as CORS-001 high', () => {
+    const apiHop = {
+      ...makeHop({
+        'access-control-allow-origin': 'https://evil.example.com',
+        'access-control-allow-credentials': 'true',
+        'content-type': 'application/json',
+      }),
+      tabId: 1,
+      normalizedPath: 'https://example.com/api',
+      method: 'GET',
+      requestOrigin: 'https://evil.example.com',
+    };
+    const findings = checkCors(apiHop);
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.severity).toBe('high');
+    expect(findings[0]?.title).toContain('reflects arbitrary request Origin');
+  });
 });

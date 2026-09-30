@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Header & Cookie Security Checker",
   "short_name": "SecCheck",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Passively observes security headers and cookies as you browse. All analysis is local — nothing leaves your device.",
   "background": {
     "scripts": [

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -262,6 +263,12 @@ export function formatMarkdown(report: CliReport): string {
   return `${lines.join('\n')}\n`;
 }
 
+export function computeFindingFingerprint(finding: Finding, target: string): string {
+  return createHash('sha256')
+    .update(`${finding.ruleId}:${finding.sourceUrl ?? target}:${finding.title}`)
+    .digest('hex');
+}
+
 export function formatSarif(report: CliReport): SarifLog {
   const rules = new Map<string, Finding>();
   for (const finding of report.findings) {
@@ -299,10 +306,14 @@ export function formatSarif(report: CliReport): SarifLog {
             : 'note',
         message: { text: `${finding.title}\n${finding.recommendation}` },
         locations: [{ physicalLocation: { artifactLocation: { uri: finding.sourceUrl ?? report.target } } }],
+        partialFingerprints: {
+          primaryLocationLineHash: computeFindingFingerprint(finding, report.target),
+        },
         properties: {
           evidence: finding.evidence,
           impact: finding.impact,
           category: finding.category,
+          confidence: finding.confidence ?? 'deterministic',
           scoreVersion: report.scoreVersion,
         },
       })),
@@ -318,6 +329,94 @@ export function formatSarif(report: CliReport): SarifLog {
   };
 }
 
+export interface FindingDiff {
+  target: string;
+  baselineDate?: string | undefined;
+  currentDate: string;
+  baselineScore?: number | undefined;
+  currentScore: number;
+  scoreDelta?: number | undefined;
+  regressions: Finding[];
+  fixes: Finding[];
+  unchanged: Finding[];
+}
+
+export function computeFindingDiff(baselineReport: CliReport, currentReport: CliReport): FindingDiff {
+  const baselineMap = new Map(baselineReport.findings.map((f) => [f.ruleId, f]));
+  const currentMap = new Map(currentReport.findings.map((f) => [f.ruleId, f]));
+
+  const regressions: Finding[] = [];
+  const unchanged: Finding[] = [];
+  const fixes: Finding[] = [];
+
+  for (const [id, finding] of currentMap.entries()) {
+    if (baselineMap.has(id)) {
+      unchanged.push(finding);
+    } else {
+      regressions.push(finding);
+    }
+  }
+
+  for (const [id, finding] of baselineMap.entries()) {
+    if (!currentMap.has(id)) {
+      fixes.push(finding);
+    }
+  }
+
+  return {
+    target: currentReport.target,
+    baselineDate: baselineReport.generatedAt,
+    currentDate: currentReport.generatedAt,
+    baselineScore: baselineReport.score,
+    currentScore: currentReport.score,
+    scoreDelta: currentReport.score - baselineReport.score,
+    regressions,
+    fixes,
+    unchanged,
+  };
+}
+
+export interface AuditBundle {
+  bundleVersion: '1.0.0';
+  generatedAt: string;
+  target: string;
+  score: number;
+  grade: Grade;
+  qualityScore: number;
+  qualityGrade: Grade;
+  scoreVersion: string;
+  findings: Array<Finding & { fix?: FixSuggestion }>;
+  redactedHeaders: Record<string, string>;
+  subdomainTrust: SubdomainTrustAnalysis;
+  integrityHash: string;
+}
+
+export function buildAuditBundle(report: CliReport, headers: Record<string, string>): AuditBundle {
+  const payloadToHash = JSON.stringify({
+    target: report.target,
+    score: report.score,
+    grade: report.grade,
+    findings: report.findings.map((f) => ({ ruleId: f.ruleId, severity: f.severity })),
+    headers,
+  });
+  const integrityHash = createHash('sha256').update(payloadToHash).digest('hex');
+
+  return {
+    bundleVersion: '1.0.0',
+    generatedAt: report.generatedAt,
+    target: report.target,
+    score: report.score,
+    grade: report.grade,
+    qualityScore: report.qualityScore,
+    qualityGrade: report.qualityGrade,
+    scoreVersion: report.scoreVersion,
+    findings: report.findings,
+    redactedHeaders: headers,
+    subdomainTrust: report.subdomainTrust,
+    integrityHash,
+  };
+}
+
 export function shouldFail(findings: Finding[], failOn: string): boolean {
   const threshold = severityOrder.indexOf(failOn as typeof severityOrder[number]);
   return threshold >= 0 && findings.some((finding) => {
@@ -326,8 +425,20 @@ export function shouldFail(findings: Finding[], failOn: string): boolean {
   });
 }
 
-function parseArguments(args: string[]): { input?: string; har?: string; url?: string; format: 'json' | 'markdown' | 'sarif'; failOn: string; help: boolean } {
-  const options: { input?: string; har?: string; url?: string; format: 'json' | 'markdown' | 'sarif'; failOn: string; help: boolean } = {
+interface CliOptions {
+  input?: string | undefined;
+  har?: string | undefined;
+  url?: string | undefined;
+  diff?: string | undefined;
+  bundle: boolean;
+  format: 'json' | 'markdown' | 'sarif';
+  failOn: string;
+  help: boolean;
+}
+
+function parseArguments(args: string[]): CliOptions {
+  const options: CliOptions = {
+    bundle: false,
     format: 'json',
     failOn: 'high',
     help: false,
@@ -335,13 +446,22 @@ function parseArguments(args: string[]): { input?: string; har?: string; url?: s
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') options.help = true;
-    else if (argument === '--input' || argument === '--har' || argument === '--url' || argument === '--format' || argument === '--fail-on') {
+    else if (argument === '--bundle') options.bundle = true;
+    else if (
+      argument === '--input' ||
+      argument === '--har' ||
+      argument === '--url' ||
+      argument === '--diff' ||
+      argument === '--format' ||
+      argument === '--fail-on'
+    ) {
       const value = args[index + 1];
       if (value === undefined || value.length === 0 || value.startsWith('--')) throw new Error(`${argument} requires a value.`);
       index += 1;
       if (argument === '--input') options.input = value;
       else if (argument === '--har') options.har = value;
       else if (argument === '--url') options.url = value;
+      else if (argument === '--diff') options.diff = value;
       else if (argument === '--format') {
         if (value !== 'json' && value !== 'markdown' && value !== 'sarif') throw new Error('--format must be json, markdown, or sarif.');
         options.format = value;
@@ -353,7 +473,7 @@ function parseArguments(args: string[]): { input?: string; har?: string; url?: s
   return options;
 }
 
-async function loadInput(options: { input?: string; har?: string; url?: string }): Promise<CliInput> {
+async function loadInput(options: { input?: string | undefined; har?: string | undefined; url?: string | undefined }): Promise<CliInput> {
   if (options.input !== undefined) {
     const parsed: unknown = JSON.parse(await readFile(resolve(options.input), 'utf8'));
     const input = requireRecord(parsed, 'Input file');
@@ -387,12 +507,14 @@ Usage:
   npm run seccheck -- --url https://example.com [--format json|markdown|sarif] [--fail-on critical|high|medium|low|info|never]
   npm run seccheck -- --input audit.json [--format json|markdown|sarif] [--fail-on ...]
   npm run seccheck -- --har capture.har --url https://example.com/path [--format json|markdown|sarif] [--fail-on ...]
+  npm run seccheck -- --input current.json --diff baseline.json [--format json|markdown]
+  npm run seccheck -- --input audit.json --bundle
 
 Input JSON: { "url": "https://example.com", "status": 200, "headers": {}, "cookies": [] }
 URL mode makes one explicit HTTP request and follows redirects. JSON and HAR input modes are offline; HAR mode selects the most recent exact URL match.
 Cookie inputs must contain attributes only; cookie values are rejected.\n`;
 const helpExitCodes = `Exit codes:
-  0  No finding met --fail-on.
+  0  No finding met --fail-on (or in --diff mode, no new regression met --fail-on).
   1  At least one finding met or exceeded --fail-on.
   2  Invalid arguments/input or a scan error.
 Default --fail-on is high, so critical and high findings return 1.\n`;
@@ -414,7 +536,41 @@ async function main(args: string[]): Promise<void> {
     throw new Error('--fail-on must be critical, high, medium, low, info, or never.');
   }
 
-  const report = buildCliReport(await loadInput(options));
+  const rawInput = await loadInput(options);
+  const report = buildCliReport(rawInput);
+
+  if (options.bundle) {
+    const bundle = buildAuditBundle(report, rawInput.headers);
+    process.stdout.write(`${JSON.stringify(bundle, null, 2)}\n`);
+    return;
+  }
+
+  if (options.diff !== undefined) {
+    const baselineParsed: unknown = JSON.parse(await readFile(resolve(options.diff), 'utf8'));
+    const baselineReport = requireRecord(baselineParsed, 'Baseline report') as unknown as CliReport;
+    const diff = computeFindingDiff(baselineReport, report);
+    if (options.format === 'markdown') {
+      const md = [
+        `# SecCheck Regression Diff: ${diff.target}`,
+        '',
+        `**Baseline Score:** ${diff.baselineScore ?? 'N/A'} -> **Current Score:** ${diff.currentScore} (Delta: ${diff.scoreDelta ?? 0})`,
+        '',
+        `## Regressions (New Findings): ${diff.regressions.length}`,
+        ...(diff.regressions.length === 0 ? ['No new regressions detected.'] : diff.regressions.map((f) => `- [${f.severity.toUpperCase()}] ${f.ruleId}: ${f.title}`)),
+        '',
+        `## Resolved (Fixed Findings): ${diff.fixes.length}`,
+        ...(diff.fixes.length === 0 ? ['No previously flagged findings were resolved.'] : diff.fixes.map((f) => `- [FIXED] ${f.ruleId}: ${f.title}`)),
+        '',
+        `## Persistent Findings: ${diff.unchanged.length}`,
+      ];
+      process.stdout.write(`${md.join('\n')}\n`);
+    } else {
+      process.stdout.write(`${JSON.stringify(diff, null, 2)}\n`);
+    }
+    if (shouldFail(diff.regressions, options.failOn)) process.exitCode = 1;
+    return;
+  }
+
   const output = options.format === 'sarif'
     ? formatSarif(report)
     : options.format === 'markdown'

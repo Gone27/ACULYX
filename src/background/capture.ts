@@ -107,6 +107,29 @@ export function registerCaptureListeners(
   const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
   const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
 
+  // Track in-flight request metadata (method, Origin header) captured at onBeforeSendHeaders.
+  const inFlightRequests: Map<string, { method: string; origin?: string | undefined; timestamp: number }> = new Map();
+
+  try {
+    chrome.webRequest.onBeforeSendHeaders.addListener(
+      (details: chrome.webRequest.WebRequestHeadersDetails): void => {
+        if (details.tabId < 0) return;
+        const originHeader = details.requestHeaders?.find(
+          (h) => h.name.toLowerCase() === 'origin',
+        )?.value;
+        inFlightRequests.set(details.requestId, {
+          method: details.method,
+          origin: originHeader,
+          timestamp: details.timeStamp,
+        });
+      },
+      filter,
+      ['requestHeaders', 'extraHeaders'],
+    );
+  } catch {
+    // extraHeaders may be restricted in some environments; fall back gracefully
+  }
+
   // -------------------------------------------------------------------------
   // Stage 1 — onHeadersReceived
   // -------------------------------------------------------------------------
@@ -144,6 +167,8 @@ export function registerCaptureListeners(
       // Route XHR/Fetch responses to the API callback, if registered.
       if (details.type === 'xmlhttprequest' && details.tabId >= 0) {
         if (onApiHopComplete !== undefined) {
+          const reqMeta = inFlightRequests.get(details.requestId);
+          inFlightRequests.delete(details.requestId);
           const raw = details.responseHeaders ?? [];
           const apiHeaders = normalizeHeaders(raw);
           const apiRawHeaders = toRawHeaders(raw);
@@ -159,10 +184,13 @@ export function registerCaptureListeners(
             tabId: details.tabId,
             url: details.url,
             normalizedPath,
-            method: 'GET', // webRequest onResponseStarted doesn't expose method; index.ts can enrich if needed
+            method: reqMeta?.method ?? 'GET',
+            requestOrigin: reqMeta?.origin,
             status: details.statusCode,
             headers: apiHeaders,
             rawHeaders: apiRawHeaders,
+            timestamp: reqMeta?.timestamp ?? details.timeStamp,
+            fromCache: details.fromCache ?? false,
           };
           onApiHopComplete(apiHop);
         }
