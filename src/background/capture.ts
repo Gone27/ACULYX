@@ -11,9 +11,9 @@
  * Comparing the two snapshots lets us detect header mutations by other
  * extensions or intermediaries (headersDiffer flag on the Hop).
  *
- * Only `main_frame` requests are processed to avoid noise from sub-resources.
- * A host-permission check guards against restricted URLs the extension is not
- * allowed to observe.
+ * Captures top-level (`main_frame`) navigations and in-page `xmlhttprequest` (XHR/fetch)
+ * API responses. Passive sub-resources (images, stylesheets, fonts, iframes) are excluded
+ * to avoid noise. All captures are strictly origin-gated and require user permission.
  */
 
 import { normalizeHeaders, headersDiffer, redactUrlQueryParams } from '../rules/utils';

@@ -30,6 +30,11 @@ describe('checkCors', () => {
     expect(findings.length).toBe(0);
   });
 
+  it('skips document responses with missing Content-Type even with ACAO: *', () => {
+    const findings = checkCors(makeHop({ 'access-control-allow-origin': '*' }));
+    expect(findings.length).toBe(0);
+  });
+
   it("flags ACAO: null as CORS-001 with high/medium severity", () => {
     const findings = checkCors(makeHop({ 'access-control-allow-origin': 'null', 'content-type': 'application/json' }));
     expect(findings.length).toBe(1);

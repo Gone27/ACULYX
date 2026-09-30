@@ -11,7 +11,10 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
   // harmless noise on public pages. We only skip HTML responses on document navigation.
   const isApi = 'method' in hop || 'normalizedPath' in hop;
   const contentType = hop.headers['content-type']?.toLowerCase() ?? '';
-  if (!isApi && contentType.includes('text/html')) {
+  // Top-level document navigations are not gated by CORS. CDNs commonly apply ACAO: *
+  // to entire zones including web documents. We skip HTML documents and documents with
+  // omitted/missing Content-Type on top-level navigations.
+  if (!isApi && (contentType.includes('text/html') || contentType === '')) {
     return [];
   }
 

@@ -69,8 +69,9 @@ Because SecCheck observes responses in the browser you are already using, it can
 
 ### Coverage Boundaries
 
-- SecCheck analyzes top-level (`main_frame`) navigation responses only. Headers from iframes and other sub-resources are not inspected; this is not a whole-page resource audit.
-- A detected meta CSP is reported as a signal only. Full CSP policy analysis applies to response-header CSP.
+- SecCheck analyzes top-level (`main_frame`) navigation responses and in-page API (`xmlhttprequest` / `fetch`) responses on user-permitted origins. Static sub-resources (such as images, fonts, and stylesheets) and embedded iframes are not inspected; this is not a full whole-page resource crawl.
+- Sensitive query parameters (such as tokens, session keys, and auth parameters) in captured API URLs are automatically redacted before local display or storage.
+- A detected meta CSP is reported as a presence signal only. Full CSP policy evaluation applies to HTTP response headers.
 
 ---
 
@@ -105,7 +106,7 @@ Because SecCheck observes responses in the browser you are already using, it can
 ---
 
 ## 7. Reviewer Justification for Permissions
-- `webRequest` / `webNavigation`: Passively observes HTTP response headers on main-frame navigations to calculate security header grades.
+- `webRequest` / `webNavigation`: Passively observes HTTP response headers on main-frame navigations and in-page API calls (XHR/fetch) on user-permitted origins to calculate security header grades.
 - `cookies`: Inspects cookie security attributes (Secure, HttpOnly, SameSite, prefixes) to detect insecure session storage.
 - `storage`: Persists local user preferences and historical domain scores locally on the device.
 - `scripting`: Injects the small page-signal check only after the user grants that origin; it checks meta-CSP presence and service-worker control, and sends results only to the local extension service worker.
