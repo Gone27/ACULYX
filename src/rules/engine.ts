@@ -204,7 +204,6 @@ export function runRules(input: RuleInput): RuleOutput {
 
 export function runApiRules(
   apiHop: import('../shared/types').ApiHop,
-  pageOrigin: string,
   cookieSettings?: { alwaysSensitive: string[]; alwaysIgnore: string[] }
 ): Finding[] {
   const hopLike = apiHop as unknown as Hop;

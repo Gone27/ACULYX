@@ -98,9 +98,11 @@ function toRawHeaders(
  *
  * @param onHopComplete - Callback invoked for every captured response, including
  *   intermediate redirect responses.
+ * @param onApiHopComplete - Optional callback invoked for each captured XHR/Fetch response.
  */
 export function registerCaptureListeners(
   onHopComplete: (tabId: number, hop: Hop) => void,
+  onApiHopComplete?: (apiHop: ApiHop) => void,
 ): void {
   const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
   const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
@@ -139,6 +141,34 @@ export function registerCaptureListeners(
   // -------------------------------------------------------------------------
   chrome.webRequest.onResponseStarted.addListener(
     (details: chrome.webRequest.WebResponseCacheDetails): void => {
+      // Route XHR/Fetch responses to the API callback, if registered.
+      if (details.type === 'xmlhttprequest' && details.tabId >= 0) {
+        if (onApiHopComplete !== undefined) {
+          const raw = details.responseHeaders ?? [];
+          const apiHeaders = normalizeHeaders(raw);
+          const apiRawHeaders = toRawHeaders(raw);
+          let normalizedPath: string;
+          try {
+            const u = new URL(details.url);
+            normalizedPath = u.origin + u.pathname;
+          } catch {
+            normalizedPath = details.url;
+          }
+          const apiHop: ApiHop = {
+            requestId: details.requestId,
+            tabId: details.tabId,
+            url: details.url,
+            normalizedPath,
+            method: 'GET', // webRequest onResponseStarted doesn't expose method; index.ts can enrich if needed
+            status: details.statusCode,
+            headers: apiHeaders,
+            rawHeaders: apiRawHeaders,
+          };
+          onApiHopComplete(apiHop);
+        }
+        return;
+      }
+
       if (details.type !== 'main_frame' || details.tabId < 0) return;
 
       const raw = details.responseHeaders ?? [];

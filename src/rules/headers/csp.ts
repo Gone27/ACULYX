@@ -369,7 +369,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
             severity: 'low',
             title: "CSP style-src contains 'unsafe-inline'",
             impact: 'Allows injection of malicious CSS which can exfiltrate data via attribute selectors or deface the site.',
-            evidence: sanitizeEvidence(`${f.directive}: ${f.value || ''}`),
+            evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ''}`),
             recommendation: 'Remove unsafe-inline from style-src and use external stylesheets or nonces/hashes for inline styles.',
             reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/style-src'
           });
@@ -383,7 +383,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
             severity: 'info',
             title: 'CSP allowlist bypass or structural weakness',
             impact: f.description,
-            evidence: sanitizeEvidence(`${f.directive}: ${f.value || ''}`),
+            evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ''}`),
             recommendation: 'Remove the bypass host or use strict-dynamic / nonces instead of an allowlist.',
             reference: 'https://csp-evaluator.withgoogle.com/'
           });
@@ -395,14 +395,14 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
           severity: 'info',
           title: 'CSP Syntax or Nonce Issue',
           impact: f.description,
-          evidence: sanitizeEvidence(`${f.directive}: ${f.value || ''}`),
+          evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ''}`),
           recommendation: 'Review CSP syntax.',
           reference: 'https://csp-evaluator.withgoogle.com/'
         });
       }
     }
-  } catch (e) {
-    // Ignore parser errors
+  } catch {
+    // Ignore parser errors — a malformed CSP is already flagged by our own checks above.
   }
 
   return { findings, directives };

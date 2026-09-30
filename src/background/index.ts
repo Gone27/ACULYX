@@ -534,7 +534,10 @@ void (async (): Promise<void> => {
       const isFirstParty = state.origin === targetOrigin;
       apiHop.isThirdParty = !isFirstParty;
 
-      const findings = runApiRules(apiHop, state.origin, currentSettings);
+      const findings = runApiRules(apiHop, {
+        alwaysSensitive: currentSettings.alwaysSensitiveCookies,
+        alwaysIgnore: currentSettings.alwaysIgnoreCookies,
+      });
 
       if (!state.apiEndpoints) {
         state.apiEndpoints = new Map();

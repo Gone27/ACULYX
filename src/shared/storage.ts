@@ -7,16 +7,34 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
 // service-worker restarts within a browser session (not across browser close).
 // This is how we survive MV3's SW-kill-on-idle.
 
+/** Serialized form stored in chrome.storage.session (JSON-safe). */
+type SerializedTabState = Omit<TabState, 'apiEndpoints'> & {
+  apiEndpoints?: [string, import('./types').ApiEndpointState][];
+};
+
+function serializeTabState(state: TabState): SerializedTabState {
+  const { apiEndpoints, ...rest } = state;
+  if (apiEndpoints !== undefined) {
+    return { ...rest, apiEndpoints: Array.from(apiEndpoints.entries()) };
+  }
+  return rest;
+}
+
+function deserializeTabState(raw: SerializedTabState): TabState {
+  const { apiEndpoints, ...rest } = raw;
+  if (Array.isArray(apiEndpoints)) {
+    return { ...rest, apiEndpoints: new Map(apiEndpoints) };
+  }
+  return rest;
+}
+
 export const SessionStorage = {
   async getTabState(tabId: number): Promise<TabState | null> {
     const key = `${STORAGE_KEYS.TAB_PREFIX}${tabId}`;
     const result = await chrome.storage.session.get(key);
-    const state = result[key] as any;
-    if (!state) return null;
-    if (state.apiEndpoints && Array.isArray(state.apiEndpoints)) {
-      state.apiEndpoints = new Map(state.apiEndpoints);
-    }
-    return state as TabState;
+    const raw = result[key] as SerializedTabState | undefined;
+    if (raw === undefined) return null;
+    return deserializeTabState(raw);
   },
 
   async setTabState(state: TabState): Promise<void> {
@@ -30,12 +48,9 @@ export const SessionStorage = {
         );
       }
     }
-    const stateToStore = { ...state } as any;
-    if (state.apiEndpoints instanceof Map) {
-      stateToStore.apiEndpoints = Array.from(state.apiEndpoints.entries());
-    }
+    const serialized = serializeTabState(state);
     const key = `${STORAGE_KEYS.TAB_PREFIX}${state.tabId}`;
-    await chrome.storage.session.set({ [key]: stateToStore });
+    await chrome.storage.session.set({ [key]: serialized });
   },
 
   async removeTabState(tabId: number): Promise<void> {
@@ -47,13 +62,7 @@ export const SessionStorage = {
     const all = await chrome.storage.session.get(null);
     return Object.entries(all)
       .filter(([k]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX))
-      .map(([, v]) => {
-        const state = v as any;
-        if (state.apiEndpoints && Array.isArray(state.apiEndpoints)) {
-          state.apiEndpoints = new Map(state.apiEndpoints);
-        }
-        return state as TabState;
-      });
+      .map(([, v]) => deserializeTabState(v as SerializedTabState));
   },
 };
 
