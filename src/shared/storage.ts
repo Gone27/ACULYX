@@ -1,6 +1,7 @@
 import type { TabState, SettingsV2, OriginHistoryItem } from './types';
 import { STORAGE_KEYS } from './constants';
 import { SettingsService } from './settings';
+import { registrableDomain } from '../rules/headers/subdomain-trust';
 
 // ─── Session storage ──────────────────────────────────────────────────────────
 //
@@ -186,7 +187,42 @@ export const SessionStorage = {
 //
 // Stores user settings, capped per-origin history, and onboarding state.
 
-const MAX_HISTORY_PER_ORIGIN = 10;
+const DEFAULT_MAX_HISTORY_PER_ORIGIN = 10;
+
+/**
+ * Pure function to prune origin history items according to age and count policies.
+ *
+ * Precedence (Contract Section 5.1):
+ * 1. Age pruning (retainHistoryDays): if > 0, prune items older than retainHistoryDays * 86,400,000 ms.
+ *    If 0, keep forever (age pruning disabled).
+ * 2. Count cap (maxHistoryPerOrigin): keep at most maxHistoryPerOrigin newest items (default 10, range 1..50).
+ */
+export function pruneHistoryItems(
+  items: readonly OriginHistoryItem[],
+  now: number,
+  retainHistoryDays: number,
+  maxHistoryPerOrigin: number = DEFAULT_MAX_HISTORY_PER_ORIGIN,
+): OriginHistoryItem[] {
+  let filtered = [...items];
+
+  // 1. Age pruning
+  if (retainHistoryDays > 0) {
+    const maxAgeMs = retainHistoryDays * 24 * 60 * 60 * 1000;
+    const cutoff = now - maxAgeMs;
+    filtered = filtered.filter((item) => item.timestamp >= cutoff);
+  }
+
+  // 2. Count cap (clamped between 1 and 50)
+  const rawCap = typeof maxHistoryPerOrigin === 'number' && !Number.isNaN(maxHistoryPerOrigin)
+    ? maxHistoryPerOrigin
+    : DEFAULT_MAX_HISTORY_PER_ORIGIN;
+  const cap = Math.max(1, Math.min(50, Math.floor(rawCap)));
+  if (filtered.length > cap) {
+    filtered = filtered.slice(-cap);
+  }
+
+  return filtered;
+}
 
 export const LocalStorage = {
   async getSettings(): Promise<SettingsV2> {
@@ -212,9 +248,95 @@ export const LocalStorage = {
     if (last && last.score === item.score && last.grade === item.grade && (item.timestamp - last.timestamp) < 60_000) {
       return;
     }
-    const updated = [...history, item].slice(-MAX_HISTORY_PER_ORIGIN);
+    const settings = await this.getSettings();
+    const updated = pruneHistoryItems(
+      [...history, item],
+      item.timestamp,
+      settings.retainHistoryDays,
+      settings.maxHistoryPerOrigin,
+    );
     const key = `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`;
     await chrome.storage.local.set({ [key]: updated });
+  },
+
+  async pruneAllHistory(now: number = Date.now(), settings?: SettingsV2): Promise<void> {
+    if (typeof chrome === 'undefined' || chrome.storage?.local === undefined) {
+      return;
+    }
+    const currentSettings = settings ?? (await this.getSettings());
+    const all = await chrome.storage.local.get(null);
+    const updates: Record<string, OriginHistoryItem[]> = {};
+    const toRemove: string[] = [];
+
+    for (const [key, value] of Object.entries(all)) {
+      if (key.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || key.startsWith('history:')) {
+        if (Array.isArray(value)) {
+          const pruned = pruneHistoryItems(
+            value as OriginHistoryItem[],
+            now,
+            currentSettings.retainHistoryDays,
+            currentSettings.maxHistoryPerOrigin,
+          );
+          if (pruned.length === 0) {
+            toRemove.push(key);
+          } else {
+            updates[key] = pruned;
+          }
+        }
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await chrome.storage.local.set(updates);
+    }
+    if (toRemove.length > 0) {
+      await chrome.storage.local.remove(toRemove);
+    }
+  },
+
+  async purgeOriginData(origin: string): Promise<void> {
+    if (!origin || typeof chrome === 'undefined' || chrome.storage?.local === undefined) return;
+    const keysToRemove = [
+      `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`,
+      `history:${origin}`,
+      `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`,
+      `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`,
+    ];
+
+    let hostname = origin;
+    try {
+      hostname = new URL(origin).hostname;
+    } catch {
+      // not a parseable URL
+    }
+
+    const apex = registrableDomain(hostname) ?? hostname;
+
+    if (apex) {
+      if (hostname === apex) {
+        keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
+      } else {
+        const graph = await this.getGraph(apex);
+        if (graph) {
+          graph.nodes = graph.nodes.filter((n) => n.hostname !== hostname);
+          graph.edges = graph.edges.filter((e) => e.source !== hostname && e.target !== hostname);
+          if (graph.nodes.length <= 1 && graph.nodes.every((n) => n.isApex)) {
+            keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
+          } else {
+            await this.saveGraph(graph);
+          }
+        }
+      }
+    }
+
+    if (hostname && hostname !== apex) {
+      keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${hostname}`);
+    }
+
+    await chrome.storage.local.remove(keysToRemove);
+    if (typeof chrome !== 'undefined' && chrome.storage?.session !== undefined) {
+      await chrome.storage.session.remove(`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`).catch(() => {});
+    }
   },
 
   async getAuthDiffHistory(origin: string): Promise<import('./types').AuthDiffRecord[]> {
@@ -232,7 +354,7 @@ export const LocalStorage = {
   async recordAuthDiff(origin: string, diff: import('./types').AuthDiffRecord): Promise<void> {
     if (!origin) return;
     const history = await this.getAuthDiffHistory(origin);
-    const updated = [...history, diff].slice(-MAX_HISTORY_PER_ORIGIN);
+    const updated = [...history, diff].slice(-DEFAULT_MAX_HISTORY_PER_ORIGIN);
     const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
     await chrome.storage.local.set({ [key]: updated });
   },

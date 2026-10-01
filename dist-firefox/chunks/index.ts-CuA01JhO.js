@@ -1,6 +1,5 @@
-import { C as SCORE_VERSION, S as RESTRICTED_SCHEMES, T as SIDEPANEL_PORT_NAME, _ as DEFAULT_SETTINGS, a as extractSetCookieHeaders, c as isSensitiveCookie, d as parseCspDirectives, g as BADGE_COLORS, h as sanitizeEvidence, i as checkDuplicateHeaders, n as portSend, o as hasCspBypassProtection, t as PortRegistry, u as originFromUrl, v as GRADE_THRESHOLDS, x as POPUP_PORT_NAME } from "./messaging-BCZa4hwB.js";
-import { a as registerCaptureListeners, c as originAuthBaselines, d as SessionStorage, f as SettingsService, i as captureMap, l as tabStates, n as reconcilePermissionsOnRemoved, o as hydrateFromSession, r as reconcilePermissionsOnStartup, s as initLifecycle, t as PermissionsService, u as LocalStorage } from "./permissions-DorKxJ_0.js";
-import { n as registrableDomain, t as checkSubdomainTrust } from "./subdomain-trust-BFZLSYTp.js";
+import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-cpmoITPm.js";
+import { a as registerCaptureListeners, c as originAuthBaselines, d as SessionStorage, f as SettingsService, i as captureMap, l as tabStates, n as reconcilePermissionsOnRemoved, o as hydrateFromSession, r as reconcilePermissionsOnStartup, s as initLifecycle, t as PermissionsService, u as LocalStorage } from "./permissions-3T9E3siW.js";
 import { n as isRestrictedUrl$1, t as isModeCaptureAllowed } from "./gating-BKxraNh3.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
@@ -3316,7 +3315,7 @@ function recomputeTabState(tabId, state) {
 			grade: state.grade
 		});
 		const baseline = originAuthBaselines.get(state.origin);
-		const { isAuthEvent, record, newBaseline } = checkAuthTransition(state.origin, baseline, state.cookies, state.findings, state.score, state.grade, currentSettings.alwaysSensitiveCookies, currentSettings.alwaysIgnoreCookies);
+		const { isAuthEvent, record, newBaseline } = checkAuthTransition(state.origin, baseline, state.cookies, state.findings, state.score, state.grade, currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [], currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []);
 		originAuthBaselines.set(state.origin, newBaseline);
 		SessionStorage.setAuthBaseline(state.origin, newBaseline);
 		if (isAuthEvent && record !== null) LocalStorage.recordAuthDiff(state.origin, record);
@@ -3844,4 +3843,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 });
 //#endregion
 
-//# sourceMappingURL=index.ts-xFtBEV9K.js.map
+//# sourceMappingURL=index.ts-CuA01JhO.js.map

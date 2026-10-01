@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Security Checker</title>
-  <script type="module" crossorigin src="/chunks/popup.html-CyePEuHx.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-BCZa4hwB.js">
-  <link rel="modulepreload" crossorigin href="/chunks/permissions-DorKxJ_0.js">
+  <script type="module" crossorigin src="/chunks/popup.html-DjL8Ruda.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-cpmoITPm.js">
+  <link rel="modulepreload" crossorigin href="/chunks/permissions-3T9E3siW.js">
   <link rel="modulepreload" crossorigin href="/chunks/gating-BKxraNh3.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
-  <link rel="stylesheet" crossorigin href="/assets/popup-CEB3rtsa.css">
+  <link rel="stylesheet" crossorigin href="/assets/popup-Dhhfq7Q7.css">
 </head>
 <body>
   <!-- Header bar -->
@@ -75,7 +75,11 @@
 
   <!-- Top findings list (max 5) -->
   <div class="findings-section" id="findings-section" hidden role="region" aria-label="Security Findings">
-    <h2 class="section-title">Top findings</h2>
+    <div class="findings-header">
+      <h2 class="section-title">Top findings</h2>
+      <button class="btn-filter-override" id="show-all-findings-btn" hidden type="button">Show all</button>
+    </div>
+    <div class="findings-filter-notice" id="findings-filter-notice" hidden></div>
     <ul class="findings-list" id="findings-list" role="list"></ul>
   </div>
 

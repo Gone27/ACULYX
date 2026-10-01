@@ -1,4 +1,4 @@
-import { E as STORAGE_KEYS, _ as DEFAULT_SETTINGS, b as KEEPALIVE_PERIOD_MINUTES, f as redactHeaderValue, l as normalizeHeaders, m as redactUrlQueryParams, p as redactUrlPath, s as headersDiffer, y as KEEPALIVE_ALARM } from "./messaging-BCZa4hwB.js";
+import { D as STORAGE_KEYS, a as registrableDomain, d as normalizeHeaders, g as redactUrlQueryParams, h as redactUrlPath, l as headersDiffer, m as redactHeaderValue, x as MAINTENANCE_ALARM, y as DEFAULT_SETTINGS } from "./messaging-cpmoITPm.js";
 //#region src/shared/settings.ts
 /**
 * settings.ts
@@ -290,6 +290,25 @@ var SessionStorage = {
 		return map;
 	}
 };
+var DEFAULT_MAX_HISTORY_PER_ORIGIN = 10;
+/**
+* Pure function to prune origin history items according to age and count policies.
+*
+* Precedence (Contract Section 5.1):
+* 1. Age pruning (retainHistoryDays): if > 0, prune items older than retainHistoryDays * 86,400,000 ms.
+*    If 0, keep forever (age pruning disabled).
+* 2. Count cap (maxHistoryPerOrigin): keep at most maxHistoryPerOrigin newest items (default 10, range 1..50).
+*/
+function pruneHistoryItems(items, now, retainHistoryDays, maxHistoryPerOrigin = DEFAULT_MAX_HISTORY_PER_ORIGIN) {
+	let filtered = [...items];
+	if (retainHistoryDays > 0) {
+		const cutoff = now - retainHistoryDays * 24 * 60 * 60 * 1e3;
+		filtered = filtered.filter((item) => item.timestamp >= cutoff);
+	}
+	const cap = Math.max(1, Math.min(50, Math.floor(typeof maxHistoryPerOrigin === "number" && !Number.isNaN(maxHistoryPerOrigin) ? maxHistoryPerOrigin : DEFAULT_MAX_HISTORY_PER_ORIGIN)));
+	if (filtered.length > cap) filtered = filtered.slice(-cap);
+	return filtered;
+}
 var LocalStorage = {
 	async getSettings() {
 		return await SettingsService.getSettings();
@@ -307,9 +326,55 @@ var LocalStorage = {
 		const history = await this.getOriginHistory(origin);
 		const last = history[history.length - 1];
 		if (last && last.score === item.score && last.grade === item.grade && item.timestamp - last.timestamp < 6e4) return;
-		const updated = [...history, item].slice(-10);
+		const settings = await this.getSettings();
+		const updated = pruneHistoryItems([...history, item], item.timestamp, settings.retainHistoryDays, settings.maxHistoryPerOrigin);
 		const key = `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`;
 		await chrome.storage.local.set({ [key]: updated });
+	},
+	async pruneAllHistory(now = Date.now(), settings) {
+		if (typeof chrome === "undefined" || chrome.storage?.local === void 0) return;
+		const currentSettings = settings ?? await this.getSettings();
+		const all = await chrome.storage.local.get(null);
+		const updates = {};
+		const toRemove = [];
+		for (const [key, value] of Object.entries(all)) if (key.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || key.startsWith("history:")) {
+			if (Array.isArray(value)) {
+				const pruned = pruneHistoryItems(value, now, currentSettings.retainHistoryDays, currentSettings.maxHistoryPerOrigin);
+				if (pruned.length === 0) toRemove.push(key);
+				else updates[key] = pruned;
+			}
+		}
+		if (Object.keys(updates).length > 0) await chrome.storage.local.set(updates);
+		if (toRemove.length > 0) await chrome.storage.local.remove(toRemove);
+	},
+	async purgeOriginData(origin) {
+		if (!origin || typeof chrome === "undefined" || chrome.storage?.local === void 0) return;
+		const keysToRemove = [
+			`${STORAGE_KEYS.HISTORY_PREFIX}${origin}`,
+			`history:${origin}`,
+			`${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`,
+			`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`
+		];
+		let hostname = origin;
+		try {
+			hostname = new URL(origin).hostname;
+		} catch {}
+		const apex = registrableDomain(hostname) ?? hostname;
+		if (apex) {
+			if (hostname === apex) keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
+			else {
+				const graph = await this.getGraph(apex);
+				if (graph) {
+					graph.nodes = graph.nodes.filter((n) => n.hostname !== hostname);
+					graph.edges = graph.edges.filter((e) => e.source !== hostname && e.target !== hostname);
+					if (graph.nodes.length <= 1 && graph.nodes.every((n) => n.isApex)) keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
+					else await this.saveGraph(graph);
+				}
+			}
+		}
+		if (hostname && hostname !== apex) keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${hostname}`);
+		await chrome.storage.local.remove(keysToRemove);
+		if (typeof chrome !== "undefined" && chrome.storage?.session !== void 0) await chrome.storage.session.remove(`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`).catch(() => {});
 	},
 	async getAuthDiffHistory(origin) {
 		if (!origin) return [];
@@ -371,16 +436,14 @@ var tabStates = /* @__PURE__ */ new Map();
 */
 var originAuthBaselines = /* @__PURE__ */ new Map();
 /**
-* Registers the recurring keepalive alarm and its listener.
+* Registers the periodic maintenance alarm and its listener.
 *
-* Call once at SW startup (both fresh install and revival).
-* chrome.alarms.create is idempotent for a given name — calling it again
-* while the alarm already exists simply resets the period, which is fine.
+* Runs periodic history pruning sweeps and cleans up expired data.
 */
 function initLifecycle() {
-	chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MINUTES });
+	chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 1 });
 	chrome.alarms.onAlarm.addListener((alarm) => {
-		if (alarm.name === "keepalive") {}
+		if (alarm.name === "maintenance" || alarm.name === "keepalive") LocalStorage.pruneAllHistory();
 	});
 }
 /**
@@ -395,6 +458,7 @@ async function hydrateFromSession() {
 	for (const state of all) tabStates.set(state.tabId, state);
 	const baselines = await SessionStorage.getAllAuthBaselines();
 	for (const [origin, baseline] of baselines) originAuthBaselines.set(origin, baseline);
+	LocalStorage.pruneAllHistory();
 }
 //#endregion
 //#region src/background/capture.ts
@@ -743,4 +807,4 @@ async function reconcilePermissionsOnStartup(options) {
 //#endregion
 export { registerCaptureListeners as a, originAuthBaselines as c, SessionStorage as d, SettingsService as f, captureMap as i, tabStates as l, resolveCookieOverlaps as m, reconcilePermissionsOnRemoved as n, hydrateFromSession as o, normalizeCookieList as p, reconcilePermissionsOnStartup as r, initLifecycle as s, PermissionsService as t, LocalStorage as u };
 
-//# sourceMappingURL=permissions-DorKxJ_0.js.map
+//# sourceMappingURL=permissions-3T9E3siW.js.map

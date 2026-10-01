@@ -115,8 +115,8 @@ function recomputeTabState(tabId: number, state: TabState): void {
       state.findings,
       state.score,
       state.grade,
-      currentSettings.alwaysSensitiveCookies,
-      currentSettings.alwaysIgnoreCookies,
+      currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
+      currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? [],
     );
     originAuthBaselines.set(state.origin, newBaseline);
     void SessionStorage.setAuthBaseline(state.origin, newBaseline);

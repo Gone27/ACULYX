@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Settings</title>
-  <script type="module" crossorigin src="/chunks/options.html-B2kWl96h.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-BCZa4hwB.js">
-  <link rel="modulepreload" crossorigin href="/chunks/permissions-DorKxJ_0.js">
+  <script type="module" crossorigin src="/chunks/options.html-ChDPjwlR.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-cpmoITPm.js">
+  <link rel="modulepreload" crossorigin href="/chunks/permissions-3T9E3siW.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
-  <link rel="stylesheet" crossorigin href="/assets/options-chYcSAPO.css">
+  <link rel="stylesheet" crossorigin href="/assets/options-Dx9UQMGI.css">
 </head>
 <body>
 
@@ -119,23 +119,72 @@
 
     <!-- ── History retention ───────────────────────────────────── -->
     <section class="options-section" id="section-history">
-      <h2 class="section-heading">History</h2>
+      <h2 class="section-heading">History &amp; Retention</h2>
       <p class="section-desc">
-        How many days of scan history to keep in local storage.
+        Configure audit history retention and per-origin history caps.
       </p>
-      <label class="field-label" for="retain-history-days">
-        Retain history for
-        <input
-          type="number"
-          id="retain-history-days"
-          name="retainHistoryDays"
-          min="0"
-          max="365"
-          step="1"
-          class="number-input"
-        >
-        days &nbsp;<span class="field-hint">(0 = keep forever)</span>
-      </label>
+      <div class="field-row">
+        <label class="field-label" for="retain-history-days">
+          Retain history for
+          <input
+            type="number"
+            id="retain-history-days"
+            name="retainHistoryDays"
+            min="0"
+            max="365"
+            step="1"
+            class="number-input"
+          >
+          days &nbsp;<span class="field-hint">(0 = keep forever)</span>
+        </label>
+      </div>
+      <div class="field-row" style="margin-top: 10px;">
+        <label class="field-label" for="max-history-per-origin">
+          Max history per origin
+          <input
+            type="number"
+            id="max-history-per-origin"
+            name="maxHistoryPerOrigin"
+            min="1"
+            max="50"
+            step="1"
+            class="number-input"
+          >
+          entries &nbsp;<span class="field-hint">(1–50, default: 10)</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- ── Custom cookie classification ───────────────────────── -->
+    <section class="options-section" id="section-cookies">
+      <h2 class="section-heading">Custom cookie classification</h2>
+      <p class="section-desc">
+        Customize cookie sensitivity rules. Enter comma-separated cookie names.
+      </p>
+      <div class="field-row">
+        <label class="field-label-block" for="always-sensitive">
+          Always treat as sensitive
+          <textarea
+            id="always-sensitive"
+            name="sensitiveCookieNames"
+            rows="2"
+            class="textarea-input"
+            placeholder="e.g. session_id, auth_token, jwt"
+          ></textarea>
+        </label>
+      </div>
+      <div class="field-row" style="margin-top: 12px;">
+        <label class="field-label-block" for="always-ignore">
+          Always ignore (exempt from sensitivity checks)
+          <textarea
+            id="always-ignore"
+            name="ignoredCookieNames"
+            rows="2"
+            class="textarea-input"
+            placeholder="e.g. _ga, theme, lang_pref"
+          ></textarea>
+        </label>
+      </div>
     </section>
 
     <!-- ── Developer / Evaluation Mode ──────────────────────────── -->

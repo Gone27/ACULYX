@@ -82,11 +82,13 @@ export const POPUP_PORT_NAME = 'popup';
  */
 export const SIDEPANEL_PORT_NAME = 'sidepanel';
 
-// ─── MV3 service worker keepalive ─────────────────────────────────────────────
+// ─── Periodic maintenance alarm ───────────────────────────────────────────────
 
-export const KEEPALIVE_ALARM = 'keepalive';
-/** Period in minutes — must stay under the ~30 s Chrome idle threshold. */
-export const KEEPALIVE_PERIOD_MINUTES = 0.4;
+export const MAINTENANCE_ALARM = 'maintenance';
+export const MAINTENANCE_PERIOD_MINUTES = 1.0;
+/** Deprecated alias retained for backward compatibility. */
+export const KEEPALIVE_ALARM = MAINTENANCE_ALARM;
+export const KEEPALIVE_PERIOD_MINUTES = MAINTENANCE_PERIOD_MINUTES;
 
 // ─── Default settings ─────────────────────────────────────────────────────────
 

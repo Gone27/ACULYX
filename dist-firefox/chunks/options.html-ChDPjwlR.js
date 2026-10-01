@@ -1,11 +1,12 @@
-import { r as sendToBackground, w as SEVERITY_ORDER } from "./messaging-BCZa4hwB.js";
-import { f as SettingsService, m as resolveCookieOverlaps, p as normalizeCookieList, t as PermissionsService } from "./permissions-DorKxJ_0.js";
+import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-cpmoITPm.js";
+import { f as SettingsService, m as resolveCookieOverlaps, p as normalizeCookieList, t as PermissionsService, u as LocalStorage } from "./permissions-3T9E3siW.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
 var modeRadios;
 var severityCheckboxes;
 var retainDaysInput;
+var maxHistoryInput;
 var alwaysSensitiveInput;
 var alwaysIgnoreInput;
 var allowlistEl;
@@ -23,10 +24,12 @@ var currentMode = "per-site";
 * Mutated by remove buttons; committed to storage on Save.
 */
 var workingOrigins = [];
+var initialSettingsSnapshot = "";
 document.addEventListener("DOMContentLoaded", () => {
 	modeRadios = document.querySelectorAll("input[name=\"monitoringMode\"]");
 	severityCheckboxes = document.querySelectorAll("input[name=\"severity\"]");
 	retainDaysInput = getEl("retain-history-days");
+	maxHistoryInput = getEl("max-history-per-origin");
 	alwaysSensitiveInput = getEl("always-sensitive");
 	alwaysIgnoreInput = getEl("always-ignore");
 	allowlistEl = getEl("allowlist");
@@ -41,6 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	wireModeRadios();
 	wireConflictBanner();
 	wireSaveButton();
+	wireDirtyTracking();
 	loadAndPopulate();
 });
 async function loadAndPopulate() {
@@ -57,6 +61,7 @@ async function loadAndPopulate() {
 	const filterSet = new Set(settings.severityFilter);
 	for (const cb of severityCheckboxes) cb.checked = filterSet.has(cb.value);
 	retainDaysInput.value = String(settings.retainHistoryDays);
+	maxHistoryInput.value = String(settings.maxHistoryPerOrigin ?? 10);
 	alwaysSensitiveInput.value = (settings.sensitiveCookieNames ?? settings.alwaysSensitiveCookies ?? []).join(", ");
 	alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(", ");
 	proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
@@ -67,6 +72,8 @@ async function loadAndPopulate() {
 	}
 	renderAllowlist();
 	await checkAndRenderBroadConflict();
+	initialSettingsSnapshot = getFormStateString();
+	updateDirtyState();
 }
 function wireSaveButton() {
 	saveBtn.addEventListener("click", () => {
@@ -80,18 +87,29 @@ async function handleSave() {
 		setStatus("Retain days must be between 0 and 365.", true);
 		return;
 	}
+	if (settings.maxHistoryPerOrigin < 1 || settings.maxHistoryPerOrigin > 50) {
+		setStatus("Max history per origin must be between 1 and 50.", true);
+		return;
+	}
+	saveBtn.disabled = true;
+	saveBtn.textContent = "Saving…";
 	try {
 		await SettingsService.updateSettings(settings);
 		await sendToBackground({
 			type: "SETTINGS_CHANGED",
 			settings
 		});
+		initialSettingsSnapshot = getFormStateString();
 		setStatus("Settings saved ✓", false);
 	} catch {
 		setStatus("Failed to save settings.", true);
-		return;
+	} finally {
+		saveBtn.disabled = false;
+		saveBtn.textContent = "Save settings";
 	}
-	setTimeout(() => clearStatus(), 3e3);
+	setTimeout(() => {
+		if (getFormStateString() === initialSettingsSnapshot) clearStatus();
+	}, 3e3);
 }
 function readFormValues() {
 	let monitoringMode = "per-site";
@@ -106,6 +124,7 @@ function readFormValues() {
 		if (ALL_SEVERITIES.includes(val)) severityFilter.push(val);
 	}
 	const retainHistoryDays = Math.max(0, Math.min(365, parseInt(retainDaysInput.value, 10) || 0));
+	const maxHistoryPerOrigin = Math.max(1, Math.min(50, parseInt(maxHistoryInput.value, 10) || 10));
 	const rawSensitive = alwaysSensitiveInput.value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 	const rawIgnored = alwaysIgnoreInput.value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 	const { sensitive, ignored, overlaps } = resolveCookieOverlaps(normalizeCookieList(rawSensitive), normalizeCookieList(rawIgnored));
@@ -116,7 +135,7 @@ function readFormValues() {
 		allowedOrigins: [...workingOrigins],
 		severityFilter,
 		retainHistoryDays,
-		maxHistoryPerOrigin: 10,
+		maxHistoryPerOrigin,
 		sensitiveCookieNames: sensitive,
 		ignoredCookieNames: ignored,
 		evaluationMode: proModeToggle.checked,
@@ -152,16 +171,38 @@ function buildAllowlistItem(origin) {
 	originSpan.className = "allowlist-origin";
 	originSpan.textContent = origin;
 	originSpan.title = origin;
+	const actionsDiv = document.createElement("div");
+	actionsDiv.className = "allowlist-actions";
+	const purgeBtn = document.createElement("button");
+	purgeBtn.type = "button";
+	purgeBtn.className = "btn-purge";
+	purgeBtn.textContent = "Delete stored data";
+	purgeBtn.title = `Delete stored audit history and graph data for ${origin}`;
+	purgeBtn.addEventListener("click", () => {
+		purgeOrigin(origin);
+	});
 	const removeBtn = document.createElement("button");
 	removeBtn.type = "button";
 	removeBtn.className = "btn-remove";
 	removeBtn.textContent = "Remove";
+	removeBtn.title = `Revoke browser host permission for ${origin}`;
 	removeBtn.addEventListener("click", () => {
 		removeOrigin(origin);
 	});
+	actionsDiv.appendChild(purgeBtn);
+	actionsDiv.appendChild(removeBtn);
 	li.appendChild(originSpan);
-	li.appendChild(removeBtn);
+	li.appendChild(actionsDiv);
 	return li;
+}
+/** Purge stored data for an origin without revoking permissions */
+async function purgeOrigin(origin) {
+	try {
+		await LocalStorage.purgeOriginData(origin);
+		setStatus(`Deleted stored data for ${origin}`, false);
+	} catch {
+		setStatus(`Failed to delete stored data for ${origin}`, true);
+	}
 }
 /** Remove an origin from browser permissions and re-render the list. */
 function removeOrigin(origin) {
@@ -235,14 +276,41 @@ function updateAllowlistVisibility(mode) {
 	if (mode === "per-site") sectionAllowlist.removeAttribute("hidden");
 	else sectionAllowlist.setAttribute("hidden", "");
 }
-function setStatus(msg, isError) {
+function getFormStateString() {
+	const current = readFormValues();
+	return JSON.stringify({
+		monitoringMode: current.monitoringMode,
+		severityFilter: [...current.severityFilter].sort(),
+		retainHistoryDays: current.retainHistoryDays,
+		maxHistoryPerOrigin: current.maxHistoryPerOrigin,
+		sensitiveCookieNames: [...current.sensitiveCookieNames].sort(),
+		ignoredCookieNames: [...current.ignoredCookieNames].sort(),
+		evaluationMode: current.evaluationMode
+	});
+}
+function updateDirtyState() {
+	if (!initialSettingsSnapshot) return;
+	if (getFormStateString() !== initialSettingsSnapshot) setStatus("Unsaved changes", false, true);
+	else if (saveStatus.classList.contains("dirty")) clearStatus();
+}
+function wireDirtyTracking() {
+	for (const radio of modeRadios) radio.addEventListener("change", updateDirtyState);
+	for (const cb of severityCheckboxes) cb.addEventListener("change", updateDirtyState);
+	retainDaysInput.addEventListener("input", updateDirtyState);
+	maxHistoryInput.addEventListener("input", updateDirtyState);
+	alwaysSensitiveInput.addEventListener("input", updateDirtyState);
+	alwaysIgnoreInput.addEventListener("input", updateDirtyState);
+	proModeToggle.addEventListener("change", updateDirtyState);
+}
+function setStatus(msg, isError, isDirty = false) {
 	saveStatus.textContent = msg;
+	saveStatus.className = "save-status";
 	if (isError) saveStatus.classList.add("error");
-	else saveStatus.classList.remove("error");
+	else if (isDirty) saveStatus.classList.add("dirty");
 }
 function clearStatus() {
 	saveStatus.textContent = "";
-	saveStatus.classList.remove("error");
+	saveStatus.className = "save-status";
 }
 /** Returns a typed, non-null reference to a DOM element by ID. */
 function getEl(id) {
@@ -268,4 +336,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-B2kWl96h.js.map
+//# sourceMappingURL=options.html-ChDPjwlR.js.map

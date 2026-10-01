@@ -10,6 +10,7 @@
 import type { Settings, Severity } from '../shared/types';
 import { SettingsService, normalizeCookieList, resolveCookieOverlaps } from '../shared/settings';
 import { PermissionsService } from '../background/permissions';
+import { LocalStorage } from '../shared/storage';
 import { sendToBackground } from '../shared/messaging';
 import { SEVERITY_ORDER } from '../shared/constants';
 
@@ -20,6 +21,7 @@ const ALL_SEVERITIES: Severity[] = [...SEVERITY_ORDER];
 let modeRadios: NodeListOf<HTMLInputElement>;
 let severityCheckboxes: NodeListOf<HTMLInputElement>;
 let retainDaysInput: HTMLInputElement;
+let maxHistoryInput: HTMLInputElement;
 let alwaysSensitiveInput: HTMLTextAreaElement;
 let alwaysIgnoreInput: HTMLTextAreaElement;
 let allowlistEl: HTMLUListElement;
@@ -38,6 +40,7 @@ let currentMode: Settings['monitoringMode'] = 'per-site';
  * Mutated by remove buttons; committed to storage on Save.
  */
 let workingOrigins: string[] = [];
+let initialSettingsSnapshot: string = '';
 
 /* ================================================================
    Boot
@@ -48,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   modeRadios           = document.querySelectorAll<HTMLInputElement>('input[name="monitoringMode"]');
   severityCheckboxes   = document.querySelectorAll<HTMLInputElement>('input[name="severity"]');
   retainDaysInput      = getEl<HTMLInputElement>('retain-history-days');
+  maxHistoryInput      = getEl<HTMLInputElement>('max-history-per-origin');
   alwaysSensitiveInput = getEl<HTMLTextAreaElement>('always-sensitive');
   alwaysIgnoreInput    = getEl<HTMLTextAreaElement>('always-ignore');
   allowlistEl          = getEl<HTMLUListElement>('allowlist');
@@ -63,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireModeRadios();
   wireConflictBanner();
   wireSaveButton();
+  wireDirtyTracking();
   void loadAndPopulate();
 });
 
@@ -94,6 +99,7 @@ async function loadAndPopulate(): Promise<void> {
 
   // ── History ──────────────────────────────────────────────────
   retainDaysInput.value = String(settings.retainHistoryDays);
+  maxHistoryInput.value = String(settings.maxHistoryPerOrigin ?? 10);
   alwaysSensitiveInput.value = (settings.sensitiveCookieNames ?? settings.alwaysSensitiveCookies ?? []).join(', ');
   alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(', ');
   proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
@@ -107,6 +113,10 @@ async function loadAndPopulate(): Promise<void> {
   }
   renderAllowlist();
   await checkAndRenderBroadConflict();
+
+  // Snapshot after full population for dirty state checking
+  initialSettingsSnapshot = getFormStateString();
+  updateDirtyState();
 }
 
 /* ================================================================
@@ -129,18 +139,32 @@ async function handleSave(): Promise<void> {
     setStatus('Retain days must be between 0 and 365.', true);
     return;
   }
+  if (settings.maxHistoryPerOrigin < 1 || settings.maxHistoryPerOrigin > 50) {
+    setStatus('Max history per origin must be between 1 and 50.', true);
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
 
   try {
     await SettingsService.updateSettings(settings);
     await sendToBackground({ type: 'SETTINGS_CHANGED', settings });
+    initialSettingsSnapshot = getFormStateString();
     setStatus('Settings saved ✓', false);
   } catch {
     setStatus('Failed to save settings.', true);
-    return;
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save settings';
   }
 
   // Auto-clear success message after 3 seconds.
-  setTimeout(() => clearStatus(), 3000);
+  setTimeout(() => {
+    if (getFormStateString() === initialSettingsSnapshot) {
+      clearStatus();
+    }
+  }, 3000);
 }
 
 /* ================================================================
@@ -174,6 +198,7 @@ function readFormValues(): Settings {
 
   // Retain history days
   const retainHistoryDays = Math.max(0, Math.min(365, parseInt(retainDaysInput.value, 10) || 0));
+  const maxHistoryPerOrigin = Math.max(1, Math.min(50, parseInt(maxHistoryInput.value, 10) || 10));
   const rawSensitive = alwaysSensitiveInput.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const rawIgnored = alwaysIgnoreInput.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const { sensitive, ignored, overlaps } = resolveCookieOverlaps(
@@ -191,7 +216,7 @@ function readFormValues(): Settings {
     allowedOrigins: [...workingOrigins],
     severityFilter,
     retainHistoryDays,
-    maxHistoryPerOrigin: 10,
+    maxHistoryPerOrigin,
     sensitiveCookieNames: sensitive,
     ignoredCookieNames: ignored,
     evaluationMode: proModeToggle.checked,
@@ -241,21 +266,46 @@ function buildAllowlistItem(origin: string): HTMLLIElement {
   const originSpan = document.createElement('span');
   originSpan.className = 'allowlist-origin';
   originSpan.textContent = origin;     // origin is trusted but use textContent anyway
-  // Provide a title for long origins that get truncated.
   originSpan.title = origin;
+
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'allowlist-actions';
+
+  const purgeBtn = document.createElement('button');
+  purgeBtn.type = 'button';
+  purgeBtn.className = 'btn-purge';
+  purgeBtn.textContent = 'Delete stored data';
+  purgeBtn.title = `Delete stored audit history and graph data for ${origin}`;
+  purgeBtn.addEventListener('click', () => {
+    void purgeOrigin(origin);
+  });
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove';
   removeBtn.textContent = 'Remove';
+  removeBtn.title = `Revoke browser host permission for ${origin}`;
   removeBtn.addEventListener('click', () => {
     removeOrigin(origin);
   });
 
+  actionsDiv.appendChild(purgeBtn);
+  actionsDiv.appendChild(removeBtn);
+
   li.appendChild(originSpan);
-  li.appendChild(removeBtn);
+  li.appendChild(actionsDiv);
 
   return li;
+}
+
+/** Purge stored data for an origin without revoking permissions */
+async function purgeOrigin(origin: string): Promise<void> {
+  try {
+    await LocalStorage.purgeOriginData(origin);
+    setStatus(`Deleted stored data for ${origin}`, false);
+  } catch {
+    setStatus(`Failed to delete stored data for ${origin}`, true);
+  }
 }
 
 /** Remove an origin from browser permissions and re-render the list. */
@@ -362,21 +412,64 @@ function updateAllowlistVisibility(mode: string): void {
 }
 
 /* ================================================================
+   Dirty state tracking
+   ================================================================ */
+
+function getFormStateString(): string {
+  const current = readFormValues();
+  return JSON.stringify({
+    monitoringMode: current.monitoringMode,
+    severityFilter: [...current.severityFilter].sort(),
+    retainHistoryDays: current.retainHistoryDays,
+    maxHistoryPerOrigin: current.maxHistoryPerOrigin,
+    sensitiveCookieNames: [...current.sensitiveCookieNames].sort(),
+    ignoredCookieNames: [...current.ignoredCookieNames].sort(),
+    evaluationMode: current.evaluationMode,
+  });
+}
+
+function updateDirtyState(): void {
+  if (!initialSettingsSnapshot) return;
+  const currentSnapshot = getFormStateString();
+  const isDirty = currentSnapshot !== initialSettingsSnapshot;
+  if (isDirty) {
+    setStatus('Unsaved changes', false, true);
+  } else if (saveStatus.classList.contains('dirty')) {
+    clearStatus();
+  }
+}
+
+function wireDirtyTracking(): void {
+  for (const radio of modeRadios) {
+    radio.addEventListener('change', updateDirtyState);
+  }
+  for (const cb of severityCheckboxes) {
+    cb.addEventListener('change', updateDirtyState);
+  }
+  retainDaysInput.addEventListener('input', updateDirtyState);
+  maxHistoryInput.addEventListener('input', updateDirtyState);
+  alwaysSensitiveInput.addEventListener('input', updateDirtyState);
+  alwaysIgnoreInput.addEventListener('input', updateDirtyState);
+  proModeToggle.addEventListener('change', updateDirtyState);
+}
+
+/* ================================================================
    Status message helpers
    ================================================================ */
 
-function setStatus(msg: string, isError: boolean): void {
+function setStatus(msg: string, isError: boolean, isDirty: boolean = false): void {
   saveStatus.textContent = msg;
+  saveStatus.className = 'save-status';
   if (isError) {
     saveStatus.classList.add('error');
-  } else {
-    saveStatus.classList.remove('error');
+  } else if (isDirty) {
+    saveStatus.classList.add('dirty');
   }
 }
 
 function clearStatus(): void {
   saveStatus.textContent = '';
-  saveStatus.classList.remove('error');
+  saveStatus.className = 'save-status';
 }
 
 /* ================================================================

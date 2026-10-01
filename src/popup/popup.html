@@ -70,7 +70,11 @@
 
   <!-- Top findings list (max 5) -->
   <div class="findings-section" id="findings-section" hidden role="region" aria-label="Security Findings">
-    <h2 class="section-title">Top findings</h2>
+    <div class="findings-header">
+      <h2 class="section-title">Top findings</h2>
+      <button class="btn-filter-override" id="show-all-findings-btn" hidden type="button">Show all</button>
+    </div>
+    <div class="findings-filter-notice" id="findings-filter-notice" hidden></div>
     <ul class="findings-list" id="findings-list" role="list"></ul>
   </div>
 

@@ -9,8 +9,8 @@
  * processing WebRequest events without dropping state.
  */
 
-import { KEEPALIVE_ALARM, KEEPALIVE_PERIOD_MINUTES } from '../shared/constants';
-import { SessionStorage } from '../shared/storage';
+import { MAINTENANCE_ALARM, MAINTENANCE_PERIOD_MINUTES } from '../shared/constants';
+import { SessionStorage, LocalStorage } from '../shared/storage';
 import type { TabState, AuthBaseline } from '../shared/types';
 
 // ---------------------------------------------------------------------------
@@ -31,27 +31,22 @@ export const tabStates: Map<number, TabState> = new Map();
 export const originAuthBaselines: Map<string, AuthBaseline> = new Map();
 
 // ---------------------------------------------------------------------------
-// Keepalive
+// Maintenance alarm
 // ---------------------------------------------------------------------------
 
 /**
- * Registers the recurring keepalive alarm and its listener.
+ * Registers the periodic maintenance alarm and its listener.
  *
- * Call once at SW startup (both fresh install and revival).
- * chrome.alarms.create is idempotent for a given name — calling it again
- * while the alarm already exists simply resets the period, which is fine.
+ * Runs periodic history pruning sweeps and cleans up expired data.
  */
 export function initLifecycle(): void {
-  // Create (or re-arm) the periodic alarm that prevents the SW from sleeping.
-  void chrome.alarms.create(KEEPALIVE_ALARM, {
-    periodInMinutes: KEEPALIVE_PERIOD_MINUTES,
+  void chrome.alarms.create(MAINTENANCE_ALARM, {
+    periodInMinutes: MAINTENANCE_PERIOD_MINUTES,
   });
 
-  // The alarm listener does nothing intentionally: merely *receiving* the
-  // alarm event is enough to wake/keep the service worker alive.
   chrome.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm): void => {
-    if (alarm.name === KEEPALIVE_ALARM) {
-      // Intentional no-op — wakeup is the sole purpose.
+    if (alarm.name === MAINTENANCE_ALARM || alarm.name === 'keepalive') {
+      void LocalStorage.pruneAllHistory();
     }
   });
 }
@@ -78,4 +73,7 @@ export async function hydrateFromSession(): Promise<void> {
   for (const [origin, baseline] of baselines) {
     originAuthBaselines.set(origin, baseline);
   }
+
+  // Initial maintenance sweep on SW startup/hydration
+  void LocalStorage.pruneAllHistory();
 }

@@ -1,7 +1,31 @@
-import { r as sendToBackground, w as SEVERITY_ORDER, x as POPUP_PORT_NAME } from "./messaging-BCZa4hwB.js";
-import { f as SettingsService, t as PermissionsService, u as LocalStorage } from "./permissions-DorKxJ_0.js";
+import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-cpmoITPm.js";
+import { f as SettingsService, t as PermissionsService, u as LocalStorage } from "./permissions-3T9E3siW.js";
 import { t as isModeCaptureAllowed } from "./gating-BKxraNh3.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
+//#region src/shared/filters.ts
+/**
+* Pure presentation selector to filter findings by allowed severity levels.
+*
+* @param findings - Full list of findings computed by the rules engine
+* @param severityFilter - Severities allowed for display (from user settings)
+* @param showAllOverride - Whether the user has temporarily opted to show all findings
+*/
+function selectVisibleFindings(findings, severityFilter, showAllOverride = false) {
+	if (showAllOverride || severityFilter.length === 0) return {
+		visibleFindings: [...findings],
+		hiddenCount: 0
+	};
+	const allowed = new Set(severityFilter);
+	const visibleFindings = [];
+	let hiddenCount = 0;
+	for (const finding of findings) if (allowed.has(finding.severity)) visibleFindings.push(finding);
+	else hiddenCount++;
+	return {
+		visibleFindings,
+		hiddenCount
+	};
+}
+//#endregion
 //#region src/popup/popup.ts
 var gradeBadge;
 var badgeGrade;
@@ -39,12 +63,20 @@ var authDiffDelta;
 var authDiffMeta;
 var authDiffList;
 var openGraphBtn;
+var findingsFilterNotice;
+var showAllFindingsBtn;
 /** The tab ID currently being inspected by the popup. */
 var currentTabId = null;
 /** The normalised origin (scheme + host + port) of the active tab. */
 var currentOrigin = "";
 /** Last full TabState received — used by the export function. */
 var currentState = null;
+/** Cached settings used for presentation filtering. */
+var currentSettings = null;
+/** Current findings array for filtering re-renders. */
+var currentFindings = [];
+/** Temporary override to show all findings regardless of filter. */
+var showAllFindingsOverride = false;
 document.addEventListener("DOMContentLoaded", () => {
 	gradeBadge = getEl("grade-badge");
 	badgeGrade = getEl("badge-grade");
@@ -82,6 +114,16 @@ document.addEventListener("DOMContentLoaded", () => {
 	authDiffMeta = getEl("auth-diff-meta");
 	authDiffList = getEl("auth-diff-list");
 	openGraphBtn = getEl("open-graph-btn");
+	findingsFilterNotice = getEl("findings-filter-notice");
+	showAllFindingsBtn = getEl("show-all-findings-btn");
+	showAllFindingsBtn.addEventListener("click", () => {
+		showAllFindingsOverride = !showAllFindingsOverride;
+		renderFindings(currentFindings);
+	});
+	SettingsService.onSettingsChanged((newSettings) => {
+		currentSettings = newSettings;
+		if (currentFindings.length > 0) renderFindings(currentFindings);
+	});
 	wireSettingsLink();
 	wireMonitorButton();
 	wireStopMonitoringButton();
@@ -120,6 +162,7 @@ async function initPopup() {
 	}
 	currentTabId = tab.id;
 	const settings = await SettingsService.getSettings();
+	currentSettings = settings;
 	const broadActive = await PermissionsService.isBroadGrantPresent();
 	const gate = isModeCaptureAllowed(tab.url, settings, broadActive);
 	if (!gate.allowed) {
@@ -231,8 +274,25 @@ function formatServiceWorkerStatus(coverage) {
 	return "not verified";
 }
 function renderFindings(findings) {
+	currentFindings = findings;
 	while (findingsList.firstChild) findingsList.removeChild(findingsList.firstChild);
-	const top5 = [...findings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)).slice(0, 5);
+	const { visibleFindings, hiddenCount } = selectVisibleFindings(findings, currentSettings?.severityFilter ?? SEVERITY_ORDER, showAllFindingsOverride);
+	if (hiddenCount > 0 && !showAllFindingsOverride) {
+		findingsFilterNotice.textContent = `${hiddenCount} finding${hiddenCount === 1 ? "" : "s"} hidden by filter`;
+		findingsFilterNotice.hidden = false;
+		showAllFindingsBtn.textContent = "Show all";
+		showAllFindingsBtn.hidden = false;
+	} else if (showAllFindingsOverride && hiddenCount === 0 && findings.length > visibleFindings.length) {
+		findingsFilterNotice.textContent = "Showing all findings (filter overridden)";
+		findingsFilterNotice.hidden = false;
+		showAllFindingsBtn.textContent = "Reset filter";
+		showAllFindingsBtn.hidden = false;
+	} else {
+		findingsFilterNotice.textContent = "";
+		findingsFilterNotice.hidden = true;
+		showAllFindingsBtn.hidden = true;
+	}
+	const top5 = [...visibleFindings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)).slice(0, 5);
 	for (const finding of top5) findingsList.appendChild(buildFindingItem(finding));
 }
 function buildFindingItem(finding) {
@@ -964,4 +1024,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-CyePEuHx.js.map
+//# sourceMappingURL=popup.html-DjL8Ruda.js.map

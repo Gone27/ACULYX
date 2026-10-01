@@ -21,6 +21,7 @@ import type {
   SubdomainTrustAnalysis,
   SubdomainTrustVector,
   ApiEndpointState,
+  SettingsV2,
 } from '../shared/types';
 import { sendToBackground } from '../shared/messaging';
 import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
@@ -28,6 +29,7 @@ import { LocalStorage } from '../shared/storage';
 import { SettingsService } from '../shared/settings';
 import { PermissionsService } from '../background/permissions';
 import { isModeCaptureAllowed } from '../shared/gating';
+import { selectVisibleFindings } from '../shared/filters';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let gradeBadge:          HTMLDivElement;
@@ -66,6 +68,8 @@ let authDiffDelta:       HTMLSpanElement;
 let authDiffMeta:        HTMLDivElement;
 let authDiffList:        HTMLUListElement;
 let openGraphBtn:        HTMLButtonElement;
+let findingsFilterNotice: HTMLDivElement;
+let showAllFindingsBtn:  HTMLButtonElement;
 
 /** The tab ID currently being inspected by the popup. */
 let currentTabId: number | null = null;
@@ -73,6 +77,12 @@ let currentTabId: number | null = null;
 let currentOrigin: string = '';
 /** Last full TabState received — used by the export function. */
 let currentState: TabState | null = null;
+/** Cached settings used for presentation filtering. */
+let currentSettings: SettingsV2 | null = null;
+/** Current findings array for filtering re-renders. */
+let currentFindings: Finding[] = [];
+/** Temporary override to show all findings regardless of filter. */
+let showAllFindingsOverride: boolean = false;
 
 /* ================================================================
    Boot
@@ -115,6 +125,20 @@ document.addEventListener('DOMContentLoaded', () => {
   authDiffMeta        = getEl<HTMLDivElement>('auth-diff-meta');
   authDiffList        = getEl<HTMLUListElement>('auth-diff-list');
   openGraphBtn        = getEl<HTMLButtonElement>('open-graph-btn');
+  findingsFilterNotice = getEl<HTMLDivElement>('findings-filter-notice');
+  showAllFindingsBtn  = getEl<HTMLButtonElement>('show-all-findings-btn');
+
+  showAllFindingsBtn.addEventListener('click', () => {
+    showAllFindingsOverride = !showAllFindingsOverride;
+    renderFindings(currentFindings);
+  });
+
+  SettingsService.onSettingsChanged((newSettings) => {
+    currentSettings = newSettings;
+    if (currentFindings.length > 0) {
+      renderFindings(currentFindings);
+    }
+  });
 
   wireSettingsLink();
   wireMonitorButton();
@@ -167,6 +191,7 @@ async function initPopup(): Promise<void> {
   currentTabId = tab.id;
 
   const settings = await SettingsService.getSettings();
+  currentSettings = settings;
   const broadActive = await PermissionsService.isBroadGrantPresent();
   const gate = isModeCaptureAllowed(tab.url, settings, broadActive);
   if (!gate.allowed) {
@@ -350,11 +375,35 @@ function formatServiceWorkerStatus(coverage: CoverageInfo): string {
 /* ── Findings list ────────────────────────────────────────────── */
 
 function renderFindings(findings: Finding[]): void {
+  currentFindings = findings;
   while (findingsList.firstChild) {
     findingsList.removeChild(findingsList.firstChild);
   }
 
-  const sorted = [...findings].sort(
+  const severityFilter = currentSettings?.severityFilter ?? SEVERITY_ORDER;
+  const { visibleFindings, hiddenCount } = selectVisibleFindings(
+    findings,
+    severityFilter,
+    showAllFindingsOverride,
+  );
+
+  if (hiddenCount > 0 && !showAllFindingsOverride) {
+    findingsFilterNotice.textContent = `${hiddenCount} finding${hiddenCount === 1 ? '' : 's'} hidden by filter`;
+    findingsFilterNotice.hidden = false;
+    showAllFindingsBtn.textContent = 'Show all';
+    showAllFindingsBtn.hidden = false;
+  } else if (showAllFindingsOverride && hiddenCount === 0 && findings.length > visibleFindings.length) {
+    findingsFilterNotice.textContent = 'Showing all findings (filter overridden)';
+    findingsFilterNotice.hidden = false;
+    showAllFindingsBtn.textContent = 'Reset filter';
+    showAllFindingsBtn.hidden = false;
+  } else {
+    findingsFilterNotice.textContent = '';
+    findingsFilterNotice.hidden = true;
+    showAllFindingsBtn.hidden = true;
+  }
+
+  const sorted = [...visibleFindings].sort(
     (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity),
   );
   const top5 = sorted.slice(0, 5);
