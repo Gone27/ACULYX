@@ -6,6 +6,7 @@ import {
   clearTabCapture,
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
+  PermissionsService,
 } from '../../src/background/permissions';
 import type { TabState } from '../../src/shared/types';
 
@@ -195,4 +196,94 @@ describe('Permission Reconciliation (onRemoved & startup)', () => {
     expect(tabStates.has(10)).toBe(true);
     expect(tabStates.has(20)).toBe(false);
   });
+
+  it('retains tabs with narrow grants when broad grant is removed', async () => {
+    const tabStates = new Map<number, TabState>();
+    tabStates.set(1, makeMockTabState(1, 'https://app.example'));
+    tabStates.set(2, makeMockTabState(2, 'https://other.example'));
+
+    const removeTabStateMock = vi.fn().mockResolvedValue(undefined);
+
+    // User removes <all_urls>, but https://app.example/* is still in activeOrigins
+    const cleared = await reconcilePermissionsOnRemoved(['<all_urls>'], {
+      tabStates,
+      sessionStorage: { removeTabState: removeTabStateMock },
+      getActiveOrigins: vi.fn().mockResolvedValue(['https://app.example']),
+      isBroadGrantActive: vi.fn().mockResolvedValue(false),
+    });
+
+    // Only other.example should be cleared; app.example retains its state!
+    expect(cleared).toEqual([2]);
+    expect(tabStates.has(1)).toBe(true);
+    expect(tabStates.has(2)).toBe(false);
+    expect(removeTabStateMock).toHaveBeenCalledWith(2);
+    expect(removeTabStateMock).not.toHaveBeenCalledWith(1);
+  });
 });
+
+describe('PermissionsService.removeAllBroadGrants', () => {
+  it('identifies and removes all broad grants truthfully', async () => {
+    let callCount = 0;
+    const getAllMock = vi.fn().mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve({
+          origins: ['<all_urls>', '*://*/*', 'https://*/*', 'https://app.example/*'],
+        });
+      }
+      // After removal, only narrow grant remains
+      return Promise.resolve({
+        origins: ['https://app.example/*'],
+      });
+    });
+
+    let removedPatterns: string[] = [];
+    const removeMock = vi.fn().mockImplementation((options: { origins: string[] }, callback: (res: boolean) => void) => {
+      removedPatterns = options.origins;
+      callback(true);
+    });
+
+    const chromeMock = {
+      permissions: {
+        getAll: getAllMock,
+        remove: removeMock,
+      },
+    } as unknown as typeof chrome;
+
+    vi.stubGlobal('chrome', chromeMock);
+
+    try {
+      const result = await PermissionsService.removeAllBroadGrants();
+      expect(result).toBe(true);
+      expect(removedPatterns).toEqual(['<all_urls>', '*://*/*', 'https://*/*']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns false if broad pattern removal fails or access remains', async () => {
+    const getAllMock = vi.fn().mockResolvedValue({
+      origins: ['<all_urls>', 'https://app.example/*'],
+    });
+    const removeMock = vi.fn().mockImplementation((_options: unknown, callback: (res: boolean) => void) => {
+      callback(false);
+    });
+
+    const chromeMock = {
+      permissions: {
+        getAll: getAllMock,
+        remove: removeMock,
+      },
+    } as unknown as typeof chrome;
+
+    vi.stubGlobal('chrome', chromeMock);
+
+    try {
+      const result = await PermissionsService.removeAllBroadGrants();
+      expect(result).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+

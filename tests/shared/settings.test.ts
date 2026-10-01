@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   migrateSettings,
   normalizeCookieList,
   resolveCookieOverlaps,
   SettingsService,
+  UnsupportedSchemaError,
 } from '../../src/shared/settings';
 import { runRules } from '../../src/rules/engine';
 import type { Hop, CookieRecord } from '../../src/shared/types';
@@ -175,5 +176,64 @@ describe('Settings schema v2 and migration', () => {
     unsubscribe();
     SettingsService.clearCache();
   });
+
+  it('rejects future schema versions without overwriting storage or downgrading', async () => {
+    expect(() => migrateSettings({ schemaVersion: 3, newFeature: 'test' })).toThrow(UnsupportedSchemaError);
+
+    SettingsService.clearCache();
+    const storageGetMock = vi.fn().mockResolvedValue({
+      settings: { schemaVersion: 3, futureKey: 'do-not-drop-me' },
+    });
+    const storageSetMock = vi.fn().mockResolvedValue(undefined);
+
+    const chromeMock = {
+      storage: {
+        local: {
+          get: storageGetMock,
+          set: storageSetMock,
+        },
+        onChanged: { addListener: vi.fn() },
+      },
+    } as unknown as typeof chrome;
+
+    vi.stubGlobal('chrome', chromeMock);
+
+    try {
+      await expect(SettingsService.getSettings()).rejects.toThrow(UnsupportedSchemaError);
+      // Ensure storage was never overwritten with downgraded schema
+      expect(storageSetMock).not.toHaveBeenCalled();
+      // Ensure cached settings failed closed to 'off'
+      expect(SettingsService.getCachedSettings().monitoringMode).toBe('off');
+    } finally {
+      vi.unstubAllGlobals();
+      SettingsService.clearCache();
+    }
+  });
+
+  it('fails closed to off when storage read fails with an error', async () => {
+    SettingsService.clearCache();
+    const storageGetMock = vi.fn().mockRejectedValue(new Error('Storage disk corruption'));
+
+    const chromeMock = {
+      storage: {
+        local: {
+          get: storageGetMock,
+          set: vi.fn(),
+        },
+        onChanged: { addListener: vi.fn() },
+      },
+    } as unknown as typeof chrome;
+
+    vi.stubGlobal('chrome', chromeMock);
+
+    try {
+      await expect(SettingsService.getSettings()).rejects.toThrow('Storage disk corruption');
+      expect(SettingsService.getCachedSettings().monitoringMode).toBe('off');
+    } finally {
+      vi.unstubAllGlobals();
+      SettingsService.clearCache();
+    }
+  });
 });
+
 

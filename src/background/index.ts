@@ -16,7 +16,8 @@
  */
 
 import { tabStates, initLifecycle, hydrateFromSession, originAuthBaselines } from './lifecycle';
-import { registerCaptureListeners, captureMap } from './capture';
+import { registerCaptureListeners, captureMap, clearInFlightCaptures } from './capture';
+import { CapturePolicy } from './capture-policy';
 import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
 import { runRules, runApiRules } from '../rules/engine';
@@ -27,11 +28,9 @@ import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { SessionStorage, LocalStorage } from '../shared/storage';
 import { PortRegistry, portSend } from '../shared/messaging';
 import {
-  PermissionsService,
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
 } from './permissions';
-import { isModeCaptureAllowed } from '../shared/gating';
 import {
   BADGE_COLORS,
   RESTRICTED_SCHEMES,
@@ -45,7 +44,6 @@ import type {
   Grade,
   CoverageInfo,
   CoverageLedgerEntry,
-  Settings,
   SettingsV2,
   ApiHop,
   ApiEndpointState,
@@ -67,9 +65,15 @@ const pendingServiceWorkerReports = new Map<number, {
 }>();
 const pendingMetaCspReports = new Set<number>();
 
-let currentSettings: SettingsV2 = DEFAULT_SETTINGS;
-void SettingsService.getSettings().then((s) => { currentSettings = s; }).catch(() => {});
-SettingsService.onSettingsChanged((s) => { currentSettings = s; });
+// Fail-closed default settings (mode: 'off') until storage hydration resolves
+let currentSettings: SettingsV2 = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
+export const settingsReady = SettingsService.whenReady().then((s) => {
+  currentSettings = s;
+  return s;
+});
+SettingsService.onSettingsChanged((s) => {
+  currentSettings = s;
+});
 
 function recomputeTabState(tabId: number, state: TabState): void {
   const result = runRules({
@@ -269,41 +273,30 @@ async function onHopComplete(
   state.origin = originFromUrl(hop.url) ?? hop.url;
 
   // ------------------------------------------------------------------
-  // 2. Guard: mode capture gating & restricted URLs.
+  // 2. Guard: authoritative fail-closed capture policy.
   // ------------------------------------------------------------------
-  const broadActive = await PermissionsService.isBroadGrantPresent();
-  const gate = isModeCaptureAllowed(hop.url, currentSettings, broadActive);
-  if (!gate.allowed) {
-    if (gate.reason === 'off') {
+  const captureCheck = await CapturePolicy.evaluate(hop.url);
+  if (!captureCheck.allowed) {
+    if (captureCheck.reason === 'off') {
       void chrome.action?.setBadgeText({ tabId, text: '' })?.catch?.(() => undefined);
       return;
     }
-    if (gate.reason === 'broad-access-conflict') {
+    if (captureCheck.reason === 'broad-access-conflict') {
       setBadgeForTab(tabId, '?');
       return;
     }
-    if (gate.reason === 'restricted-url') {
+    if (captureCheck.reason === 'restricted-url') {
       state.coverage.isRestricted = true;
       tabStates.set(tabId, state);
       setBadgeForTab(tabId, '?');
       return;
     }
-    return;
-  }
-
-  // ------------------------------------------------------------------
-  // 3. Guard: check the user has granted permission for this origin.
-  // ------------------------------------------------------------------
-  const origin = state.origin;
-  if (!origin || origin === hop.url) return; // originFromUrl returned null (non-http URL)
-
-  const permitted = broadActive || (await PermissionsService.hasPermissionForOrigin(origin));
-  if (!permitted) {
-    // Not monitored — reset badge to '?' and do nothing further.
+    // not-permitted or other unprivileged reason
     state.coverage.isRestricted = false;
     setBadgeForTab(tabId, '?');
     return;
   }
+
   state.coverage.metaCspFound ||= pendingMetaCspReports.has(tabId);
   state.monitoredByUser = true;
 
@@ -466,8 +459,10 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port): void => {
   if (senderTabId !== undefined) {
     portRegistry.register(port, senderTabId);
 
-    // Push current state immediately so the UI doesn't wait for the next hop.
-    const current = tabStates.get(senderTabId);
+  // Push current state immediately so the UI doesn't wait for the next hop.
+    const current = currentSettings.monitoringMode !== 'off'
+      ? tabStates.get(senderTabId)
+      : undefined;
     if (current) {
       const response: StateResponseMessage = {
         type: 'STATE_RESPONSE',
@@ -486,10 +481,12 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port): void => {
       // Register with the resolved tabId in case we didn't have it at connect.
       portRegistry.register(port, resolvedTabId);
 
-      const stateForTab = tabStates.get(resolvedTabId);
+      const stateForTab = currentSettings.monitoringMode !== 'off'
+        ? (tabStates.get(resolvedTabId) ?? null)
+        : null;
       const response: StateResponseMessage = {
         type: 'STATE_RESPONSE',
-        state: stateForTab ?? null,
+        state: stateForTab,
       };
       portSend(port, response);
     }
@@ -507,7 +504,7 @@ chrome.runtime.onMessage.addListener(
     sendResponse: (response: ExtensionMessage) => void,
   ): boolean => {
     if (message.type === 'REQUEST_STATE') {
-      const stateForTab = message.tabId !== undefined
+      const stateForTab = message.tabId !== undefined && currentSettings.monitoringMode !== 'off'
         ? tabStates.get(message.tabId) ?? null
         : null;
 
@@ -554,8 +551,54 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'SETTINGS_CHANGED') {
-      currentSettings = message.settings;
-      portRegistry.broadcastAll(message);
+      void (async () => {
+        const previousSettings = currentSettings;
+        currentSettings = message.settings;
+
+        if (message.settings.monitoringMode === 'off') {
+          // 1. Immediately clear in-flight WebRequest captures
+          clearInFlightCaptures();
+
+          // 2. Clear in-memory tab state and pending reports
+          const activeTabIds = Array.from(tabStates.keys());
+          tabStates.clear();
+          pendingServiceWorkerReports.clear();
+          pendingMetaCspReports.clear();
+
+          // 3. Clear session storage entries
+          await SessionStorage.clearAllTabStates();
+
+          // 4. Clear badges for all open tabs
+          for (const tabId of activeTabIds) {
+            chrome.action?.setBadgeText?.({ tabId, text: '' })?.catch?.(() => undefined);
+          }
+
+          // 5. Notify open ports for each cleared tab
+          for (const tabId of activeTabIds) {
+            portRegistry.broadcast(tabId, { type: 'STATE_RESPONSE', state: null });
+          }
+        } else {
+          // Recompute already-captured tab findings if rule-affecting cookie lists changed
+          const prevSens = previousSettings.sensitiveCookieNames ?? previousSettings.alwaysSensitiveCookies ?? [];
+          const newSens = message.settings.sensitiveCookieNames ?? message.settings.alwaysSensitiveCookies ?? [];
+          const prevIgn = previousSettings.ignoredCookieNames ?? previousSettings.alwaysIgnoreCookies ?? [];
+          const newIgn = message.settings.ignoredCookieNames ?? message.settings.alwaysIgnoreCookies ?? [];
+
+          const sensitiveChanged = prevSens.length !== newSens.length || prevSens.some((v, i) => v !== newSens[i]);
+          const ignoredChanged = prevIgn.length !== newIgn.length || prevIgn.some((v, i) => v !== newIgn[i]);
+
+          if (sensitiveChanged || ignoredChanged) {
+            for (const [tabId, state] of Array.from(tabStates.entries())) {
+              recomputeTabState(tabId, state);
+              void SessionStorage.setTabState(state).catch(() => undefined);
+              portRegistry.broadcast(tabId, { type: 'TAB_STATE_UPDATE', state });
+            }
+          }
+        }
+
+        portRegistry.broadcastAll(message);
+      })();
+
       sendResponse(message);
       return false;
     }
@@ -752,12 +795,6 @@ chrome.runtime.onMessage.addListener(
 // Startup sequence
 // ---------------------------------------------------------------------------
 
-chrome.storage.local.onChanged.addListener((changes: { [key: string]: chrome.storage.StorageChange }) => {
-  if (changes.settings?.newValue !== undefined) {
-    currentSettings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue as Partial<Settings>) };
-  }
-});
-
 // 1. Arm the keepalive alarm immediately on SW startup.
 initLifecycle();
 
@@ -771,9 +808,8 @@ registerCaptureListeners(
     if (!state) return;
 
     void (async () => {
-      const broadActive = await PermissionsService.isBroadGrantPresent();
-      const gate = isModeCaptureAllowed(apiHop.url, currentSettings, broadActive);
-      if (!gate.allowed) return;
+      const allowed = await CapturePolicy.isAllowed(apiHop.url);
+      if (!allowed) return;
 
       const targetOrigin = originFromUrl(apiHop.url);
       const isFirstParty = state.origin === targetOrigin;

@@ -1342,8 +1342,14 @@ function showBroadAccessConflictNotice(): void {
   removeBtn.className = 'btn-secondary';
   removeBtn.textContent = 'Remove broad access';
   removeBtn.addEventListener('click', () => {
-    chrome.permissions.remove({ origins: ['<all_urls>', '*://*/*'] }, () => {
-      void initPopup();
+    removeBtn.disabled = true;
+    void PermissionsService.removeAllBroadGrants().then((success) => {
+      removeBtn.disabled = false;
+      if (success) {
+        void initPopup();
+      } else {
+        showStateMessage('Failed to remove broad access or broad grants still remain.', 'error');
+      }
     });
   });
 

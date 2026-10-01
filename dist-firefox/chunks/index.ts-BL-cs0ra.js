@@ -1,8 +1,66 @@
 import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-cpmoITPm.js";
-import { a as registerCaptureListeners, c as originAuthBaselines, d as SessionStorage, f as SettingsService, i as captureMap, l as tabStates, n as reconcilePermissionsOnRemoved, o as hydrateFromSession, r as reconcilePermissionsOnStartup, s as initLifecycle, t as PermissionsService, u as LocalStorage } from "./permissions-3T9E3siW.js";
-import { n as isRestrictedUrl$1, t as isModeCaptureAllowed } from "./gating-BKxraNh3.js";
+import { a as captureMap, c as isModeCaptureAllowed, d as initLifecycle, f as originAuthBaselines, g as SettingsService, h as SessionStorage, i as reconcilePermissionsOnStartup, l as isRestrictedUrl$1, m as LocalStorage, n as isBroadGrant, o as clearInFlightCaptures, p as tabStates, r as reconcilePermissionsOnRemoved, s as registerCaptureListeners, t as PermissionsService, u as hydrateFromSession } from "./permissions-BZvSKL0Y.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
+//#endregion
+//#region src/background/capture-policy.ts
+/**
+* capture-policy.ts
+*
+* Single authoritative fail-closed capture policy across navigation, API,
+* and page-signal paths.
+*/
+var CapturePolicy = {
+	/**
+	* Authoritative fail-closed evaluation of whether capture is permitted for a URL.
+	* Awaits settings hydration and evaluates mode, broad grants, and origin permissions.
+	*/
+	async evaluate(url) {
+		if (url.length === 0 || isRestrictedUrl$1(url)) return {
+			allowed: false,
+			reason: "restricted-url"
+		};
+		const origin = originFromUrl(url);
+		if (origin === null || origin.length === 0) return {
+			allowed: false,
+			reason: "invalid-url"
+		};
+		let settings;
+		try {
+			settings = await SettingsService.getSettings();
+		} catch {
+			return {
+				allowed: false,
+				reason: "settings-error"
+			};
+		}
+		if (settings.monitoringMode === "off") return {
+			allowed: false,
+			reason: "off"
+		};
+		const broadActive = await PermissionsService.isBroadGrantPresent();
+		const gate = isModeCaptureAllowed(url, settings, broadActive);
+		if (!gate.allowed) {
+			if (gate.reason === "off" || gate.reason === "broad-access-conflict" || gate.reason === "restricted-url") return {
+				allowed: false,
+				reason: gate.reason
+			};
+			return { allowed: false };
+		}
+		if (broadActive) return { allowed: true };
+		if (!await PermissionsService.hasPermissionForOrigin(origin)) return {
+			allowed: false,
+			reason: "not-permitted"
+		};
+		return { allowed: true };
+	},
+	/**
+	* Helper returning boolean allowed status.
+	*/
+	async isAllowed(url) {
+		return (await this.evaluate(url)).allowed;
+	}
+};
 //#endregion
 //#region src/background/correlate.ts
 /**
@@ -279,18 +337,44 @@ function injectPageSignals(tabId, url) {
 	if (isRestrictedUrl$1(url)) return;
 	const origin = originFromUrl(url);
 	if (origin === null || origin.length === 0) return;
-	if (SettingsService.getCachedSettings().monitoringMode === "off") return;
+	const settings = SettingsService.getCachedSettings();
+	if (settings.monitoringMode === "off") return;
 	if (typeof chrome === "undefined" || typeof chrome.permissions === "undefined") return;
-	chrome.permissions.contains({ origins: [`${origin}/*`] }, (permitted) => {
-		if (!permitted) return;
-		chrome.scripting.executeScript({
-			target: {
-				tabId,
-				frameIds: [0]
-			},
-			func: reportPageSignals
-		}).catch(() => void 0);
-	});
+	const performInjection = (broadGrantPresent) => {
+		if (!isModeCaptureAllowed(url, settings, broadGrantPresent).allowed) return;
+		if (broadGrantPresent) {
+			if (typeof chrome.scripting !== "undefined") chrome.scripting.executeScript({
+				target: {
+					tabId,
+					frameIds: [0]
+				},
+				func: reportPageSignals
+			}).catch(() => void 0);
+			return;
+		}
+		chrome.permissions.contains({ origins: [`${origin}/*`] }, (permitted) => {
+			if (!permitted) return;
+			if (typeof chrome.scripting !== "undefined") chrome.scripting.executeScript({
+				target: {
+					tabId,
+					frameIds: [0]
+				},
+				func: reportPageSignals
+			}).catch(() => void 0);
+		});
+	};
+	if (typeof chrome.permissions.getAll === "function") {
+		const handlePerms = (perms) => {
+			const broad = (perms?.origins ?? []).some(isBroadGrant);
+			performInjection(broad);
+		};
+		try {
+			const res = chrome.permissions.getAll(handlePerms);
+			if (typeof res === "object" && res !== null && "then" in res && typeof res.then === "function") res.then(handlePerms);
+		} catch {
+			performInjection(false);
+		}
+	} else performInjection(false);
 }
 function registerPageSignalInjection() {
 	chrome.webNavigation.onCommitted.addListener((details) => {
@@ -3277,10 +3361,14 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 var portRegistry = new PortRegistry();
 var pendingServiceWorkerReports = /* @__PURE__ */ new Map();
 var pendingMetaCspReports = /* @__PURE__ */ new Set();
-var currentSettings = DEFAULT_SETTINGS;
-SettingsService.getSettings().then((s) => {
+var currentSettings = {
+	...DEFAULT_SETTINGS,
+	monitoringMode: "off"
+};
+var settingsReady = SettingsService.whenReady().then((s) => {
 	currentSettings = s;
-}).catch(() => {});
+	return s;
+});
 SettingsService.onSettingsChanged((s) => {
 	currentSettings = s;
 });
@@ -3419,31 +3507,25 @@ async function onHopComplete(tabId, hop) {
 	const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
 	state.url = hop.url;
 	state.origin = originFromUrl(hop.url) ?? hop.url;
-	const broadActive = await PermissionsService.isBroadGrantPresent();
-	const gate = isModeCaptureAllowed(hop.url, currentSettings, broadActive);
-	if (!gate.allowed) {
-		if (gate.reason === "off") {
+	const captureCheck = await CapturePolicy.evaluate(hop.url);
+	if (!captureCheck.allowed) {
+		if (captureCheck.reason === "off") {
 			chrome.action?.setBadgeText({
 				tabId,
 				text: ""
 			})?.catch?.(() => void 0);
 			return;
 		}
-		if (gate.reason === "broad-access-conflict") {
+		if (captureCheck.reason === "broad-access-conflict") {
 			setBadgeForTab(tabId, "?");
 			return;
 		}
-		if (gate.reason === "restricted-url") {
+		if (captureCheck.reason === "restricted-url") {
 			state.coverage.isRestricted = true;
 			tabStates.set(tabId, state);
 			setBadgeForTab(tabId, "?");
 			return;
 		}
-		return;
-	}
-	const origin = state.origin;
-	if (!origin || origin === hop.url) return;
-	if (!(broadActive || await PermissionsService.hasPermissionForOrigin(origin))) {
 		state.coverage.isRestricted = false;
 		setBadgeForTab(tabId, "?");
 		return;
@@ -3524,7 +3606,7 @@ chrome.runtime.onConnect.addListener((port) => {
 	const senderTabId = port.sender?.tab?.id;
 	if (senderTabId !== void 0) {
 		portRegistry.register(port, senderTabId);
-		const current = tabStates.get(senderTabId);
+		const current = currentSettings.monitoringMode !== "off" ? tabStates.get(senderTabId) : void 0;
 		if (current) portSend(port, {
 			type: "STATE_RESPONSE",
 			state: current
@@ -3537,7 +3619,7 @@ chrome.runtime.onConnect.addListener((port) => {
 			portRegistry.register(port, resolvedTabId);
 			const response = {
 				type: "STATE_RESPONSE",
-				state: tabStates.get(resolvedTabId) ?? null
+				state: currentSettings.monitoringMode !== "off" ? tabStates.get(resolvedTabId) ?? null : null
 			};
 			portSend(port, response);
 		}
@@ -3547,7 +3629,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message.type === "REQUEST_STATE") {
 		sendResponse({
 			type: "STATE_RESPONSE",
-			state: message.tabId !== void 0 ? tabStates.get(message.tabId) ?? null : null
+			state: message.tabId !== void 0 && currentSettings.monitoringMode !== "off" ? tabStates.get(message.tabId) ?? null : null
 		});
 		return false;
 	}
@@ -3577,8 +3659,42 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return false;
 	}
 	if (message.type === "SETTINGS_CHANGED") {
-		currentSettings = message.settings;
-		portRegistry.broadcastAll(message);
+		(async () => {
+			const previousSettings = currentSettings;
+			currentSettings = message.settings;
+			if (message.settings.monitoringMode === "off") {
+				clearInFlightCaptures();
+				const activeTabIds = Array.from(tabStates.keys());
+				tabStates.clear();
+				pendingServiceWorkerReports.clear();
+				pendingMetaCspReports.clear();
+				await SessionStorage.clearAllTabStates();
+				for (const tabId of activeTabIds) chrome.action?.setBadgeText?.({
+					tabId,
+					text: ""
+				})?.catch?.(() => void 0);
+				for (const tabId of activeTabIds) portRegistry.broadcast(tabId, {
+					type: "STATE_RESPONSE",
+					state: null
+				});
+			} else {
+				const prevSens = previousSettings.sensitiveCookieNames ?? previousSettings.alwaysSensitiveCookies ?? [];
+				const newSens = message.settings.sensitiveCookieNames ?? message.settings.alwaysSensitiveCookies ?? [];
+				const prevIgn = previousSettings.ignoredCookieNames ?? previousSettings.alwaysIgnoreCookies ?? [];
+				const newIgn = message.settings.ignoredCookieNames ?? message.settings.alwaysIgnoreCookies ?? [];
+				const sensitiveChanged = prevSens.length !== newSens.length || prevSens.some((v, i) => v !== newSens[i]);
+				const ignoredChanged = prevIgn.length !== newIgn.length || prevIgn.some((v, i) => v !== newIgn[i]);
+				if (sensitiveChanged || ignoredChanged) for (const [tabId, state] of Array.from(tabStates.entries())) {
+					recomputeTabState(tabId, state);
+					SessionStorage.setTabState(state).catch(() => void 0);
+					portRegistry.broadcast(tabId, {
+						type: "TAB_STATE_UPDATE",
+						state
+					});
+				}
+			}
+			portRegistry.broadcastAll(message);
+		})();
 		sendResponse(message);
 		return false;
 	}
@@ -3751,12 +3867,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	}
 	return false;
 });
-chrome.storage.local.onChanged.addListener((changes) => {
-	if (changes.settings?.newValue !== void 0) currentSettings = {
-		...DEFAULT_SETTINGS,
-		...changes.settings.newValue
-	};
-});
 initLifecycle();
 registerCaptureListeners((tabId, hop) => {
 	onHopComplete(tabId, hop);
@@ -3764,8 +3874,7 @@ registerCaptureListeners((tabId, hop) => {
 	const state = tabStates.get(apiHop.tabId);
 	if (!state) return;
 	(async () => {
-		const broadActive = await PermissionsService.isBroadGrantPresent();
-		if (!isModeCaptureAllowed(apiHop.url, currentSettings, broadActive).allowed) return;
+		if (!await CapturePolicy.isAllowed(apiHop.url)) return;
 		const targetOrigin = originFromUrl(apiHop.url);
 		const isFirstParty = state.origin === targetOrigin;
 		apiHop.isThirdParty = !isFirstParty;
@@ -3842,5 +3951,6 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 	});
 });
 //#endregion
+export { settingsReady };
 
-//# sourceMappingURL=index.ts-CuA01JhO.js.map
+//# sourceMappingURL=index.ts-BL-cs0ra.js.map

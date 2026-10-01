@@ -146,6 +146,44 @@ export const PermissionsService = {
   },
 
   /**
+   * Identifies all broad permission patterns currently granted in the browser,
+   * requests removal from the browser, and verifies that no broad grants remain.
+   * Returns true only if all broad patterns were successfully removed.
+   */
+  async removeAllBroadGrants(): Promise<boolean> {
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.permissions === 'undefined' ||
+      typeof chrome.permissions.getAll === 'undefined' ||
+      typeof chrome.permissions.remove === 'undefined'
+    ) {
+      return false;
+    }
+    const perms = await chrome.permissions.getAll();
+    const origins = perms.origins ?? [];
+    const broadOrigins = origins.filter((o) => isBroadGrant(o));
+
+    if (broadOrigins.length === 0) {
+      return true; // Already no broad grants
+    }
+
+    const removed = await new Promise<boolean>((resolve) => {
+      chrome.permissions.remove({ origins: broadOrigins }, (result) => {
+        resolve(Boolean(result));
+      });
+    });
+
+    if (!removed) {
+      return false;
+    }
+
+    // Verify broad grants are truthfully absent
+    const remainingPerms = await chrome.permissions.getAll();
+    const remainingBroad = (remainingPerms.origins ?? []).filter((o) => isBroadGrant(o));
+    return remainingBroad.length === 0;
+  },
+
+  /**
    * Revokes all optional host permissions granted to the extension.
    */
   async removeAllOptionalPermissions(): Promise<boolean> {
@@ -225,15 +263,15 @@ export async function clearTabCapture(
 /**
  * Handles permission revocation when chrome.permissions.onRemoved fires.
  * Identifies tabs whose origin permission was revoked and clears their capture.
+ * Preserves tabs whose origin remains permitted even after a broad grant is removed.
  */
 export async function reconcilePermissionsOnRemoved(
-  removedOrigins: readonly string[],
+  _removedOrigins: readonly string[],
   options?: ClearTabOptions & {
     getActiveOrigins?: () => Promise<string[]>;
     isBroadGrantActive?: () => Promise<boolean>;
   },
 ): Promise<number[]> {
-  const isBroadRemoved = removedOrigins.some((o) => isBroadGrant(o));
   const clearedTabIds: number[] = [];
 
   const targetTabStates = options?.tabStates ?? tabStates;
@@ -254,9 +292,9 @@ export async function reconcilePermissionsOnRemoved(
 
   for (const [tabId, state] of Array.from(targetTabStates.entries())) {
     const tabOrigin = normalizePermissionOrigin(state.origin);
-    const stillPermitted = isBroadActive || activeOriginSet.has(tabOrigin);
+    const stillPermitted = activeOriginSet.has(tabOrigin);
 
-    if (!stillPermitted || isBroadRemoved) {
+    if (!stillPermitted) {
       await clearTabCapture(tabId, options);
       clearedTabIds.push(tabId);
     }

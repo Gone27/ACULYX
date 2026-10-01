@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { registerCaptureListeners } from '../../src/background/capture';
+import {
+  registerCaptureListeners,
+  clearInFlightCaptures,
+  captureMap,
+  inFlightRequests,
+} from '../../src/background/capture';
 import type { Hop, ApiHop } from '../../src/shared/types';
+import { SettingsService } from '../../src/shared/settings';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
 type Listener = (...args: unknown[]) => void;
 
@@ -293,5 +300,130 @@ describe('redirect response capture', () => {
     expect(apiHop.headers['set-cookie']).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
     expect(apiHop.rawHeaders.find((h) => h.name.toLowerCase() === 'set-cookie')?.value).toBe('session=[REDACTED]; Path=/; Secure; HttpOnly; SameSite=Lax');
     expect(JSON.stringify(apiHop)).not.toContain('V2_SYNTHETIC_CANARY');
+  });
+
+  describe('Off mode capture gating and in-flight cleanup', () => {
+    it('stops capturing navigation and API hops when mode is off', () => {
+      const getCachedSpy = vi.spyOn(SettingsService, 'getCachedSettings').mockReturnValue({
+        ...DEFAULT_SETTINGS,
+        monitoringMode: 'off',
+      });
+
+      const hops: Hop[] = [];
+      const apiHops: ApiHop[] = [];
+      registerCaptureListeners(
+        (_tabId, hop) => hops.push(hop),
+        (apiHop) => apiHops.push(apiHop),
+      );
+
+      try {
+        // Attempt navigation capture in Off mode
+        listeners['onHeadersReceived']?.({
+          type: 'main_frame',
+          tabId: 10,
+          requestId: 'req-off-1',
+          url: 'https://example.com/',
+          statusCode: 200,
+          responseHeaders: [{ name: 'Content-Security-Policy', value: "default-src 'self'" }],
+          timeStamp: 1000,
+        });
+
+        expect(captureMap.has('req-off-1')).toBe(false);
+
+        listeners['onResponseStarted']?.({
+          type: 'main_frame',
+          tabId: 10,
+          requestId: 'req-off-1',
+          url: 'https://example.com/',
+          statusCode: 200,
+          responseHeaders: [{ name: 'Content-Security-Policy', value: "default-src 'self'" }],
+          fromCache: false,
+          timeStamp: 1001,
+        });
+
+        expect(hops).toHaveLength(0);
+
+        // Attempt API capture in Off mode
+        listeners['onBeforeSendHeaders']?.({
+          type: 'xmlhttprequest',
+          tabId: 10,
+          requestId: 'api-off-1',
+          method: 'GET',
+          url: 'https://api.example.com/data',
+          requestHeaders: [],
+          timeStamp: 1002,
+        });
+
+        expect(inFlightRequests.has('api-off-1')).toBe(false);
+
+        listeners['onResponseStarted']?.({
+          type: 'xmlhttprequest',
+          tabId: 10,
+          requestId: 'api-off-1',
+          url: 'https://api.example.com/data',
+          statusCode: 200,
+          responseHeaders: [],
+          fromCache: false,
+          timeStamp: 1003,
+        });
+
+        expect(apiHops).toHaveLength(0);
+      } finally {
+        getCachedSpy.mockRestore();
+      }
+    });
+
+    it('clearInFlightCaptures empties captureMap and inFlightRequests', () => {
+      captureMap.set('c1', {
+        tabId: 1,
+        url: 'https://test.com',
+        status: 200,
+        headersReceived: null,
+        rawHeadersReceived: [],
+        headersStarted: null,
+        rawHeadersStarted: [],
+        fromCache: false,
+        wasRedirected: false,
+        timestamp: 1,
+        redirectCount: 0,
+      });
+      inFlightRequests.set('req1', { method: 'GET', timestamp: 1 });
+
+      expect(captureMap.size).toBe(1);
+      expect(inFlightRequests.size).toBe(1);
+
+      clearInFlightCaptures();
+
+      expect(captureMap.size).toBe(0);
+      expect(inFlightRequests.size).toBe(0);
+    });
+
+    it('cleanup listeners still run for requests already started', () => {
+      registerCaptureListeners(() => {});
+
+      // Request started
+      captureMap.set('in-flight-err', {
+        tabId: 1,
+        url: 'https://test.com',
+        status: 200,
+        headersReceived: null,
+        rawHeadersReceived: [],
+        headersStarted: null,
+        rawHeadersStarted: [],
+        fromCache: false,
+        wasRedirected: false,
+        timestamp: 1,
+        redirectCount: 0,
+      });
+      inFlightRequests.set('in-flight-err', { method: 'GET', timestamp: 1 });
+
+      // onErrorOccurred runs
+      listeners['onErrorOccurred']?.({
+        requestId: 'in-flight-err',
+      });
+
+      expect(captureMap.has('in-flight-err')).toBe(false);
+      expect(inFlightRequests.has('in-flight-err')).toBe(false);
+    });
   });
 });

@@ -378,12 +378,16 @@ async function checkAndRenderBroadConflict(): Promise<void> {
 
 function wireConflictBanner(): void {
   btnRemoveBroadAccess.addEventListener('click', () => {
-    if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
-      chrome.permissions.remove({ origins: ['<all_urls>', '*://*/*'] }, () => {
-        void checkAndRenderBroadConflict();
+    btnRemoveBroadAccess.disabled = true;
+    void PermissionsService.removeAllBroadGrants().then(async (success) => {
+      btnRemoveBroadAccess.disabled = false;
+      await checkAndRenderBroadConflict();
+      if (success) {
         setStatus('Broad access removed', false);
-      });
-    }
+      } else {
+        setStatus('Failed to remove broad access or broad grants still remain in browser', true);
+      }
+    });
   });
 
   btnSwitchToAllSites.addEventListener('click', () => {

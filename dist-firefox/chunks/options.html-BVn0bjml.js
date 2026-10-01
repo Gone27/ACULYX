@@ -1,5 +1,5 @@
 import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-cpmoITPm.js";
-import { f as SettingsService, m as resolveCookieOverlaps, p as normalizeCookieList, t as PermissionsService, u as LocalStorage } from "./permissions-3T9E3siW.js";
+import { _ as normalizeCookieList, g as SettingsService, m as LocalStorage, t as PermissionsService, v as resolveCookieOverlaps } from "./permissions-BZvSKL0Y.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
@@ -255,9 +255,12 @@ async function checkAndRenderBroadConflict() {
 }
 function wireConflictBanner() {
 	btnRemoveBroadAccess.addEventListener("click", () => {
-		if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") chrome.permissions.remove({ origins: ["<all_urls>", "*://*/*"] }, () => {
-			checkAndRenderBroadConflict();
-			setStatus("Broad access removed", false);
+		btnRemoveBroadAccess.disabled = true;
+		PermissionsService.removeAllBroadGrants().then(async (success) => {
+			btnRemoveBroadAccess.disabled = false;
+			await checkAndRenderBroadConflict();
+			if (success) setStatus("Broad access removed", false);
+			else setStatus("Failed to remove broad access or broad grants still remain in browser", true);
 		});
 	});
 	btnSwitchToAllSites.addEventListener("click", () => {
@@ -336,4 +339,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-ChDPjwlR.js.map
+//# sourceMappingURL=options.html-BVn0bjml.js.map

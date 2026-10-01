@@ -63,6 +63,22 @@ export interface PartialCapture {
 export const captureMap: Map<string, PartialCapture> = new Map();
 
 
+/**
+ * Keyed by Chrome's `requestId`. In-flight request metadata for XHR/Fetch.
+ */
+export const inFlightRequests: Map<
+  string,
+  { method: string; origin?: string | undefined; timestamp: number }
+> = new Map();
+
+/**
+ * Immediately clears all in-flight capture maps (used on transition to Off mode).
+ */
+export function clearInFlightCaptures(): void {
+  captureMap.clear();
+  inFlightRequests.clear();
+}
+
 // ---------------------------------------------------------------------------
 // Hop builder helpers
 // ---------------------------------------------------------------------------
@@ -92,9 +108,17 @@ function toRawHeaders(
   }));
 }
 
-// ---------------------------------------------------------------------------
-// Public registration function
-// ---------------------------------------------------------------------------
+import { isRestrictedUrl } from '../shared/gating';
+import { SettingsService } from '../shared/settings';
+
+/**
+ * Checks whether capture is currently active and permitted for this URL.
+ * Returns false if mode is off, unhydrated, or URL is a restricted scheme.
+ */
+export function isCaptureActiveForUrl(url: string): boolean {
+  if (!url || isRestrictedUrl(url)) return false;
+  return SettingsService.getCachedSettings().monitoringMode !== 'off';
+}
 
 /**
  * Registers all WebRequest listeners needed to capture response hops.
@@ -110,14 +134,13 @@ export function registerCaptureListeners(
   const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
   const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
 
-  // Track in-flight request metadata (method, Origin header) captured at onBeforeSendHeaders.
-  const inFlightRequests: Map<string, { method: string; origin?: string | undefined; timestamp: number }> = new Map();
-
   try {
     chrome.webRequest.onBeforeSendHeaders.addListener(
       (details: chrome.webRequest.WebRequestHeadersDetails): void => {
         // ONLY track XHR/fetch requests
         if (details.type !== 'xmlhttprequest' || details.tabId < 0) return;
+        if (!isCaptureActiveForUrl(details.url)) return;
+
         const originHeader = details.requestHeaders?.find(
           (h) => h.name.toLowerCase() === 'origin',
         )?.value;
@@ -139,9 +162,11 @@ export function registerCaptureListeners(
     // Clean up in-flight request tracking on error or completion
     chrome.webRequest.onErrorOccurred.addListener((details) => {
       inFlightRequests.delete(details.requestId);
+      captureMap.delete(details.requestId);
     }, filter);
     chrome.webRequest.onCompleted.addListener((details) => {
       inFlightRequests.delete(details.requestId);
+      captureMap.delete(details.requestId);
     }, filter);
   } catch {
     // extraHeaders may be restricted in some environments; fall back gracefully
@@ -154,6 +179,7 @@ export function registerCaptureListeners(
     (details: chrome.webRequest.WebResponseHeadersDetails): void => {
       // Only track top-level navigation frames.
       if (details.type !== 'main_frame' || details.tabId < 0) return;
+      if (!isCaptureActiveForUrl(details.url)) return;
 
       const raw = details.responseHeaders ?? [];
       const partial: PartialCapture = {
@@ -183,39 +209,46 @@ export function registerCaptureListeners(
     (details: chrome.webRequest.WebResponseCacheDetails): void => {
       // Route XHR/Fetch responses to the API callback, if registered.
       if (details.type === 'xmlhttprequest' && details.tabId >= 0) {
-        if (onApiHopComplete !== undefined) {
-          const reqMeta = inFlightRequests.get(details.requestId);
-          inFlightRequests.delete(details.requestId);
-          const raw = details.responseHeaders ?? [];
-          const apiHeaders = normalizeHeaders(raw);
-          const apiRawHeaders = toRawHeaders(raw);
-          let normalizedPath: string;
-          try {
-            const u = new URL(details.url);
-            normalizedPath = u.origin + redactUrlPath(u.pathname);
-          } catch {
-            normalizedPath = redactUrlQueryParams(details.url);
-          }
-          const sanitizedUrl = redactUrlQueryParams(details.url);
-          const apiHop: ApiHop = {
-            requestId: details.requestId,
-            tabId: details.tabId,
-            url: sanitizedUrl,
-            normalizedPath,
-            method: reqMeta?.method ?? 'GET',
-            requestOrigin: reqMeta?.origin,
-            status: details.statusCode,
-            headers: apiHeaders,
-            rawHeaders: apiRawHeaders,
-            timestamp: reqMeta?.timestamp ?? details.timeStamp,
-            fromCache: details.fromCache ?? false,
-          };
-          onApiHopComplete(apiHop);
+        const reqMeta = inFlightRequests.get(details.requestId);
+        inFlightRequests.delete(details.requestId);
+
+        if (!isCaptureActiveForUrl(details.url)) return;
+        if (onApiHopComplete === undefined) return;
+
+        const raw = details.responseHeaders ?? [];
+        const apiHeaders = normalizeHeaders(raw);
+        const apiRawHeaders = toRawHeaders(raw);
+        let normalizedPath: string;
+        try {
+          const u = new URL(details.url);
+          normalizedPath = u.origin + redactUrlPath(u.pathname);
+        } catch {
+          normalizedPath = redactUrlQueryParams(details.url);
         }
+        const sanitizedUrl = redactUrlQueryParams(details.url);
+        const apiHop: ApiHop = {
+          requestId: details.requestId,
+          tabId: details.tabId,
+          url: sanitizedUrl,
+          normalizedPath,
+          method: reqMeta?.method ?? 'GET',
+          requestOrigin: reqMeta?.origin,
+          status: details.statusCode,
+          headers: apiHeaders,
+          rawHeaders: apiRawHeaders,
+          timestamp: reqMeta?.timestamp ?? details.timeStamp,
+          fromCache: details.fromCache ?? false,
+        };
+        onApiHopComplete(apiHop);
         return;
       }
 
       if (details.type !== 'main_frame' || details.tabId < 0) return;
+
+      if (!isCaptureActiveForUrl(details.url)) {
+        captureMap.delete(details.requestId);
+        return;
+      }
 
       const raw = details.responseHeaders ?? [];
       const normalised = normalizeHeaders(raw);
@@ -295,6 +328,10 @@ export function registerCaptureListeners(
   chrome.webRequest.onBeforeRedirect.addListener(
     (details: chrome.webRequest.WebRedirectionResponseDetails): void => {
       if (details.type !== 'main_frame' || details.tabId < 0) return;
+      if (!isCaptureActiveForUrl(details.url)) {
+        captureMap.delete(details.requestId);
+        return;
+      }
 
       const existing = captureMap.get(details.requestId);
       const raw = details.responseHeaders ?? existing?.rawHeadersReceived ?? [];

@@ -1,6 +1,5 @@
 import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-cpmoITPm.js";
-import { f as SettingsService, t as PermissionsService, u as LocalStorage } from "./permissions-3T9E3siW.js";
-import { t as isModeCaptureAllowed } from "./gating-BKxraNh3.js";
+import { c as isModeCaptureAllowed, g as SettingsService, m as LocalStorage, t as PermissionsService } from "./permissions-BZvSKL0Y.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/shared/filters.ts
 /**
@@ -984,8 +983,11 @@ function showBroadAccessConflictNotice() {
 	removeBtn.className = "btn-secondary";
 	removeBtn.textContent = "Remove broad access";
 	removeBtn.addEventListener("click", () => {
-		chrome.permissions.remove({ origins: ["<all_urls>", "*://*/*"] }, () => {
-			initPopup();
+		removeBtn.disabled = true;
+		PermissionsService.removeAllBroadGrants().then((success) => {
+			removeBtn.disabled = false;
+			if (success) initPopup();
+			else showStateMessage("Failed to remove broad access or broad grants still remain.", "error");
 		});
 	});
 	const switchBtn = document.createElement("button");
@@ -1024,4 +1026,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-DjL8Ruda.js.map
+//# sourceMappingURL=popup.html-DQGQnjvm.js.map

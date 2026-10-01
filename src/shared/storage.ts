@@ -150,6 +150,21 @@ export const SessionStorage = {
     await chrome.storage.session.remove(key);
   },
 
+  async clearAllTabStates(): Promise<void> {
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.storage === 'undefined' ||
+      typeof chrome.storage.session === 'undefined'
+    ) {
+      return;
+    }
+    const all = await chrome.storage.session.get(null);
+    const tabKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.TAB_PREFIX));
+    if (tabKeys.length > 0) {
+      await chrome.storage.session.remove(tabKeys);
+    }
+  },
+
   async getAllTabStates(): Promise<TabState[]> {
     const all = await chrome.storage.session.get(null);
     return Object.entries(all)

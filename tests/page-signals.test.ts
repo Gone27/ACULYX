@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerPageSignalInjection } from '../src/background/page-signals';
 import { reportPageSignals } from '../src/content/service-worker-detection';
+import { SettingsService } from '../src/shared/settings';
+import { DEFAULT_SETTINGS } from '../src/shared/constants';
 
 interface NavigationDetails {
   frameId: number;
@@ -73,6 +75,49 @@ describe('permission-gated page signal injection', () => {
     historyStateListeners[0]?.({ frameId: 0, tabId: 12, url: 'https://example.test/app/route' });
 
     expect(executeScript).not.toHaveBeenCalled();
+  });
+
+  it('does not inject when monitoring mode is off', () => {
+    const getCachedSpy = vi.spyOn(SettingsService, 'getCachedSettings').mockReturnValue({
+      ...DEFAULT_SETTINGS,
+      monitoringMode: 'off',
+    });
+
+    try {
+      historyStateListeners[0]?.({ frameId: 0, tabId: 12, url: 'https://example.test/app/route' });
+      expect(permissionContains).not.toHaveBeenCalled();
+      expect(executeScript).not.toHaveBeenCalled();
+    } finally {
+      getCachedSpy.mockRestore();
+    }
+  });
+
+  it('does not inject when in broad-access-conflict mode', () => {
+    const getCachedSpy = vi.spyOn(SettingsService, 'getCachedSettings').mockReturnValue({
+      ...DEFAULT_SETTINGS,
+      monitoringMode: 'per-site',
+    });
+
+    // Provide getAll that returns <all_urls> to simulate broad-access conflict
+    const getAllMock = vi.fn().mockImplementation((cb: (perms: { origins: string[] }) => void) => {
+      cb({ origins: ['<all_urls>'] });
+    });
+
+    const chromeWithGetAll = {
+      ...chrome,
+      permissions: {
+        contains: permissionContains,
+        getAll: getAllMock,
+      },
+    };
+    vi.stubGlobal('chrome', chromeWithGetAll);
+
+    try {
+      historyStateListeners[0]?.({ frameId: 0, tabId: 12, url: 'https://example.test/app/route' });
+      expect(executeScript).not.toHaveBeenCalled();
+    } finally {
+      getCachedSpy.mockRestore();
+    }
   });
 
   it('ignores SPA history updates in subframes', () => {

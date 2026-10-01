@@ -87,9 +87,17 @@ function sanitizeSeverityFilter(raw: unknown): Severity[] {
 // Migration logic (v1 → v2)
 // ---------------------------------------------------------------------------
 
+export class UnsupportedSchemaError extends Error {
+  constructor(public readonly version: number) {
+    super(`Unsupported settings schema version: ${version}`);
+    this.name = 'UnsupportedSchemaError';
+  }
+}
+
 /**
  * Idempotently migrates any raw/legacy settings object to canonical SettingsV2.
  * Preserves all valid existing v1 settings without dropping user preferences.
+ * Throws UnsupportedSchemaError if given a future schema version (> 2).
  */
 export function migrateSettings(raw: unknown): SettingsV2 {
   if (raw == null || typeof raw !== 'object') {
@@ -97,6 +105,11 @@ export function migrateSettings(raw: unknown): SettingsV2 {
   }
 
   const obj = raw as Record<string, unknown>;
+
+  // Check if raw is a future unsupported schema
+  if (typeof obj.schemaVersion === 'number' && obj.schemaVersion > 2) {
+    throw new UnsupportedSchemaError(obj.schemaVersion);
+  }
 
   // Detect mode
   let monitoringMode: SettingsV2['monitoringMode'] = DEFAULT_SETTINGS.monitoringMode;
@@ -161,6 +174,7 @@ export function migrateSettings(raw: unknown): SettingsV2 {
 // ---------------------------------------------------------------------------
 
 let cachedSettings: SettingsV2 | null = null;
+let hydrationPromise: Promise<SettingsV2> | null = null;
 const listeners = new Set<(settings: SettingsV2) => void>();
 let storageListenerRegistered = false;
 
@@ -177,7 +191,12 @@ function ensureStorageListener(): void {
     const change = changes[STORAGE_KEYS.SETTINGS];
     if (areaName === 'local' && change !== undefined) {
       const newRaw: unknown = change.newValue;
-      cachedSettings = migrateSettings(newRaw);
+      try {
+        cachedSettings = migrateSettings(newRaw);
+      } catch {
+        // If unsupported future schema or invalid data is written, fail closed
+        cachedSettings = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
+      }
       for (const cb of listeners) {
         try {
           cb(cachedSettings);
@@ -194,11 +213,15 @@ export const SettingsService = {
   /**
    * Reads settings from memory cache or chrome.storage.local.
    * Auto-migrates and writes back if legacy schema is detected.
+   * Fails closed if storage read throws or future schema version is encountered.
    */
   async getSettings(): Promise<SettingsV2> {
     ensureStorageListener();
     if (cachedSettings !== null) {
       return { ...cachedSettings };
+    }
+    if (hydrationPromise !== null) {
+      return hydrationPromise.then((s) => ({ ...s }));
     }
 
     if (
@@ -210,18 +233,57 @@ export const SettingsService = {
       return { ...cachedSettings };
     }
 
-    const data = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    const raw: unknown = data[STORAGE_KEYS.SETTINGS];
-    const migrated = migrateSettings(raw);
+    hydrationPromise = (async (): Promise<SettingsV2> => {
+      try {
+        const data = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+        const raw: unknown = data[STORAGE_KEYS.SETTINGS];
 
-    // If storage was missing schemaVersion 2, persist the migrated v2 record
-    const hasSchemaV2 = typeof raw === 'object' && raw !== null && (raw as Record<string, unknown>)['schemaVersion'] === 2;
-    if (!hasSchemaV2) {
-      await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+        if (
+          typeof raw === 'object' &&
+          raw !== null &&
+          typeof (raw as Record<string, unknown>)['schemaVersion'] === 'number' &&
+          ((raw as Record<string, unknown>)['schemaVersion'] as number) > 2
+        ) {
+          throw new UnsupportedSchemaError((raw as Record<string, unknown>)['schemaVersion'] as number);
+        }
+
+        const migrated = migrateSettings(raw);
+
+        // If storage was missing schemaVersion 2, persist the migrated v2 record
+        const hasSchemaV2 =
+          typeof raw === 'object' &&
+          raw !== null &&
+          (raw as Record<string, unknown>)['schemaVersion'] === 2;
+        if (!hasSchemaV2) {
+          await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+        }
+
+        cachedSettings = migrated;
+        return { ...migrated };
+      } catch (err) {
+        // Fail closed on storage read error or unsupported schema
+        cachedSettings = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
+        throw err;
+      } finally {
+        hydrationPromise = null;
+      }
+    })();
+
+    return hydrationPromise.then((s) => ({ ...s }));
+  },
+
+  /**
+   * Returns a promise that resolves to valid hydrated settings, failing closed to Off mode.
+   */
+  async whenReady(): Promise<SettingsV2> {
+    if (cachedSettings !== null) {
+      return { ...cachedSettings };
     }
-
-    cachedSettings = migrated;
-    return { ...migrated };
+    try {
+      return await this.getSettings();
+    } catch {
+      return this.getCachedSettings();
+    }
   },
 
   /**
@@ -229,7 +291,24 @@ export const SettingsService = {
    */
   async updateSettings(patch: Partial<SettingsV2>): Promise<SettingsV2> {
     ensureStorageListener();
-    const current = await this.getSettings();
+    if (
+      typeof chrome !== 'undefined' &&
+      typeof chrome.storage !== 'undefined' &&
+      typeof chrome.storage.local !== 'undefined'
+    ) {
+      const data = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+      const raw: unknown = data[STORAGE_KEYS.SETTINGS];
+      if (
+        typeof raw === 'object' &&
+        raw !== null &&
+        typeof (raw as Record<string, unknown>)['schemaVersion'] === 'number' &&
+        ((raw as Record<string, unknown>)['schemaVersion'] as number) > 2
+      ) {
+        throw new UnsupportedSchemaError((raw as Record<string, unknown>)['schemaVersion'] as number);
+      }
+    }
+
+    const current = await this.whenReady();
     const merged = migrateSettings({ ...current, ...patch, schemaVersion: 2 });
 
     if (
@@ -264,10 +343,20 @@ export const SettingsService = {
   },
 
   /**
-   * Returns in-memory cached settings synchronously, or default settings if not yet loaded.
+   * Returns in-memory cached settings synchronously, or fail-closed (mode off) if not yet loaded.
    */
   getCachedSettings(): SettingsV2 {
-    return cachedSettings !== null ? { ...cachedSettings } : { ...DEFAULT_SETTINGS };
+    if (cachedSettings !== null) {
+      return { ...cachedSettings };
+    }
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.storage === 'undefined' ||
+      typeof chrome.storage.local === 'undefined'
+    ) {
+      return { ...DEFAULT_SETTINGS };
+    }
+    return { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
   },
 
   /**
@@ -275,5 +364,6 @@ export const SettingsService = {
    */
   clearCache(): void {
     cachedSettings = null;
+    hydrationPromise = null;
   },
 };

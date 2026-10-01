@@ -69,13 +69,23 @@ function sanitizeSeverityFilter(raw) {
 	const filtered = raw.filter((s) => typeof s === "string" && VALID_SEVERITIES.has(s));
 	return filtered.length > 0 ? Array.from(new Set(filtered)) : [...DEFAULT_SETTINGS.severityFilter];
 }
+var UnsupportedSchemaError = class extends Error {
+	version;
+	constructor(version) {
+		super(`Unsupported settings schema version: ${version}`);
+		this.version = version;
+		this.name = "UnsupportedSchemaError";
+	}
+};
 /**
 * Idempotently migrates any raw/legacy settings object to canonical SettingsV2.
 * Preserves all valid existing v1 settings without dropping user preferences.
+* Throws UnsupportedSchemaError if given a future schema version (> 2).
 */
 function migrateSettings(raw) {
 	if (raw == null || typeof raw !== "object") return { ...DEFAULT_SETTINGS };
 	const obj = raw;
+	if (typeof obj.schemaVersion === "number" && obj.schemaVersion > 2) throw new UnsupportedSchemaError(obj.schemaVersion);
 	let monitoringMode = DEFAULT_SETTINGS.monitoringMode;
 	if (typeof obj.monitoringMode === "string" && VALID_MODES.has(obj.monitoringMode)) monitoringMode = obj.monitoringMode;
 	const severityFilter = sanitizeSeverityFilter(obj.severityFilter);
@@ -102,6 +112,7 @@ function migrateSettings(raw) {
 	return result;
 }
 var cachedSettings = null;
+var hydrationPromise = null;
 var listeners = /* @__PURE__ */ new Set();
 var storageListenerRegistered = false;
 function ensureStorageListener() {
@@ -110,7 +121,14 @@ function ensureStorageListener() {
 		const change = changes[STORAGE_KEYS.SETTINGS];
 		if (areaName === "local" && change !== void 0) {
 			const newRaw = change.newValue;
-			cachedSettings = migrateSettings(newRaw);
+			try {
+				cachedSettings = migrateSettings(newRaw);
+			} catch {
+				cachedSettings = {
+					...DEFAULT_SETTINGS,
+					monitoringMode: "off"
+				};
+			}
 			for (const cb of listeners) try {
 				cb(cachedSettings);
 			} catch {}
@@ -122,27 +140,58 @@ var SettingsService = {
 	/**
 	* Reads settings from memory cache or chrome.storage.local.
 	* Auto-migrates and writes back if legacy schema is detected.
+	* Fails closed if storage read throws or future schema version is encountered.
 	*/
 	async getSettings() {
 		ensureStorageListener();
 		if (cachedSettings !== null) return { ...cachedSettings };
+		if (hydrationPromise !== null) return hydrationPromise.then((s) => ({ ...s }));
 		if (typeof chrome === "undefined" || typeof chrome.storage === "undefined" || typeof chrome.storage.local === "undefined") {
 			cachedSettings = { ...DEFAULT_SETTINGS };
 			return { ...cachedSettings };
 		}
-		const raw = (await chrome.storage.local.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS];
-		const migrated = migrateSettings(raw);
-		if (!(typeof raw === "object" && raw !== null && raw["schemaVersion"] === 2)) await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
-		cachedSettings = migrated;
-		return { ...migrated };
+		hydrationPromise = (async () => {
+			try {
+				const raw = (await chrome.storage.local.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS];
+				if (typeof raw === "object" && raw !== null && typeof raw["schemaVersion"] === "number" && raw["schemaVersion"] > 2) throw new UnsupportedSchemaError(raw["schemaVersion"]);
+				const migrated = migrateSettings(raw);
+				if (!(typeof raw === "object" && raw !== null && raw["schemaVersion"] === 2)) await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+				cachedSettings = migrated;
+				return { ...migrated };
+			} catch (err) {
+				cachedSettings = {
+					...DEFAULT_SETTINGS,
+					monitoringMode: "off"
+				};
+				throw err;
+			} finally {
+				hydrationPromise = null;
+			}
+		})();
+		return hydrationPromise.then((s) => ({ ...s }));
+	},
+	/**
+	* Returns a promise that resolves to valid hydrated settings, failing closed to Off mode.
+	*/
+	async whenReady() {
+		if (cachedSettings !== null) return { ...cachedSettings };
+		try {
+			return await this.getSettings();
+		} catch {
+			return this.getCachedSettings();
+		}
 	},
 	/**
 	* Validates and applies a patch to current settings, writes to storage, and returns updated settings.
 	*/
 	async updateSettings(patch) {
 		ensureStorageListener();
+		if (typeof chrome !== "undefined" && typeof chrome.storage !== "undefined" && typeof chrome.storage.local !== "undefined") {
+			const raw = (await chrome.storage.local.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS];
+			if (typeof raw === "object" && raw !== null && typeof raw["schemaVersion"] === "number" && raw["schemaVersion"] > 2) throw new UnsupportedSchemaError(raw["schemaVersion"]);
+		}
 		const merged = migrateSettings({
-			...await this.getSettings(),
+			...await this.whenReady(),
 			...patch,
 			schemaVersion: 2
 		});
@@ -164,16 +213,22 @@ var SettingsService = {
 		};
 	},
 	/**
-	* Returns in-memory cached settings synchronously, or default settings if not yet loaded.
+	* Returns in-memory cached settings synchronously, or fail-closed (mode off) if not yet loaded.
 	*/
 	getCachedSettings() {
-		return cachedSettings !== null ? { ...cachedSettings } : { ...DEFAULT_SETTINGS };
+		if (cachedSettings !== null) return { ...cachedSettings };
+		if (typeof chrome === "undefined" || typeof chrome.storage === "undefined" || typeof chrome.storage.local === "undefined") return { ...DEFAULT_SETTINGS };
+		return {
+			...DEFAULT_SETTINGS,
+			monitoringMode: "off"
+		};
 	},
 	/**
 	* Resets the in-memory cache (primarily for unit tests).
 	*/
 	clearCache() {
 		cachedSettings = null;
+		hydrationPromise = null;
 	}
 };
 //#endregion
@@ -265,6 +320,12 @@ var SessionStorage = {
 	async removeTabState(tabId) {
 		const key = `${STORAGE_KEYS.TAB_PREFIX}${tabId}`;
 		await chrome.storage.session.remove(key);
+	},
+	async clearAllTabStates() {
+		if (typeof chrome === "undefined" || typeof chrome.storage === "undefined" || typeof chrome.storage.session === "undefined") return;
+		const all = await chrome.storage.session.get(null);
+		const tabKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.TAB_PREFIX));
+		if (tabKeys.length > 0) await chrome.storage.session.remove(tabKeys);
 	},
 	async getAllTabStates() {
 		const all = await chrome.storage.session.get(null);
@@ -461,6 +522,59 @@ async function hydrateFromSession() {
 	LocalStorage.pruneAllHistory();
 }
 //#endregion
+//#region src/shared/gating.ts
+var RESTRICTED_SCHEME_PREFIXES = [
+	"chrome://",
+	"chrome-extension://",
+	"edge://",
+	"devtools://",
+	"about:",
+	"data:",
+	"blob:",
+	"view-source:"
+];
+/**
+* Checks whether a URL is restricted from inspection (browser internals, extensions, web stores).
+*/
+function isRestrictedUrl(url, options) {
+	if (!url || url.trim().length === 0) return true;
+	const lower = url.trim().toLowerCase();
+	for (const prefix of RESTRICTED_SCHEME_PREFIXES) if (lower.startsWith(prefix)) return true;
+	if (lower.startsWith("file://")) return options?.fileAccessAllowed !== true;
+	try {
+		const parsed = new URL(lower);
+		const host = parsed.hostname;
+		if (host === "chromewebstore.google.com" || host === "addons.mozilla.org") return true;
+		if (host === "chrome.google.com" && parsed.pathname.startsWith("/webstore")) return true;
+	} catch {
+		if (!lower.startsWith("http://") && !lower.startsWith("https://")) return true;
+	}
+	return false;
+}
+/**
+* Pure synchronous function to evaluate whether traffic for a URL qualifies for capture.
+*
+* Invariant: Evaluation mode or presentation settings NEVER affect this decision.
+*/
+function isModeCaptureAllowed(url, settings, broadGrantPresent, options) {
+	if (isRestrictedUrl(url, options)) return {
+		allowed: false,
+		reason: "restricted-url"
+	};
+	if (settings.monitoringMode === "off") return {
+		allowed: false,
+		reason: "off"
+	};
+	if (settings.monitoringMode === "per-site" && broadGrantPresent) return {
+		allowed: false,
+		reason: "broad-access-conflict"
+	};
+	return {
+		allowed: true,
+		reason: "ok"
+	};
+}
+//#endregion
 //#region src/background/capture.ts
 /**
 * capture.ts
@@ -485,6 +599,17 @@ async function hydrateFromSession() {
 */
 var captureMap = /* @__PURE__ */ new Map();
 /**
+* Keyed by Chrome's `requestId`. In-flight request metadata for XHR/Fetch.
+*/
+var inFlightRequests = /* @__PURE__ */ new Map();
+/**
+* Immediately clears all in-flight capture maps (used on transition to Off mode).
+*/
+function clearInFlightCaptures() {
+	captureMap.clear();
+	inFlightRequests.clear();
+}
+/**
 * Detect the Non-Authoritative-Reason: HSTS header (case-insensitive name)
 * which indicates the browser silently upgraded the request from HTTP→HTTPS.
 */
@@ -502,6 +627,14 @@ function toRawHeaders(headers) {
 	}));
 }
 /**
+* Checks whether capture is currently active and permitted for this URL.
+* Returns false if mode is off, unhydrated, or URL is a restricted scheme.
+*/
+function isCaptureActiveForUrl(url) {
+	if (!url || isRestrictedUrl(url)) return false;
+	return SettingsService.getCachedSettings().monitoringMode !== "off";
+}
+/**
 * Registers all WebRequest listeners needed to capture response hops.
 *
 * @param onHopComplete - Callback invoked for every captured response, including
@@ -511,10 +644,10 @@ function toRawHeaders(headers) {
 function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 	const filter = { urls: ["<all_urls>"] };
 	const extraInfoSpec = ["responseHeaders", "extraHeaders"];
-	const inFlightRequests = /* @__PURE__ */ new Map();
 	try {
 		chrome.webRequest.onBeforeSendHeaders.addListener((details) => {
 			if (details.type !== "xmlhttprequest" || details.tabId < 0) return;
+			if (!isCaptureActiveForUrl(details.url)) return;
 			const originHeader = details.requestHeaders?.find((h) => h.name.toLowerCase() === "origin")?.value;
 			if (inFlightRequests.size > 100) {
 				const oldestKey = inFlightRequests.keys().next().value;
@@ -528,13 +661,16 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 		}, filter, ["requestHeaders", "extraHeaders"]);
 		chrome.webRequest.onErrorOccurred.addListener((details) => {
 			inFlightRequests.delete(details.requestId);
+			captureMap.delete(details.requestId);
 		}, filter);
 		chrome.webRequest.onCompleted.addListener((details) => {
 			inFlightRequests.delete(details.requestId);
+			captureMap.delete(details.requestId);
 		}, filter);
 	} catch {}
 	chrome.webRequest.onHeadersReceived.addListener((details) => {
 		if (details.type !== "main_frame" || details.tabId < 0) return;
+		if (!isCaptureActiveForUrl(details.url)) return;
 		const raw = details.responseHeaders ?? [];
 		const partial = {
 			tabId: details.tabId,
@@ -553,37 +689,41 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 	}, filter, extraInfoSpec);
 	chrome.webRequest.onResponseStarted.addListener((details) => {
 		if (details.type === "xmlhttprequest" && details.tabId >= 0) {
-			if (onApiHopComplete !== void 0) {
-				const reqMeta = inFlightRequests.get(details.requestId);
-				inFlightRequests.delete(details.requestId);
-				const raw = details.responseHeaders ?? [];
-				const apiHeaders = normalizeHeaders(raw);
-				const apiRawHeaders = toRawHeaders(raw);
-				let normalizedPath;
-				try {
-					const u = new URL(details.url);
-					normalizedPath = u.origin + redactUrlPath(u.pathname);
-				} catch {
-					normalizedPath = redactUrlQueryParams(details.url);
-				}
-				const sanitizedUrl = redactUrlQueryParams(details.url);
-				onApiHopComplete({
-					requestId: details.requestId,
-					tabId: details.tabId,
-					url: sanitizedUrl,
-					normalizedPath,
-					method: reqMeta?.method ?? "GET",
-					requestOrigin: reqMeta?.origin,
-					status: details.statusCode,
-					headers: apiHeaders,
-					rawHeaders: apiRawHeaders,
-					timestamp: reqMeta?.timestamp ?? details.timeStamp,
-					fromCache: details.fromCache ?? false
-				});
+			const reqMeta = inFlightRequests.get(details.requestId);
+			inFlightRequests.delete(details.requestId);
+			if (!isCaptureActiveForUrl(details.url)) return;
+			if (onApiHopComplete === void 0) return;
+			const raw = details.responseHeaders ?? [];
+			const apiHeaders = normalizeHeaders(raw);
+			const apiRawHeaders = toRawHeaders(raw);
+			let normalizedPath;
+			try {
+				const u = new URL(details.url);
+				normalizedPath = u.origin + redactUrlPath(u.pathname);
+			} catch {
+				normalizedPath = redactUrlQueryParams(details.url);
 			}
+			const sanitizedUrl = redactUrlQueryParams(details.url);
+			onApiHopComplete({
+				requestId: details.requestId,
+				tabId: details.tabId,
+				url: sanitizedUrl,
+				normalizedPath,
+				method: reqMeta?.method ?? "GET",
+				requestOrigin: reqMeta?.origin,
+				status: details.statusCode,
+				headers: apiHeaders,
+				rawHeaders: apiRawHeaders,
+				timestamp: reqMeta?.timestamp ?? details.timeStamp,
+				fromCache: details.fromCache ?? false
+			});
 			return;
 		}
 		if (details.type !== "main_frame" || details.tabId < 0) return;
+		if (!isCaptureActiveForUrl(details.url)) {
+			captureMap.delete(details.requestId);
+			return;
+		}
 		const raw = details.responseHeaders ?? [];
 		const normalised = normalizeHeaders(raw);
 		const rawHeaders = toRawHeaders(raw);
@@ -628,6 +768,10 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 	}, filter, extraInfoSpec);
 	chrome.webRequest.onBeforeRedirect.addListener((details) => {
 		if (details.type !== "main_frame" || details.tabId < 0) return;
+		if (!isCaptureActiveForUrl(details.url)) {
+			captureMap.delete(details.requestId);
+			return;
+		}
 		const existing = captureMap.get(details.requestId);
 		const raw = details.responseHeaders ?? existing?.rawHeadersReceived ?? [];
 		const headers = normalizeHeaders(raw);
@@ -728,6 +872,22 @@ var PermissionsService = {
 		});
 	},
 	/**
+	* Identifies all broad permission patterns currently granted in the browser,
+	* requests removal from the browser, and verifies that no broad grants remain.
+	* Returns true only if all broad patterns were successfully removed.
+	*/
+	async removeAllBroadGrants() {
+		if (typeof chrome === "undefined" || typeof chrome.permissions === "undefined" || typeof chrome.permissions.getAll === "undefined" || typeof chrome.permissions.remove === "undefined") return false;
+		const broadOrigins = ((await chrome.permissions.getAll()).origins ?? []).filter((o) => isBroadGrant(o));
+		if (broadOrigins.length === 0) return true;
+		if (!await new Promise((resolve) => {
+			chrome.permissions.remove({ origins: broadOrigins }, (result) => {
+				resolve(Boolean(result));
+			});
+		})) return false;
+		return ((await chrome.permissions.getAll()).origins ?? []).filter((o) => isBroadGrant(o)).length === 0;
+	},
+	/**
 	* Revokes all optional host permissions granted to the extension.
 	*/
 	async removeAllOptionalPermissions() {
@@ -767,18 +927,17 @@ async function clearTabCapture(tabId, options) {
 /**
 * Handles permission revocation when chrome.permissions.onRemoved fires.
 * Identifies tabs whose origin permission was revoked and clears their capture.
+* Preserves tabs whose origin remains permitted even after a broad grant is removed.
 */
-async function reconcilePermissionsOnRemoved(removedOrigins, options) {
-	const isBroadRemoved = removedOrigins.some((o) => isBroadGrant(o));
+async function reconcilePermissionsOnRemoved(_removedOrigins, options) {
 	const clearedTabIds = [];
 	const targetTabStates = options?.tabStates ?? tabStates;
-	const isBroadActive = options?.isBroadGrantActive !== void 0 ? await options.isBroadGrantActive() : await PermissionsService.isBroadGrantPresent();
-	if (isBroadActive) return clearedTabIds;
+	if (options?.isBroadGrantActive !== void 0 ? await options.isBroadGrantActive() : await PermissionsService.isBroadGrantPresent()) return clearedTabIds;
 	const activeOrigins = options?.getActiveOrigins !== void 0 ? await options.getActiveOrigins() : await PermissionsService.getAllGrantedOrigins();
 	const activeOriginSet = new Set(activeOrigins.map(normalizePermissionOrigin));
 	for (const [tabId, state] of Array.from(targetTabStates.entries())) {
 		const tabOrigin = normalizePermissionOrigin(state.origin);
-		if (!(isBroadActive || activeOriginSet.has(tabOrigin)) || isBroadRemoved) {
+		if (!activeOriginSet.has(tabOrigin)) {
 			await clearTabCapture(tabId, options);
 			clearedTabIds.push(tabId);
 		}
@@ -805,6 +964,6 @@ async function reconcilePermissionsOnStartup(options) {
 	return clearedTabIds;
 }
 //#endregion
-export { registerCaptureListeners as a, originAuthBaselines as c, SessionStorage as d, SettingsService as f, captureMap as i, tabStates as l, resolveCookieOverlaps as m, reconcilePermissionsOnRemoved as n, hydrateFromSession as o, normalizeCookieList as p, reconcilePermissionsOnStartup as r, initLifecycle as s, PermissionsService as t, LocalStorage as u };
+export { normalizeCookieList as _, captureMap as a, isModeCaptureAllowed as c, initLifecycle as d, originAuthBaselines as f, SettingsService as g, SessionStorage as h, reconcilePermissionsOnStartup as i, isRestrictedUrl as l, LocalStorage as m, isBroadGrant as n, clearInFlightCaptures as o, tabStates as p, reconcilePermissionsOnRemoved as r, registerCaptureListeners as s, PermissionsService as t, hydrateFromSession as u, resolveCookieOverlaps as v };
 
-//# sourceMappingURL=permissions-3T9E3siW.js.map
+//# sourceMappingURL=permissions-BZvSKL0Y.js.map
