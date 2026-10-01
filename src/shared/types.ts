@@ -205,16 +205,24 @@ export interface TabState {
   updatedAt: number;
 }
 
-export interface Settings {
+export interface SettingsV2 {
+  schemaVersion: 2;
   monitoringMode: MonitoringMode;
-  /** Effective when monitoringMode === 'per-site'. */
-  allowedOrigins: string[];
   severityFilter: Severity[];
   retainHistoryDays: number;
-  alwaysSensitiveCookies: string[];
-  alwaysIgnoreCookies: string[];
+  maxHistoryPerOrigin: number;
+  sensitiveCookieNames: string[];
+  ignoredCookieNames: string[];
+  evaluationMode: boolean;
+  legacyAllowedOrigins?: string[];
+  /** Legacy fields for backward compatibility */
+  allowedOrigins?: string[];
+  alwaysSensitiveCookies?: string[];
+  alwaysIgnoreCookies?: string[];
   isPro?: boolean;
 }
+
+export type Settings = SettingsV2;
 
 export interface ApiHop {
   requestId: string;

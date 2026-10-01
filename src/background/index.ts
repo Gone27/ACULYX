@@ -33,12 +33,14 @@ import {
   SIDEPANEL_PORT_NAME,
   DEFAULT_SETTINGS,
 } from '../shared/constants';
+import { SettingsService } from '../shared/settings';
 import type {
   TabState,
   Grade,
   CoverageInfo,
   CoverageLedgerEntry,
   Settings,
+  SettingsV2,
   ApiHop,
   ApiEndpointState,
 } from '../shared/types';
@@ -59,8 +61,9 @@ const pendingServiceWorkerReports = new Map<number, {
 }>();
 const pendingMetaCspReports = new Set<number>();
 
-let currentSettings: Settings = DEFAULT_SETTINGS;
-LocalStorage.getSettings().then((s) => { currentSettings = s; }).catch(() => {});
+let currentSettings: SettingsV2 = DEFAULT_SETTINGS;
+void SettingsService.getSettings().then((s) => { currentSettings = s; }).catch(() => {});
+SettingsService.onSettingsChanged((s) => { currentSettings = s; });
 
 function recomputeTabState(tabId: number, state: TabState): void {
   const result = runRules({
@@ -70,8 +73,8 @@ function recomputeTabState(tabId: number, state: TabState): void {
     metaCspFound: state.coverage.metaCspFound,
     captureFindings: state.captureFindings ?? [],
     cookieSettings: {
-      alwaysSensitive: currentSettings.alwaysSensitiveCookies,
-      alwaysIgnore: currentSettings.alwaysIgnoreCookies,
+      alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
+      alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? [],
     },
   });
 
@@ -741,8 +744,8 @@ registerCaptureListeners(
     apiHop.isThirdParty = !isFirstParty;
 
     const findings = runApiRules(apiHop, {
-      alwaysSensitive: currentSettings.alwaysSensitiveCookies,
-      alwaysIgnore: currentSettings.alwaysIgnoreCookies,
+      alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
+      alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? [],
     });
 
     if (!state.apiEndpoints) {

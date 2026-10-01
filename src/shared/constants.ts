@@ -1,4 +1,4 @@
-import type { Grade, Settings, Severity } from './types';
+import type { Grade, SettingsV2, Severity } from './types';
 
 // ─── Versioning ───────────────────────────────────────────────────────────────
 
@@ -90,13 +90,14 @@ export const KEEPALIVE_PERIOD_MINUTES = 0.4;
 
 // ─── Default settings ─────────────────────────────────────────────────────────
 
-export const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: SettingsV2 = {
+  schemaVersion: 2,
   monitoringMode: 'per-site',
-  allowedOrigins: [],
   severityFilter: ['critical', 'high', 'medium', 'low', 'info'],
   retainHistoryDays: 7,
-  alwaysSensitiveCookies: [],
-  alwaysIgnoreCookies: [],
-  isPro: false,
+  maxHistoryPerOrigin: 10,
+  sensitiveCookieNames: [],
+  ignoredCookieNames: [],
+  evaluationMode: false,
 };
 

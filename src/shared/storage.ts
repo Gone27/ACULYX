@@ -1,5 +1,6 @@
-import type { TabState, Settings, OriginHistoryItem } from './types';
-import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
+import type { TabState, SettingsV2, OriginHistoryItem } from './types';
+import { STORAGE_KEYS } from './constants';
+import { SettingsService } from './settings';
 
 // ─── Session storage ──────────────────────────────────────────────────────────
 //
@@ -188,15 +189,12 @@ export const SessionStorage = {
 const MAX_HISTORY_PER_ORIGIN = 10;
 
 export const LocalStorage = {
-  async getSettings(): Promise<Settings> {
-    const result = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
-    const stored = result[STORAGE_KEYS.SETTINGS] as Partial<Settings> | undefined;
-    // Merge with defaults so new keys added in future versions populate
-    return { ...DEFAULT_SETTINGS, ...stored };
+  async getSettings(): Promise<SettingsV2> {
+    return await SettingsService.getSettings();
   },
 
-  async setSettings(settings: Settings): Promise<void> {
-    await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: settings });
+  async setSettings(settings: SettingsV2): Promise<void> {
+    await SettingsService.updateSettings(settings);
   },
 
   async getOriginHistory(origin: string): Promise<OriginHistoryItem[]> {

@@ -124,17 +124,19 @@
       </label>
     </section>
 
-    <!-- ── SecCheck Pro ────────────────────────────────────────── -->
-    <section class="options-section" id="section-pro">
-      <h2 class="section-heading">SecCheck Pro (Evaluation Mode)</h2>
-      <p class="section-desc">
-        Local evaluation toggle for advanced capabilities. Enables multi-host Attack Surface Graph accumulation and cross-session domain discovery.
-      </p>
-      <label class="checkbox-label" for="pro-mode-toggle">
-        <input type="checkbox" id="pro-mode-toggle" name="isPro">
-        <span>Enable Pro features (Full Attack Surface Graph accumulation — Evaluation mode)</span>
-      </label>
-    </section>
+    <!-- ── Developer / Evaluation Mode ──────────────────────────── -->
+    <details class="options-section developer-section" id="section-pro">
+      <summary class="section-heading cursor-pointer">Developer Settings (Evaluation Mode)</summary>
+      <div class="developer-content">
+        <p class="section-desc">
+          Evaluation only: no billing or entitlement, no effect on security checks. Enables multi-host Attack Surface Graph accumulation and diagnostic inspection.
+        </p>
+        <label class="checkbox-label" for="pro-mode-toggle">
+          <input type="checkbox" id="pro-mode-toggle" name="evaluationMode">
+          <span>Enable evaluation mode (Attack Surface Graph accumulation)</span>
+        </label>
+      </div>
+    </details>
 
     <!-- ── Privacy ─────────────────────────────────────────────── -->
     <section class="options-section" id="section-privacy">

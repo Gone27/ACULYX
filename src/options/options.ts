@@ -8,7 +8,7 @@
  */
 
 import type { Settings, Severity } from '../shared/types';
-import { LocalStorage } from '../shared/storage';
+import { SettingsService, normalizeCookieList, resolveCookieOverlaps } from '../shared/settings';
 import { sendToBackground } from '../shared/messaging';
 import { SEVERITY_ORDER } from '../shared/constants';
 
@@ -64,7 +64,7 @@ alwaysIgnoreInput  = getEl<HTMLTextAreaElement>('always-ignore');
 async function loadAndPopulate(): Promise<void> {
   let settings: Settings;
   try {
-    settings = await LocalStorage.getSettings();
+    settings = await SettingsService.getSettings();
   } catch {
     setStatus('Failed to load settings.', true);
     return;
@@ -84,12 +84,12 @@ async function loadAndPopulate(): Promise<void> {
 
   // ── History ──────────────────────────────────────────────────
   retainDaysInput.value = String(settings.retainHistoryDays);
-  alwaysSensitiveInput.value = settings.alwaysSensitiveCookies.join(', ');
-  alwaysIgnoreInput.value = settings.alwaysIgnoreCookies.join(', ');
-  proModeToggle.checked = Boolean(settings.isPro);
+  alwaysSensitiveInput.value = (settings.sensitiveCookieNames ?? settings.alwaysSensitiveCookies ?? []).join(', ');
+  alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(', ');
+  proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
 
   // ── Allowlist ────────────────────────────────────────────────
-  workingOrigins = [...settings.allowedOrigins];
+  workingOrigins = [...(settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? [])];
   renderAllowlist();
 }
 
@@ -115,7 +115,7 @@ async function handleSave(): Promise<void> {
   }
 
   try {
-    await LocalStorage.setSettings(settings);
+    await SettingsService.updateSettings(settings);
     await sendToBackground({ type: 'SETTINGS_CHANGED', settings });
     setStatus('Settings saved ✓', false);
   } catch {
@@ -158,16 +158,29 @@ function readFormValues(): Settings {
 
   // Retain history days
   const retainHistoryDays = Math.max(0, Math.min(365, parseInt(retainDaysInput.value, 10) || 0));
-  const alwaysSensitiveCookies = alwaysSensitiveInput.value.split(',').map(s => s.trim()).filter(Boolean);
-  const alwaysIgnoreCookies = alwaysIgnoreInput.value.split(',').map(s => s.trim()).filter(Boolean);
+  const rawSensitive = alwaysSensitiveInput.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const rawIgnored = alwaysIgnoreInput.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const { sensitive, ignored, overlaps } = resolveCookieOverlaps(
+    normalizeCookieList(rawSensitive),
+    normalizeCookieList(rawIgnored),
+  );
+
+  if (overlaps.length > 0) {
+    setStatus(`Notice: Cookie names in both lists are treated as ignored: ${overlaps.join(', ')}`, false);
+  }
 
   return {
+    schemaVersion: 2,
     monitoringMode,
     allowedOrigins: [...workingOrigins],
     severityFilter,
     retainHistoryDays,
-    alwaysSensitiveCookies,
-    alwaysIgnoreCookies,
+    maxHistoryPerOrigin: 10,
+    sensitiveCookieNames: sensitive,
+    ignoredCookieNames: ignored,
+    evaluationMode: proModeToggle.checked,
+    alwaysSensitiveCookies: sensitive,
+    alwaysIgnoreCookies: ignored,
     isPro: proModeToggle.checked,
   };
 }
