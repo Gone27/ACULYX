@@ -331,7 +331,7 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
             }
             return Promise.resolve(permissionGranted);
           }
-          return origContains(details, callback as (result: boolean) => void);
+          return origContains(details, callback);
         };
         perms.request = (
           _details: chrome.permissions.Permissions,
