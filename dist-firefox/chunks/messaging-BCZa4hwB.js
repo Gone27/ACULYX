@@ -1,3 +1,89 @@
+//#region src/shared/constants.ts
+/** Bump when either score model changes so persisted history remains comparable. */
+var SCORE_VERSION = "1.7.0";
+/** URL schemes the extension cannot inspect. Show explicit "restricted" state. */
+var RESTRICTED_SCHEMES = [
+	"chrome://",
+	"chrome-extension://",
+	"devtools://",
+	"about:",
+	"data:",
+	"blob:"
+];
+var BADGE_COLORS = {
+	A: "#27ae60",
+	B: "#2980b9",
+	C: "#f39c12",
+	D: "#e67e22",
+	F: "#c0392b",
+	"?": "#7f8c8d"
+};
+var SEVERITY_ORDER = [
+	"critical",
+	"high",
+	"medium",
+	"low",
+	"info",
+	"pass"
+];
+var GRADE_THRESHOLDS = [
+	{
+		min: 90,
+		grade: "A"
+	},
+	{
+		min: 70,
+		grade: "B"
+	},
+	{
+		min: 50,
+		grade: "C"
+	},
+	{
+		min: 30,
+		grade: "D"
+	},
+	{
+		min: 0,
+		grade: "F"
+	}
+];
+var STORAGE_KEYS = {
+	SETTINGS: "settings",
+	TAB_PREFIX: "tab:",
+	HISTORY_PREFIX: "hist:",
+	AUTH_DIFF_PREFIX: "authdiff:",
+	AUTH_BASELINE_PREFIX: "authbase:",
+	GRAPH_PREFIX: "graph:",
+	ONBOARDING_DISMISSED: "onboarding_dismissed"
+};
+/** Runtime port name for popup ↔ service worker connection. */
+var POPUP_PORT_NAME = "popup";
+/**
+* Runtime port name for side panel ↔ service worker connection.
+* Channel is registered now; the panel UI ships in Phase 3.
+*/
+var SIDEPANEL_PORT_NAME = "sidepanel";
+var KEEPALIVE_ALARM = "keepalive";
+/** Period in minutes — must stay under the ~30 s Chrome idle threshold. */
+var KEEPALIVE_PERIOD_MINUTES = .4;
+var DEFAULT_SETTINGS = {
+	schemaVersion: 2,
+	monitoringMode: "per-site",
+	severityFilter: [
+		"critical",
+		"high",
+		"medium",
+		"low",
+		"info"
+	],
+	retainHistoryDays: 7,
+	maxHistoryPerOrigin: 10,
+	sensitiveCookieNames: [],
+	ignoredCookieNames: [],
+	evaluationMode: false
+};
+//#endregion
 //#region src/rules/utils.ts
 var CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
 var BIDI_OVERRIDE_RE = /[\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]/g;
@@ -355,6 +441,59 @@ function redactUrlQueryParams(rawUrl) {
 	}
 }
 //#endregion
-export { isSensitiveCookie as a, parseCspDirectives as c, redactUrlQueryParams as d, sanitizeEvidence as f, headersDiffer as i, redactHeaderValue as l, extractSetCookieHeaders as n, normalizeHeaders as o, hasCspBypassProtection as r, originFromUrl as s, checkDuplicateHeaders as t, redactUrlPath as u };
+//#region src/shared/messaging.ts
+/**
+* Tracks open named ports by (portName, tabId).
+* Stored in the service worker's global scope so it survives within
+* one SW lifetime, but rebuilt from storage after revival.
+*/
+var PortRegistry = class {
+	ports = /* @__PURE__ */ new Map();
+	key(portName, tabId) {
+		return `${portName}:${tabId}`;
+	}
+	register(port, tabId) {
+		const name = port.name === "popup" || port.name === "sidepanel" ? port.name : POPUP_PORT_NAME;
+		const k = this.key(name, tabId);
+		this.ports.set(k, port);
+		port.onDisconnect.addListener(() => {
+			this.ports.delete(k);
+		});
+	}
+	/** Send a message to every open port for a given tab. */
+	broadcast(tabId, msg) {
+		for (const portName of [POPUP_PORT_NAME, SIDEPANEL_PORT_NAME]) {
+			const port = this.ports.get(this.key(portName, tabId));
+			if (port != null) portSend(port, msg);
+		}
+	}
+	/** Send a message to every open port across all tabs. */
+	broadcastAll(msg) {
+		for (const port of this.ports.values()) portSend(port, msg);
+	}
+};
+/** Fire-and-forget port send. Silently drops if port is disconnected. */
+function portSend(port, msg) {
+	try {
+		port.postMessage(msg);
+	} catch {}
+}
+/**
+* Send a one-shot message to the service worker and await its reply.
+* For use from UI scripts (popup, options).
+*/
+function sendToBackground(msg) {
+	return new Promise((resolve, reject) => {
+		chrome.runtime.sendMessage(msg, (response) => {
+			if (chrome.runtime.lastError != null) {
+				reject(new Error(chrome.runtime.lastError.message));
+				return;
+			}
+			resolve(response);
+		});
+	});
+}
+//#endregion
+export { SCORE_VERSION as C, STORAGE_KEYS as E, RESTRICTED_SCHEMES as S, SIDEPANEL_PORT_NAME as T, DEFAULT_SETTINGS as _, extractSetCookieHeaders as a, KEEPALIVE_PERIOD_MINUTES as b, isSensitiveCookie as c, parseCspDirectives as d, redactHeaderValue as f, BADGE_COLORS as g, sanitizeEvidence as h, checkDuplicateHeaders as i, normalizeHeaders as l, redactUrlQueryParams as m, portSend as n, hasCspBypassProtection as o, redactUrlPath as p, sendToBackground as r, headersDiffer as s, PortRegistry as t, originFromUrl as u, GRADE_THRESHOLDS as v, SEVERITY_ORDER as w, POPUP_PORT_NAME as x, KEEPALIVE_ALARM as y };
 
-//# sourceMappingURL=utils-DgBLspgH.js.map
+//# sourceMappingURL=messaging-BCZa4hwB.js.map

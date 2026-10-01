@@ -180,6 +180,32 @@ body {
   color: var(--text-muted);
 }
 
+/* ── Conflict banner ────────────────────────────────────────── */
+.conflict-banner {
+  background: rgba(243, 156, 18, 0.12);
+  border: 1px solid var(--color-medium);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-top: 14px;
+}
+
+.conflict-banner-text {
+  font-weight: 600;
+  color: var(--color-medium);
+  margin-bottom: 4px;
+}
+
+.conflict-banner-desc {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.conflict-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* ── Allowlist ──────────────────────────────────────────────── */
 .allowlist {
   list-style: none;

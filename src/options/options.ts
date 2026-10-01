@@ -28,6 +28,9 @@ let saveBtn: HTMLButtonElement;
 let saveStatus: HTMLSpanElement;
 let sectionAllowlist: HTMLElement;
 let proModeToggle: HTMLInputElement;
+let modeConflictBanner: HTMLElement;
+let btnRemoveBroadAccess: HTMLButtonElement;
+let btnSwitchToAllSites: HTMLButtonElement;
 let currentMode: Settings['monitoringMode'] = 'per-site';
 
 /**
@@ -45,16 +48,20 @@ document.addEventListener('DOMContentLoaded', () => {
   modeRadios           = document.querySelectorAll<HTMLInputElement>('input[name="monitoringMode"]');
   severityCheckboxes   = document.querySelectorAll<HTMLInputElement>('input[name="severity"]');
   retainDaysInput      = getEl<HTMLInputElement>('retain-history-days');
-alwaysSensitiveInput = getEl<HTMLTextAreaElement>('always-sensitive');
-alwaysIgnoreInput  = getEl<HTMLTextAreaElement>('always-ignore');
+  alwaysSensitiveInput = getEl<HTMLTextAreaElement>('always-sensitive');
+  alwaysIgnoreInput    = getEl<HTMLTextAreaElement>('always-ignore');
   allowlistEl          = getEl<HTMLUListElement>('allowlist');
   allowlistEmptyMsg    = getEl<HTMLParagraphElement>('allowlist-empty');
   saveBtn              = getEl<HTMLButtonElement>('save-btn');
   saveStatus           = getEl<HTMLSpanElement>('save-status');
   sectionAllowlist     = getEl<HTMLElement>('section-allowlist');
   proModeToggle        = getEl<HTMLInputElement>('pro-mode-toggle');
+  modeConflictBanner   = getEl<HTMLElement>('mode-conflict-banner');
+  btnRemoveBroadAccess = getEl<HTMLButtonElement>('btn-remove-broad-access');
+  btnSwitchToAllSites  = getEl<HTMLButtonElement>('btn-switch-to-all-sites');
 
   wireModeRadios();
+  wireConflictBanner();
   wireSaveButton();
   void loadAndPopulate();
 });
@@ -99,6 +106,7 @@ async function loadAndPopulate(): Promise<void> {
     workingOrigins = [...(settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? [])];
   }
   renderAllowlist();
+  await checkAndRenderBroadConflict();
 }
 
 /* ================================================================
@@ -287,22 +295,56 @@ function wireModeRadios(): void {
                 r.checked = r.value === currentMode;
               }
               updateAllowlistVisibility(currentMode);
+              void checkAndRenderBroadConflict();
               setStatus('All-sites monitoring requires permission for all URLs. Kept previous mode.', true);
             } else {
               currentMode = 'all-sites';
               updateAllowlistVisibility('all-sites');
+              void checkAndRenderBroadConflict();
             }
           });
         } else {
           currentMode = 'all-sites';
           updateAllowlistVisibility('all-sites');
+          void checkAndRenderBroadConflict();
         }
       } else {
         currentMode = targetMode;
         updateAllowlistVisibility(targetMode);
+        void checkAndRenderBroadConflict();
       }
     });
   }
+}
+
+async function checkAndRenderBroadConflict(): Promise<void> {
+  const broadActive = await PermissionsService.isBroadGrantPresent();
+  if (currentMode === 'per-site' && broadActive) {
+    modeConflictBanner.removeAttribute('hidden');
+  } else {
+    modeConflictBanner.setAttribute('hidden', '');
+  }
+}
+
+function wireConflictBanner(): void {
+  btnRemoveBroadAccess.addEventListener('click', () => {
+    if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
+      chrome.permissions.remove({ origins: ['<all_urls>', '*://*/*'] }, () => {
+        void checkAndRenderBroadConflict();
+        setStatus('Broad access removed', false);
+      });
+    }
+  });
+
+  btnSwitchToAllSites.addEventListener('click', () => {
+    currentMode = 'all-sites';
+    for (const r of modeRadios) {
+      r.checked = r.value === 'all-sites';
+    }
+    updateAllowlistVisibility('all-sites');
+    modeConflictBanner.setAttribute('hidden', '');
+    void handleSave();
+  });
 }
 
 /**
@@ -354,6 +396,7 @@ if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') 
       void PermissionsService.getAllGrantedOrigins().then((origins) => {
         workingOrigins = origins;
         renderAllowlist();
+        void checkAndRenderBroadConflict();
       });
     });
   }
@@ -362,6 +405,7 @@ if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') 
       void PermissionsService.getAllGrantedOrigins().then((origins) => {
         workingOrigins = origins;
         renderAllowlist();
+        void checkAndRenderBroadConflict();
       });
     });
   }

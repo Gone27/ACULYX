@@ -25,6 +25,9 @@ import type {
 import { sendToBackground } from '../shared/messaging';
 import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
 import { LocalStorage } from '../shared/storage';
+import { SettingsService } from '../shared/settings';
+import { PermissionsService } from '../background/permissions';
+import { isModeCaptureAllowed } from '../shared/gating';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let gradeBadge:          HTMLDivElement;
@@ -163,10 +166,25 @@ async function initPopup(): Promise<void> {
 
   currentTabId = tab.id;
 
-  if (isRestrictedUrl(tab.url)) {
-    originText.textContent = tab.url;
-    showStateMessage('Restricted page — browser pages cannot be inspected.', 'restricted');
-    return;
+  const settings = await SettingsService.getSettings();
+  const broadActive = await PermissionsService.isBroadGrantPresent();
+  const gate = isModeCaptureAllowed(tab.url, settings, broadActive);
+  if (!gate.allowed) {
+    if (gate.reason === 'off') {
+      originText.textContent = tab.url;
+      showStateMessage('Monitoring is turned off in Settings.', 'restricted');
+      return;
+    }
+    if (gate.reason === 'broad-access-conflict') {
+      originText.textContent = tab.url;
+      showBroadAccessConflictNotice();
+      return;
+    }
+    if (gate.reason === 'restricted-url') {
+      originText.textContent = tab.url;
+      showStateMessage('Restricted page — browser pages cannot be inspected.', 'restricted');
+      return;
+    }
   }
 
   if (tab.url.toLowerCase().endsWith('.pdf') || tab.url.toLowerCase().includes('.pdf?')) {
@@ -186,7 +204,7 @@ async function initPopup(): Promise<void> {
   currentOrigin = origin;
   originText.textContent = origin;
 
-  const hasPermission = await checkPermission(origin);
+  const hasPermission = broadActive || (await checkPermission(origin));
 
   if (!hasPermission) {
     showMonitorSection();
@@ -1261,12 +1279,41 @@ function getEl<T extends Element>(id: string): T {
   return el;
 }
 
-function isRestrictedUrl(url: string): boolean {
-  const RESTRICTED_PREFIXES = [
-    'chrome://', 'chrome-extension://', 'about:',
-    'edge://', 'brave://', 'data:', 'javascript:', 'view-source:',
-  ];
-  return RESTRICTED_PREFIXES.some((prefix) => url.startsWith(prefix));
+function showBroadAccessConflictNotice(): void {
+  specialNotice.textContent = '';
+  const p = document.createElement('p');
+  p.textContent = 'Broad access is active while monitoring mode is set to Per-site opt-in. Capture is paused until resolved:';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  actions.style.marginTop = '8px';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'btn-secondary';
+  removeBtn.textContent = 'Remove broad access';
+  removeBtn.addEventListener('click', () => {
+    chrome.permissions.remove({ origins: ['<all_urls>', '*://*/*'] }, () => {
+      void initPopup();
+    });
+  });
+
+  const switchBtn = document.createElement('button');
+  switchBtn.className = 'btn-primary';
+  switchBtn.textContent = 'Switch to All sites';
+  switchBtn.addEventListener('click', () => {
+    void SettingsService.updateSettings({ monitoringMode: 'all-sites' }).then(() => {
+      void initPopup();
+    });
+  });
+
+  actions.appendChild(removeBtn);
+  actions.appendChild(switchBtn);
+  specialNotice.appendChild(p);
+  specialNotice.appendChild(actions);
+  specialNotice.className = 'special-notice conflict-notice';
+  specialNotice.hidden = false;
+  showStateMessage('Capture paused due to broad access conflict.', 'waiting');
 }
 
 function checkPermission(origin: string): Promise<boolean> {

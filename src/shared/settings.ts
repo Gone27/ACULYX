@@ -264,6 +264,13 @@ export const SettingsService = {
   },
 
   /**
+   * Returns in-memory cached settings synchronously, or default settings if not yet loaded.
+   */
+  getCachedSettings(): SettingsV2 {
+    return cachedSettings !== null ? { ...cachedSettings } : { ...DEFAULT_SETTINGS };
+  },
+
+  /**
    * Resets the in-memory cache (primarily for unit tests).
    */
   clearCache(): void {

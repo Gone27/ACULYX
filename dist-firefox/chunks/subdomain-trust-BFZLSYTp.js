@@ -1,4 +1,4 @@
-import { a as isSensitiveCookie, c as parseCspDirectives, f as sanitizeEvidence, r as hasCspBypassProtection } from "./utils-DgBLspgH.js";
+import { c as isSensitiveCookie, d as parseCspDirectives, h as sanitizeEvidence, o as hasCspBypassProtection } from "./messaging-BCZa4hwB.js";
 //#region src/rules/headers/subdomain-trust.ts
 var REF_SUBDOMAIN = "https://portswigger.net/web-security/host-header/exploiting#password-reset-poisoning-via-dangling-markup";
 var REF_CORS = "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS";
@@ -386,4 +386,4 @@ function checkSubdomainTrust(finalHop, cookies, alwaysSensitive = [], alwaysIgno
 //#endregion
 export { registrableDomain as n, checkSubdomainTrust as t };
 
-//# sourceMappingURL=subdomain-trust-B3Jbs8TC.js.map
+//# sourceMappingURL=subdomain-trust-BFZLSYTp.js.map

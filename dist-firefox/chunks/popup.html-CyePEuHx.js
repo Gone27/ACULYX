@@ -1,5 +1,6 @@
-import { f as SEVERITY_ORDER, l as POPUP_PORT_NAME, r as sendToBackground } from "./messaging-BCRf7spF.js";
-import { t as LocalStorage } from "./storage-DkrZ3D78.js";
+import { r as sendToBackground, w as SEVERITY_ORDER, x as POPUP_PORT_NAME } from "./messaging-BCZa4hwB.js";
+import { f as SettingsService, t as PermissionsService, u as LocalStorage } from "./permissions-DorKxJ_0.js";
+import { t as isModeCaptureAllowed } from "./gating-BKxraNh3.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/popup/popup.ts
 var gradeBadge;
@@ -118,10 +119,25 @@ async function initPopup() {
 		return;
 	}
 	currentTabId = tab.id;
-	if (isRestrictedUrl(tab.url)) {
-		originText.textContent = tab.url;
-		showStateMessage("Restricted page — browser pages cannot be inspected.", "restricted");
-		return;
+	const settings = await SettingsService.getSettings();
+	const broadActive = await PermissionsService.isBroadGrantPresent();
+	const gate = isModeCaptureAllowed(tab.url, settings, broadActive);
+	if (!gate.allowed) {
+		if (gate.reason === "off") {
+			originText.textContent = tab.url;
+			showStateMessage("Monitoring is turned off in Settings.", "restricted");
+			return;
+		}
+		if (gate.reason === "broad-access-conflict") {
+			originText.textContent = tab.url;
+			showBroadAccessConflictNotice();
+			return;
+		}
+		if (gate.reason === "restricted-url") {
+			originText.textContent = tab.url;
+			showStateMessage("Restricted page — browser pages cannot be inspected.", "restricted");
+			return;
+		}
 	}
 	if (tab.url.toLowerCase().endsWith(".pdf") || tab.url.toLowerCase().includes(".pdf?")) {
 		specialNotice.textContent = "📄 Static Document: This tab displays a PDF/document file where web application security headers and cookies do not apply.";
@@ -137,7 +153,7 @@ async function initPopup() {
 	}
 	currentOrigin = origin;
 	originText.textContent = origin;
-	if (!await checkPermission(origin)) {
+	if (!(broadActive || await checkPermission(origin))) {
 		showMonitorSection();
 		showStateMessage("Permission required before this site can be analysed.", "permission");
 		return;
@@ -896,17 +912,37 @@ function getEl(id) {
 	if (!el) throw new Error(`Missing required element #${id}`);
 	return el;
 }
-function isRestrictedUrl(url) {
-	return [
-		"chrome://",
-		"chrome-extension://",
-		"about:",
-		"edge://",
-		"brave://",
-		"data:",
-		"javascript:",
-		"view-source:"
-	].some((prefix) => url.startsWith(prefix));
+function showBroadAccessConflictNotice() {
+	specialNotice.textContent = "";
+	const p = document.createElement("p");
+	p.textContent = "Broad access is active while monitoring mode is set to Per-site opt-in. Capture is paused until resolved:";
+	const actions = document.createElement("div");
+	actions.style.display = "flex";
+	actions.style.gap = "8px";
+	actions.style.marginTop = "8px";
+	const removeBtn = document.createElement("button");
+	removeBtn.className = "btn-secondary";
+	removeBtn.textContent = "Remove broad access";
+	removeBtn.addEventListener("click", () => {
+		chrome.permissions.remove({ origins: ["<all_urls>", "*://*/*"] }, () => {
+			initPopup();
+		});
+	});
+	const switchBtn = document.createElement("button");
+	switchBtn.className = "btn-primary";
+	switchBtn.textContent = "Switch to All sites";
+	switchBtn.addEventListener("click", () => {
+		SettingsService.updateSettings({ monitoringMode: "all-sites" }).then(() => {
+			initPopup();
+		});
+	});
+	actions.appendChild(removeBtn);
+	actions.appendChild(switchBtn);
+	specialNotice.appendChild(p);
+	specialNotice.appendChild(actions);
+	specialNotice.className = "special-notice conflict-notice";
+	specialNotice.hidden = false;
+	showStateMessage("Capture paused due to broad access conflict.", "waiting");
 }
 function checkPermission(origin) {
 	return new Promise((resolve) => {
@@ -928,4 +964,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-H0DL7gsw.js.map
+//# sourceMappingURL=popup.html-CyePEuHx.js.map

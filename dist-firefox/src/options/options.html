@@ -4,13 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Settings</title>
-  <script type="module" crossorigin src="/chunks/options.html-MqEAKDWq.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-BCRf7spF.js">
-  <link rel="modulepreload" crossorigin href="/chunks/storage-DkrZ3D78.js">
-  <link rel="modulepreload" crossorigin href="/chunks/utils-DgBLspgH.js">
-  <link rel="modulepreload" crossorigin href="/chunks/permissions-C601rqBC.js">
+  <script type="module" crossorigin src="/chunks/options.html-B2kWl96h.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-BCZa4hwB.js">
+  <link rel="modulepreload" crossorigin href="/chunks/permissions-DorKxJ_0.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
-  <link rel="stylesheet" crossorigin href="/assets/options-C1g1KjEu.css">
+  <link rel="stylesheet" crossorigin href="/assets/options-chYcSAPO.css">
 </head>
 <body>
 
@@ -52,6 +50,16 @@
         </label>
 
       </fieldset>
+
+      <!-- Broad grant conflict notification -->
+      <div class="conflict-banner" id="mode-conflict-banner" hidden role="alert">
+        <p class="conflict-banner-text" id="mode-conflict-text">Broad access is active</p>
+        <p class="conflict-banner-desc">Per-site opt-in is selected, but broad browser access is currently granted. Capture is paused until resolved.</p>
+        <div class="conflict-banner-actions">
+          <button type="button" class="btn-secondary" id="btn-remove-broad-access">Remove broad access</button>
+          <button type="button" class="btn-primary" id="btn-switch-to-all-sites">Switch to All sites</button>
+        </div>
+      </div>
     </section>
 
     <!-- ── Per-site allowlist ───────────────────────────────────── -->

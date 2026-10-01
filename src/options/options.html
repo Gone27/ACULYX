@@ -46,6 +46,16 @@
         </label>
 
       </fieldset>
+
+      <!-- Broad grant conflict notification -->
+      <div class="conflict-banner" id="mode-conflict-banner" hidden role="alert">
+        <p class="conflict-banner-text" id="mode-conflict-text">Broad access is active</p>
+        <p class="conflict-banner-desc">Per-site opt-in is selected, but broad browser access is currently granted. Capture is paused until resolved.</p>
+        <div class="conflict-banner-actions">
+          <button type="button" class="btn-secondary" id="btn-remove-broad-access">Remove broad access</button>
+          <button type="button" class="btn-primary" id="btn-switch-to-all-sites">Switch to All sites</button>
+        </div>
+      </div>
     </section>
 
     <!-- ── Per-site allowlist ───────────────────────────────────── -->

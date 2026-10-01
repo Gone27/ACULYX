@@ -1,6 +1,5 @@
-import { f as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BCRf7spF.js";
-import { a as resolveCookieOverlaps, i as normalizeCookieList, r as SettingsService } from "./storage-DkrZ3D78.js";
-import { t as PermissionsService } from "./permissions-C601rqBC.js";
+import { r as sendToBackground, w as SEVERITY_ORDER } from "./messaging-BCZa4hwB.js";
+import { f as SettingsService, m as resolveCookieOverlaps, p as normalizeCookieList, t as PermissionsService } from "./permissions-DorKxJ_0.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
@@ -15,6 +14,9 @@ var saveBtn;
 var saveStatus;
 var sectionAllowlist;
 var proModeToggle;
+var modeConflictBanner;
+var btnRemoveBroadAccess;
+var btnSwitchToAllSites;
 var currentMode = "per-site";
 /**
 * In-memory working copy of the allowedOrigins array.
@@ -33,7 +35,11 @@ document.addEventListener("DOMContentLoaded", () => {
 	saveStatus = getEl("save-status");
 	sectionAllowlist = getEl("section-allowlist");
 	proModeToggle = getEl("pro-mode-toggle");
+	modeConflictBanner = getEl("mode-conflict-banner");
+	btnRemoveBroadAccess = getEl("btn-remove-broad-access");
+	btnSwitchToAllSites = getEl("btn-switch-to-all-sites");
 	wireModeRadios();
+	wireConflictBanner();
 	wireSaveButton();
 	loadAndPopulate();
 });
@@ -60,6 +66,7 @@ async function loadAndPopulate() {
 		workingOrigins = [...settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? []];
 	}
 	renderAllowlist();
+	await checkAndRenderBroadConflict();
 }
 function wireSaveButton() {
 	saveBtn.addEventListener("click", () => {
@@ -180,20 +187,44 @@ function wireModeRadios() {
 				if (!granted) {
 					for (const r of modeRadios) r.checked = r.value === currentMode;
 					updateAllowlistVisibility(currentMode);
+					checkAndRenderBroadConflict();
 					setStatus("All-sites monitoring requires permission for all URLs. Kept previous mode.", true);
 				} else {
 					currentMode = "all-sites";
 					updateAllowlistVisibility("all-sites");
+					checkAndRenderBroadConflict();
 				}
 			});
 			else {
 				currentMode = "all-sites";
 				updateAllowlistVisibility("all-sites");
+				checkAndRenderBroadConflict();
 			}
 		} else {
 			currentMode = targetMode;
 			updateAllowlistVisibility(targetMode);
+			checkAndRenderBroadConflict();
 		}
+	});
+}
+async function checkAndRenderBroadConflict() {
+	const broadActive = await PermissionsService.isBroadGrantPresent();
+	if (currentMode === "per-site" && broadActive) modeConflictBanner.removeAttribute("hidden");
+	else modeConflictBanner.setAttribute("hidden", "");
+}
+function wireConflictBanner() {
+	btnRemoveBroadAccess.addEventListener("click", () => {
+		if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") chrome.permissions.remove({ origins: ["<all_urls>", "*://*/*"] }, () => {
+			checkAndRenderBroadConflict();
+			setStatus("Broad access removed", false);
+		});
+	});
+	btnSwitchToAllSites.addEventListener("click", () => {
+		currentMode = "all-sites";
+		for (const r of modeRadios) r.checked = r.value === "all-sites";
+		updateAllowlistVisibility("all-sites");
+		modeConflictBanner.setAttribute("hidden", "");
+		handleSave();
 	});
 }
 /**
@@ -224,15 +255,17 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 		PermissionsService.getAllGrantedOrigins().then((origins) => {
 			workingOrigins = origins;
 			renderAllowlist();
+			checkAndRenderBroadConflict();
 		});
 	});
 	if (typeof chrome.permissions.onAdded !== "undefined") chrome.permissions.onAdded.addListener(() => {
 		PermissionsService.getAllGrantedOrigins().then((origins) => {
 			workingOrigins = origins;
 			renderAllowlist();
+			checkAndRenderBroadConflict();
 		});
 	});
 }
 //#endregion
 
-//# sourceMappingURL=options.html-MqEAKDWq.js.map
+//# sourceMappingURL=options.html-B2kWl96h.js.map

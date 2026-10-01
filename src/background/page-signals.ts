@@ -1,9 +1,17 @@
 import { originFromUrl } from '../rules/utils';
 import { reportPageSignals } from '../content/service-worker-detection';
+import { isRestrictedUrl } from '../shared/gating';
+import { SettingsService } from '../shared/settings';
 
 function injectPageSignals(tabId: number, url: string): void {
+  if (isRestrictedUrl(url)) return;
   const origin = originFromUrl(url);
   if (origin === null || origin.length === 0) return;
+
+  const settings = SettingsService.getCachedSettings();
+  if (settings.monitoringMode === 'off') return;
+
+  if (typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') return;
 
   chrome.permissions.contains({ origins: [`${origin}/*`] }, (permitted) => {
     if (!permitted) return;

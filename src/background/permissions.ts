@@ -79,7 +79,11 @@ export const PermissionsService = {
    * Queries chrome.permissions.getAll() and returns true if any broad grant exists.
    */
   async isBroadGrantPresent(): Promise<boolean> {
-    if (typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') {
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.permissions === 'undefined' ||
+      typeof chrome.permissions.getAll === 'undefined'
+    ) {
       return false;
     }
     const perms = await chrome.permissions.getAll();
@@ -92,7 +96,11 @@ export const PermissionsService = {
    * Normalizes patterns to canonical origins (e.g., https://example.com).
    */
   async getAllGrantedOrigins(): Promise<string[]> {
-    if (typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') {
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.permissions === 'undefined' ||
+      typeof chrome.permissions.getAll === 'undefined'
+    ) {
       return [];
     }
     const perms = await chrome.permissions.getAll();

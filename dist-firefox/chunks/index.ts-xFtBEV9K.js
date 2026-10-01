@@ -1,8 +1,7 @@
-import { a as DEFAULT_SETTINGS, d as SCORE_VERSION, i as BADGE_COLORS, l as POPUP_PORT_NAME, n as portSend, o as GRADE_THRESHOLDS, p as SIDEPANEL_PORT_NAME, t as PortRegistry, u as RESTRICTED_SCHEMES } from "./messaging-BCRf7spF.js";
-import { n as SessionStorage, r as SettingsService, t as LocalStorage } from "./storage-DkrZ3D78.js";
-import { a as registerCaptureListeners, c as originAuthBaselines, i as captureMap, l as tabStates, n as reconcilePermissionsOnRemoved, o as hydrateFromSession, r as reconcilePermissionsOnStartup, s as initLifecycle, t as PermissionsService } from "./permissions-C601rqBC.js";
-import { a as isSensitiveCookie, c as parseCspDirectives, f as sanitizeEvidence, n as extractSetCookieHeaders, r as hasCspBypassProtection, s as originFromUrl, t as checkDuplicateHeaders } from "./utils-DgBLspgH.js";
-import { n as registrableDomain, t as checkSubdomainTrust } from "./subdomain-trust-B3Jbs8TC.js";
+import { C as SCORE_VERSION, S as RESTRICTED_SCHEMES, T as SIDEPANEL_PORT_NAME, _ as DEFAULT_SETTINGS, a as extractSetCookieHeaders, c as isSensitiveCookie, d as parseCspDirectives, g as BADGE_COLORS, h as sanitizeEvidence, i as checkDuplicateHeaders, n as portSend, o as hasCspBypassProtection, t as PortRegistry, u as originFromUrl, v as GRADE_THRESHOLDS, x as POPUP_PORT_NAME } from "./messaging-BCZa4hwB.js";
+import { a as registerCaptureListeners, c as originAuthBaselines, d as SessionStorage, f as SettingsService, i as captureMap, l as tabStates, n as reconcilePermissionsOnRemoved, o as hydrateFromSession, r as reconcilePermissionsOnStartup, s as initLifecycle, t as PermissionsService, u as LocalStorage } from "./permissions-DorKxJ_0.js";
+import { n as registrableDomain, t as checkSubdomainTrust } from "./subdomain-trust-BFZLSYTp.js";
+import { n as isRestrictedUrl$1, t as isModeCaptureAllowed } from "./gating-BKxraNh3.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -278,8 +277,11 @@ function reportPageSignals() {
 //#endregion
 //#region src/background/page-signals.ts
 function injectPageSignals(tabId, url) {
+	if (isRestrictedUrl$1(url)) return;
 	const origin = originFromUrl(url);
 	if (origin === null || origin.length === 0) return;
+	if (SettingsService.getCachedSettings().monitoringMode === "off") return;
+	if (typeof chrome === "undefined" || typeof chrome.permissions === "undefined") return;
 	chrome.permissions.contains({ origins: [`${origin}/*`] }, (permitted) => {
 		if (!permitted) return;
 		chrome.scripting.executeScript({
@@ -3418,15 +3420,31 @@ async function onHopComplete(tabId, hop) {
 	const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
 	state.url = hop.url;
 	state.origin = originFromUrl(hop.url) ?? hop.url;
-	if (isRestrictedUrl(hop.url)) {
-		state.coverage.isRestricted = true;
-		tabStates.set(tabId, state);
-		setBadgeForTab(tabId, "?");
+	const broadActive = await PermissionsService.isBroadGrantPresent();
+	const gate = isModeCaptureAllowed(hop.url, currentSettings, broadActive);
+	if (!gate.allowed) {
+		if (gate.reason === "off") {
+			chrome.action?.setBadgeText({
+				tabId,
+				text: ""
+			})?.catch?.(() => void 0);
+			return;
+		}
+		if (gate.reason === "broad-access-conflict") {
+			setBadgeForTab(tabId, "?");
+			return;
+		}
+		if (gate.reason === "restricted-url") {
+			state.coverage.isRestricted = true;
+			tabStates.set(tabId, state);
+			setBadgeForTab(tabId, "?");
+			return;
+		}
 		return;
 	}
 	const origin = state.origin;
 	if (!origin || origin === hop.url) return;
-	if (!await PermissionsService.hasPermissionForOrigin(origin)) {
+	if (!(broadActive || await PermissionsService.hasPermissionForOrigin(origin))) {
 		state.coverage.isRestricted = false;
 		setBadgeForTab(tabId, "?");
 		return;
@@ -3746,48 +3764,52 @@ registerCaptureListeners((tabId, hop) => {
 }, (apiHop) => {
 	const state = tabStates.get(apiHop.tabId);
 	if (!state) return;
-	const targetOrigin = originFromUrl(apiHop.url);
-	const isFirstParty = state.origin === targetOrigin;
-	apiHop.isThirdParty = !isFirstParty;
-	const findings = runApiRules(apiHop, {
-		alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
-		alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []
-	});
-	if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
-	const endpointState = {
-		normalizedPath: apiHop.normalizedPath,
-		lastHop: apiHop,
-		findings,
-		isFirstParty
-	};
-	state.apiEndpoints.set(apiHop.normalizedPath, endpointState);
-	if (state.apiEndpoints.size > 50) {
-		const firstKey = state.apiEndpoints.keys().next().value;
-		if (firstKey !== void 0) state.apiEndpoints.delete(firstKey);
-	}
-	pushLedgerEntry(state, {
-		type: "api",
-		url: apiHop.url,
-		source: apiHop.fromCache === true ? "cache" : "network",
-		status: apiHop.status,
-		timestamp: apiHop.timestamp ?? Date.now(),
-		notes: `${apiHop.method} ${apiHop.isThirdParty === true ? "(third-party)" : "(first-party)"}`
-	});
-	state.updatedAt = Date.now();
-	SessionStorage.setTabState(state);
 	(async () => {
-		try {
-			const hostname = new URL(state.origin).hostname;
-			const apex = registrableDomain(hostname) ?? hostname;
-			const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-			const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
-			await LocalStorage.saveGraph(updatedGraph);
-		} catch {}
+		const broadActive = await PermissionsService.isBroadGrantPresent();
+		if (!isModeCaptureAllowed(apiHop.url, currentSettings, broadActive).allowed) return;
+		const targetOrigin = originFromUrl(apiHop.url);
+		const isFirstParty = state.origin === targetOrigin;
+		apiHop.isThirdParty = !isFirstParty;
+		const findings = runApiRules(apiHop, {
+			alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
+			alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []
+		});
+		if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
+		const endpointState = {
+			normalizedPath: apiHop.normalizedPath,
+			lastHop: apiHop,
+			findings,
+			isFirstParty
+		};
+		state.apiEndpoints.set(apiHop.normalizedPath, endpointState);
+		if (state.apiEndpoints.size > 50) {
+			const firstKey = state.apiEndpoints.keys().next().value;
+			if (firstKey !== void 0) state.apiEndpoints.delete(firstKey);
+		}
+		pushLedgerEntry(state, {
+			type: "api",
+			url: apiHop.url,
+			source: apiHop.fromCache === true ? "cache" : "network",
+			status: apiHop.status,
+			timestamp: apiHop.timestamp ?? Date.now(),
+			notes: `${apiHop.method} ${apiHop.isThirdParty === true ? "(third-party)" : "(first-party)"}`
+		});
+		state.updatedAt = Date.now();
+		SessionStorage.setTabState(state);
+		(async () => {
+			try {
+				const hostname = new URL(state.origin).hostname;
+				const apex = registrableDomain(hostname) ?? hostname;
+				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+				const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
+				await LocalStorage.saveGraph(updatedGraph);
+			} catch {}
+		})();
+		portRegistry.broadcast(apiHop.tabId, {
+			type: "TAB_STATE_UPDATE",
+			state
+		});
 	})();
-	portRegistry.broadcast(apiHop.tabId, {
-		type: "TAB_STATE_UPDATE",
-		state
-	});
 });
 hydrateFromSession().then(async () => {
 	await reconcilePermissionsOnStartup({
@@ -3822,4 +3844,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 });
 //#endregion
 
-//# sourceMappingURL=index.ts-NWe8Qpy8.js.map
+//# sourceMappingURL=index.ts-xFtBEV9K.js.map

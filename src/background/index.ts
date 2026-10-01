@@ -31,6 +31,7 @@ import {
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
 } from './permissions';
+import { isModeCaptureAllowed } from '../shared/gating';
 import {
   BADGE_COLORS,
   RESTRICTED_SCHEMES,
@@ -268,23 +269,35 @@ async function onHopComplete(
   state.origin = originFromUrl(hop.url) ?? hop.url;
 
   // ------------------------------------------------------------------
-  // 2. Guard: restricted URLs cannot be inspected.
+  // 2. Guard: mode capture gating & restricted URLs.
   // ------------------------------------------------------------------
-  if (isRestrictedUrl(hop.url)) {
-    state.coverage.isRestricted = true;
-    tabStates.set(tabId, state);
-    setBadgeForTab(tabId, '?');
+  const broadActive = await PermissionsService.isBroadGrantPresent();
+  const gate = isModeCaptureAllowed(hop.url, currentSettings, broadActive);
+  if (!gate.allowed) {
+    if (gate.reason === 'off') {
+      void chrome.action?.setBadgeText({ tabId, text: '' })?.catch?.(() => undefined);
+      return;
+    }
+    if (gate.reason === 'broad-access-conflict') {
+      setBadgeForTab(tabId, '?');
+      return;
+    }
+    if (gate.reason === 'restricted-url') {
+      state.coverage.isRestricted = true;
+      tabStates.set(tabId, state);
+      setBadgeForTab(tabId, '?');
+      return;
+    }
     return;
   }
 
   // ------------------------------------------------------------------
   // 3. Guard: check the user has granted permission for this origin.
-  //    chrome.permissions.contains requires origin/* pattern format.
   // ------------------------------------------------------------------
   const origin = state.origin;
   if (!origin || origin === hop.url) return; // originFromUrl returned null (non-http URL)
 
-  const permitted = await PermissionsService.hasPermissionForOrigin(origin);
+  const permitted = broadActive || (await PermissionsService.hasPermissionForOrigin(origin));
   if (!permitted) {
     // Not monitored — reset badge to '?' and do nothing further.
     state.coverage.isRestricted = false;
@@ -757,9 +770,14 @@ registerCaptureListeners(
     const state = tabStates.get(apiHop.tabId);
     if (!state) return;
 
-    const targetOrigin = originFromUrl(apiHop.url);
-    const isFirstParty = state.origin === targetOrigin;
-    apiHop.isThirdParty = !isFirstParty;
+    void (async () => {
+      const broadActive = await PermissionsService.isBroadGrantPresent();
+      const gate = isModeCaptureAllowed(apiHop.url, currentSettings, broadActive);
+      if (!gate.allowed) return;
+
+      const targetOrigin = originFromUrl(apiHop.url);
+      const isFirstParty = state.origin === targetOrigin;
+      apiHop.isThirdParty = !isFirstParty;
 
     const findings = runApiRules(apiHop, {
       alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
@@ -824,6 +842,7 @@ registerCaptureListeners(
       type: 'TAB_STATE_UPDATE',
       state,
     });
+    })();
   }
 );
 
