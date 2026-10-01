@@ -251,7 +251,7 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       host_permissions?: string[];
       [key: string]: unknown;
     };
-    manifestJson.host_permissions = ['<all_urls>'];
+    manifestJson.host_permissions = ['http://127.0.0.1/*'];
     fs.writeFileSync(testManifestPath, JSON.stringify(manifestJson, null, 2));
 
     let context;
@@ -310,30 +310,49 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
 
       // Open popup targeting the test tab
       const monitorPopup = await context.newPage();
+
       // Configure initial unmonitored state in popup: checkPermission returns false until user clicks monitor
       await monitorPopup.addInitScript(() => {
         let permissionGranted = false;
         const perms = chrome.permissions as unknown as {
-          contains: (details: chrome.permissions.Permissions, callback: (result: boolean) => void) => Promise<boolean> | void;
+          contains: (details: chrome.permissions.Permissions, callback?: (result: boolean) => void) => Promise<boolean> | void;
           request: (details: chrome.permissions.Permissions, callback?: (result: boolean) => void) => Promise<boolean> | void;
+          getAll: (callback?: (perms: chrome.permissions.Permissions) => void) => Promise<chrome.permissions.Permissions> | void;
         };
         const origContains = perms.contains.bind(perms);
         perms.contains = (
           details: chrome.permissions.Permissions,
-          callback: (result: boolean) => void,
-        ): void => {
+          callback?: (result: boolean) => void,
+        ): Promise<boolean> | void => {
           if (details.origins !== undefined && details.origins.some((o: string) => o.includes('127.0.0.1'))) {
-            callback(permissionGranted);
-            return;
+            if (typeof callback === 'function') {
+              callback(permissionGranted);
+              return;
+            }
+            return Promise.resolve(permissionGranted);
           }
-          void origContains(details, callback);
+          return origContains(details, callback as (result: boolean) => void);
         };
         perms.request = (
           _details: chrome.permissions.Permissions,
           callback?: (result: boolean) => void,
-        ): void => {
+        ): Promise<boolean> | void => {
           permissionGranted = true;
-          if (callback) callback(true);
+          if (typeof callback === 'function') {
+            callback(true);
+            return;
+          }
+          return Promise.resolve(true);
+        };
+        perms.getAll = (
+          callback?: (perms: chrome.permissions.Permissions) => void,
+        ): Promise<chrome.permissions.Permissions> | void => {
+          const res = { origins: permissionGranted ? ['http://127.0.0.1/*'] : [] };
+          if (typeof callback === 'function') {
+            callback(res);
+            return;
+          }
+          return Promise.resolve(res);
         };
       });
 
