@@ -35,7 +35,7 @@ export interface TestServerHandle {
  * server.close();
  * ```
  */
-export function startServer(port = 3456): Promise<TestServerHandle> {
+export function startServer(port = 3456, host = '127.0.0.1'): Promise<TestServerHandle> {
   const app = express();
 
   // Disable the default "X-Powered-By: Express" header so it does not
@@ -45,8 +45,8 @@ export function startServer(port = 3456): Promise<TestServerHandle> {
   registerRoutes(app);
 
   return new Promise<TestServerHandle>((resolve, reject) => {
-    const server = app.listen(port, () => {
-      resolve({ server, baseUrl: `http://localhost:${port}` });
+    const server = app.listen(port, host, () => {
+      resolve({ server, baseUrl: `http://${host}:${port}` });
     });
     server.on('error', reject);
   });

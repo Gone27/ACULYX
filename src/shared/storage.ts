@@ -28,15 +28,34 @@ function deserializeTabState(raw: SerializedTabState): TabState {
   return rest;
 }
 
-function hasUnredactedCookieValue(headerStr: string): boolean {
+export function hasUnredactedCookieValue(headerStr: string, isSetCookie: boolean = false): boolean {
   if (!headerStr) return false;
-  const semiIdx = headerStr.indexOf(';');
-  const firstPart = semiIdx !== -1 ? headerStr.slice(0, semiIdx) : headerStr;
-  const eqIdx = firstPart.indexOf('=');
-  if (eqIdx !== -1) {
-    const val = firstPart.slice(eqIdx + 1).trim();
-    if (val !== '' && val !== '[REDACTED]' && val !== '[redacted]') {
-      return true;
+  if (isSetCookie) {
+    const lines = headerStr.split(/\r?\n/);
+    for (const line of lines) {
+      const semiIdx = line.indexOf(';');
+      const firstPart = semiIdx !== -1 ? line.slice(0, semiIdx) : line;
+      const eqIdx = firstPart.indexOf('=');
+      if (eqIdx !== -1) {
+        const val = firstPart.slice(eqIdx + 1).trim();
+        if (val !== '' && val !== '[REDACTED]' && val !== '[redacted]') {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  const parts = headerStr.split(';');
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx !== -1) {
+      const val = trimmed.slice(eqIdx + 1).trim();
+      if (val !== '' && val !== '[REDACTED]' && val !== '[redacted]') {
+        return true;
+      }
     }
   }
   return false;
@@ -63,7 +82,7 @@ export function assertNoSensitiveSecrets(state: TabState): void {
       for (const [k, v] of Object.entries(headers)) {
         const lower = k.toLowerCase();
         if (lower === 'set-cookie' || lower === 'cookie') {
-          if (hasUnredactedCookieValue(v)) {
+          if (hasUnredactedCookieValue(v, lower === 'set-cookie')) {
             throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
           }
         } else if (lower === 'authorization' || lower === 'proxy-authorization') {
@@ -78,7 +97,7 @@ export function assertNoSensitiveSecrets(state: TabState): void {
       for (const h of rawHeaders) {
         const lower = h.name.toLowerCase();
         if (lower === 'set-cookie' || lower === 'cookie') {
-          if (hasUnredactedCookieValue(h.value)) {
+          if (hasUnredactedCookieValue(h.value, lower === 'set-cookie')) {
             throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
           }
         } else if (lower === 'authorization' || lower === 'proxy-authorization') {

@@ -19,6 +19,7 @@
  * are marked with a skip comment and left as future work.
  */
 
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { test, expect, chromium } from '@playwright/test';
@@ -239,7 +240,19 @@ test.describe('Extension e2e (requires built dist/)', () => {
 
 test.describe('Extension Loading & Storage Redaction E2E', () => {
   test('loads built extension in persistent context, renders UI, and verifies zero cookie canary leak in session storage', async () => {
-    const { server, baseUrl } = await startServer(3464);
+    const { server, baseUrl } = await startServer(3464, '127.0.0.1');
+
+    // Prepare a test extension directory with host permissions so Chromium's network layer
+    // dispatches webRequest events during automated headless execution.
+    const testExtDir = path.resolve(__dirname, '../../dist-e2e-test');
+    fs.cpSync(extensionPath, testExtDir, { recursive: true });
+    const testManifestPath = path.join(testExtDir, 'manifest.json');
+    const manifestJson = JSON.parse(fs.readFileSync(testManifestPath, 'utf8')) as {
+      host_permissions?: string[];
+      [key: string]: unknown;
+    };
+    manifestJson.host_permissions = ['<all_urls>'];
+    fs.writeFileSync(testManifestPath, JSON.stringify(manifestJson, null, 2));
 
     let context;
     try {
@@ -247,8 +260,8 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
         headless: false,
         args: [
           '--headless=new',
-          `--disable-extensions-except=${extensionPath}`,
-          `--load-extension=${extensionPath}`,
+          `--disable-extensions-except=${testExtDir}`,
+          `--load-extension=${testExtDir}`,
         ],
       });
 
@@ -283,21 +296,105 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       await expect(sidepanelPage.locator('#tier-badge')).toBeVisible();
       await sidepanelPage.close();
 
-      // 4. Test synthetic Set-Cookie canary by visiting test route
+      // 4. Exercise real monitor flow on the test route
       const page = await context.newPage();
       await page.goto(`${baseUrl}/cookie-test`);
-      await page.close();
 
-      // 5. Query session storage from service worker to verify no cookie secret or canary leaked
+      // Find the tabId of the target test page
+      const targetTabId = await background.evaluate(async (targetUrl: string) => {
+        const tabs = await chrome.tabs.query({});
+        const match = tabs.find((t) => t.url !== undefined && t.url.startsWith(targetUrl));
+        return match?.id ?? null;
+      }, baseUrl);
+      expect(targetTabId).not.toBeNull();
+
+      // Open popup targeting the test tab
+      const monitorPopup = await context.newPage();
+      // Configure initial unmonitored state in popup: checkPermission returns false until user clicks monitor
+      await monitorPopup.addInitScript(() => {
+        let permissionGranted = false;
+        const perms = chrome.permissions as unknown as {
+          contains: (details: chrome.permissions.Permissions, callback: (result: boolean) => void) => Promise<boolean> | void;
+          request: (details: chrome.permissions.Permissions, callback?: (result: boolean) => void) => Promise<boolean> | void;
+        };
+        const origContains = perms.contains.bind(perms);
+        perms.contains = (
+          details: chrome.permissions.Permissions,
+          callback: (result: boolean) => void,
+        ): void => {
+          if (details.origins !== undefined && details.origins.some((o: string) => o.includes('127.0.0.1'))) {
+            callback(permissionGranted);
+            return;
+          }
+          void origContains(details, callback);
+        };
+        perms.request = (
+          _details: chrome.permissions.Permissions,
+          callback?: (result: boolean) => void,
+        ): void => {
+          permissionGranted = true;
+          if (callback) callback(true);
+        };
+      });
+
+      await monitorPopup.goto(`chrome-extension://${extensionId}/src/popup/popup.html?tabId=${targetTabId}`);
+
+      // Verify that the monitor section is initially visible for the unmonitored origin
+      const monitorSection = monitorPopup.locator('#monitor-section');
+      await expect(monitorSection).toBeVisible();
+
+      // Click "Monitor this site" to execute the real UI permission request flow
+      const monitorBtn = monitorPopup.locator('#monitor-btn');
+      await monitorBtn.click();
+
+      // Verify that the UI state updated and monitor section is now hidden
+      await expect(monitorSection).toBeHidden();
+
+      // Wait for tab reload triggered by monitor button to finish and background to capture the hop
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(1500);
+
+      // 5. Query session storage from service worker to verify captured tab state and secret redaction
       const storageDump = await background.evaluate(async () => {
         return await chrome.storage.session.get(null);
       });
       const serialized = JSON.stringify(storageDump);
+
+      // Verify that the tab was captured and state stored
+      const tabStateKey = `tab:${targetTabId}`;
+      expect(storageDump).toHaveProperty(tabStateKey);
+      const tabState = (storageDump as Record<string, {
+        monitoredByUser: boolean;
+        hops: Array<{
+          headers: Record<string, string>;
+          rawHeaders: Array<{ name: string; value: string }>;
+        }>;
+      }>)[tabStateKey];
+
+      expect(tabState).toBeDefined();
+      if (tabState === undefined) throw new Error('tabState is undefined');
+      expect(tabState.monitoredByUser).toBe(true);
+      expect(tabState.hops.length).toBeGreaterThanOrEqual(1);
+
+      // Verify that the cookie header was captured and sanitized in both headers and rawHeaders
+      const capturedHop = tabState.hops[0];
+      expect(capturedHop).toBeDefined();
+      if (capturedHop === undefined) throw new Error('capturedHop is undefined');
+      expect(capturedHop.headers['set-cookie']).toBeDefined();
+      expect(capturedHop.headers['set-cookie']).toContain('[REDACTED]');
+      expect(capturedHop.headers['set-cookie']).not.toContain('REDACTED_IN_TEST');
+      expect(capturedHop.headers['set-cookie']).not.toContain('V2_SYNTHETIC_CANARY');
+
+      // Verify zero canary or secret values anywhere in serialized session storage
       expect(serialized).not.toContain('V2_SYNTHETIC_CANARY');
       expect(serialized).not.toContain('REDACTED_IN_TEST');
+
+      await monitorPopup.close();
+      await page.close();
     } finally {
       if (context) await context.close();
       server.close();
+      fs.rmSync(testExtDir, { recursive: true, force: true });
     }
   });
 });

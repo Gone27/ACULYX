@@ -63,15 +63,15 @@ Because SecCheck observes responses in the browser you are already using, it can
 
 - **🔒 Built for Privacy First:**
   - **Zero Remote Telemetry:** Extension pages block outbound connections with `connect-src 'none'`; the page-signal script makes no network requests and sends only local extension messages.
-  - **Zero Cookie Value Storage:** Only cookie metadata (flags and domain scope) is analyzed. Cookie contents and secrets are never read or stored, and network hop headers have secret cookie values automatically redacted before local storage.
+  - **Zero Cookie Value Storage:** Only cookie metadata (flags, attributes, and domain scope) is evaluated; `cookie.value` is never accessed. While values may be transiently present in in-flight header strings in memory strictly for immediate redaction, secret cookie values are automatically replaced with `[REDACTED]` before local session storage, state persistence, or display.
   - **Opt-in Permissions:** Works on an on-demand, per-site model — you decide when and where to inspect.
-  - **Local Meta-CSP Processing:** Detects `<meta http-equiv="Content-Security-Policy">` directives locally in tab session memory to identify policy presence without inspecting page HTML or DOM contents.
+  - **Local Meta-CSP Detection:** Queries the document head for the presence of fallback `<meta http-equiv="Content-Security-Policy">` tags as an informational indicator, without collecting or inspecting page body HTML or general DOM tree contents.
 
 ### Coverage Boundaries
 
 - SecCheck analyzes top-level (`main_frame`) navigation responses and in-page API (`xmlhttprequest` / `fetch`) responses on user-permitted origins. Static sub-resources (such as images, fonts, and stylesheets) and embedded iframes are not inspected; this is not a full whole-page resource crawl.
 - Sensitive query parameters (such as tokens, session keys, and auth parameters) in captured API URLs are automatically redacted before local display or storage.
-- Meta CSP directives are inspected strictly in local memory to report fallback policy presence and syntax when HTTP response headers omit CSP.
+- Meta CSP tags in the document head are noted strictly in local memory as an informational indicator of fallback policy presence; policy directives in meta tags are not evaluated for syntax or directive strength, as meta CSP cannot replace HTTP response headers.
 
 ---
 

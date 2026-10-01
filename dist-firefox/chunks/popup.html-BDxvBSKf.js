@@ -1,5 +1,5 @@
 import { f as SEVERITY_ORDER, l as POPUP_PORT_NAME, r as sendToBackground } from "./messaging-BiWicsg3.js";
-import { t as LocalStorage } from "./storage-D5dK29a1.js";
+import { t as LocalStorage } from "./storage-CJOthBSi.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/popup/popup.ts
 var gradeBadge;
@@ -92,17 +92,27 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 async function initPopup() {
 	showStateMessage("Loading…", "loading");
-	let tabs;
-	try {
-		tabs = await chrome.tabs.query({
-			active: true,
-			currentWindow: true
-		});
-	} catch {
-		showStateMessage("Unable to determine the active tab.", "error");
-		return;
+	const paramTabId = new URLSearchParams(window.location.search).get("tabId");
+	let tab;
+	if (paramTabId !== null && paramTabId.length > 0) {
+		const id = parseInt(paramTabId, 10);
+		if (!Number.isNaN(id)) try {
+			tab = await chrome.tabs.get(id);
+		} catch {}
 	}
-	const tab = tabs[0];
+	if (tab === void 0) {
+		let tabs;
+		try {
+			tabs = await chrome.tabs.query({
+				active: true,
+				currentWindow: true
+			});
+		} catch {
+			showStateMessage("Unable to determine the active tab.", "error");
+			return;
+		}
+		tab = tabs[0];
+	}
 	if (!tab || typeof tab.id !== "number" || tab.url == null || tab.url.length === 0) {
 		showStateMessage("No active tab found.", "error");
 		return;
@@ -918,4 +928,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Dm7Vx8SK.js.map
+//# sourceMappingURL=popup.html-BDxvBSKf.js.map

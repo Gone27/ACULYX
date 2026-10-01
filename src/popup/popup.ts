@@ -130,15 +130,32 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initPopup(): Promise<void> {
   showStateMessage('Loading…', 'loading');
 
-  let tabs: chrome.tabs.Tab[];
-  try {
-    tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  } catch {
-    showStateMessage('Unable to determine the active tab.', 'error');
-    return;
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramTabId = urlParams.get('tabId');
+  let tab: chrome.tabs.Tab | undefined;
+
+  if (paramTabId !== null && paramTabId.length > 0) {
+    const id = parseInt(paramTabId, 10);
+    if (!Number.isNaN(id)) {
+      try {
+        tab = await chrome.tabs.get(id);
+      } catch {
+        // Fall back to querying active tab
+      }
+    }
   }
 
-  const tab = tabs[0];
+  if (tab === undefined) {
+    let tabs: chrome.tabs.Tab[];
+    try {
+      tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    } catch {
+      showStateMessage('Unable to determine the active tab.', 'error');
+      return;
+    }
+    tab = tabs[0];
+  }
+
   if (!tab || typeof tab.id !== 'number' || tab.url == null || tab.url.length === 0) {
     showStateMessage('No active tab found.', 'error');
     return;

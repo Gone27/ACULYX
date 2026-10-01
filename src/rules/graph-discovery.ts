@@ -51,10 +51,10 @@ export function discoverNodes(
   apiEndpoints?: Map<string, import('../shared/types').ApiEndpointState>,
 ): DiscoveredNode[] {
   const apex = registrableDomain(currentHostname) ?? currentHostname;
-  const discoveredMap = new Map<string, DiscoveredNode['discoveredVia']>();
+  const discoveredMap = new Map<string, { via: DiscoveredNode['discoveredVia']; sourceHost?: string | undefined }>();
 
   // 1. Current host is always a navigation node
-  discoveredMap.set(currentHostname.toLowerCase(), 'navigation');
+  discoveredMap.set(currentHostname.toLowerCase(), { via: 'navigation' });
 
   // 2. Discover from CSP source-list tokens
   for (const hop of hops) {
@@ -65,7 +65,7 @@ export function discoverNodes(
         const host = extractHostnameFromCspToken(token);
         if (host != null && host.length > 0 && (host === apex || host.endsWith(`.${apex}`))) {
           if (!discoveredMap.has(host)) {
-            discoveredMap.set(host, 'csp');
+            discoveredMap.set(host, { via: 'csp' });
           }
         }
       }
@@ -78,7 +78,7 @@ export function discoverNodes(
       const cleanDomain = cookie.domain.replace(/^\./, '').toLowerCase();
       if (cleanDomain.length > 0 && (cleanDomain === apex || cleanDomain.endsWith(`.${apex}`))) {
         if (!discoveredMap.has(cleanDomain)) {
-          discoveredMap.set(cleanDomain, 'cookie');
+          discoveredMap.set(cleanDomain, { via: 'cookie' });
         }
       }
     }
@@ -91,9 +91,11 @@ export function discoverNodes(
       try {
         const u = new URL(acao);
         const host = u.hostname.toLowerCase();
+        let hopHost: string | undefined;
+        try { hopHost = new URL(hop.url).hostname.toLowerCase(); } catch {}
         if (host === apex || host.endsWith(`.${apex}`)) {
           if (!discoveredMap.has(host)) {
-            discoveredMap.set(host, 'cors');
+            discoveredMap.set(host, { via: 'cors', sourceHost: hopHost });
           }
         }
       } catch {
@@ -112,7 +114,7 @@ export function discoverNodes(
         const host = u.hostname.toLowerCase();
         if (host === apex || host.endsWith(`.${apex}`)) {
           if (!discoveredMap.has(host)) {
-            discoveredMap.set(host, 'api');
+            discoveredMap.set(host, { via: 'api' });
           }
         }
       } catch {
@@ -124,9 +126,11 @@ export function discoverNodes(
         try {
           const u = new URL(acao);
           const host = u.hostname.toLowerCase();
+          let hopHost: string | undefined;
+          try { hopHost = new URL(hop.url).hostname.toLowerCase(); } catch {}
           if (host === apex || host.endsWith(`.${apex}`)) {
             if (!discoveredMap.has(host)) {
-              discoveredMap.set(host, 'cors');
+              discoveredMap.set(host, { via: 'cors', sourceHost: hopHost });
             }
           }
         } catch {
@@ -136,9 +140,10 @@ export function discoverNodes(
     }
   }
 
-  return Array.from(discoveredMap.entries()).map(([hostname, discoveredVia]) => ({
+  return Array.from(discoveredMap.entries()).map(([hostname, info]) => ({
     hostname,
-    discoveredVia,
+    discoveredVia: info.via,
+    sourceHost: info.sourceHost,
   }));
 }
 
@@ -225,38 +230,52 @@ export function mergeIntoGraph(
     }
   }
 
-  // Build edges: connect each non-apex node to apex and/or current host
+  // Build edges: connect observed relationships and fallback synthetic hierarchy connections to apex
   const edges: GraphEdge[] = [];
   const edgeSet = new Set<string>();
 
+  // 1. Explicit observed CORS relationships: response host -> allowed host
+  for (const d of discovered) {
+    if (d.discoveredVia === 'cors' && d.sourceHost !== undefined && d.sourceHost.length > 0 && d.sourceHost !== d.hostname) {
+      const source = d.sourceHost.toLowerCase();
+      const target = d.hostname.toLowerCase();
+      const edgeKey = `${source}->${target}:cors-observed`;
+      if (!edgeSet.has(edgeKey)) {
+        edgeSet.add(edgeKey);
+        edges.push({
+          source,
+          target,
+          type: 'cors',
+          severity: 'medium',
+          provenance: 'observed',
+        });
+      }
+    }
+  }
+
+  // 2. Synthetic hierarchy connections: non-apex node -> apex (inferred)
   for (const node of nodeMap.values()) {
     if (node.hostname === apex) continue;
 
-    // Primary trust edge: connect node to apex
     for (const via of node.discoveredVia) {
       const edgeKey = `${node.hostname}->${apex}:${via}`;
       if (!edgeSet.has(edgeKey)) {
         edgeSet.add(edgeKey);
         let severity: Severity = 'low';
         let edgeType: GraphEdge['type'] = 'csp';
-        let provenance: GraphEdge['provenance'] = 'inferred';
 
         if (via === 'cookie') {
           edgeType = 'cookie';
           severity = 'high';
-          provenance = 'inferred';
         } else if (via === 'cors') {
           edgeType = 'cors';
           severity = 'medium';
-          provenance = 'observed';
         } else if (via === 'csp') {
           edgeType = 'csp';
           severity = 'medium';
-          provenance = 'inferred';
         } else if (via === 'api') {
           edgeType = 'cors';
           severity = 'low';
-          provenance = 'inferred';
         }
 
         edges.push({
@@ -264,7 +283,7 @@ export function mergeIntoGraph(
           target: apex,
           type: edgeType,
           severity,
-          provenance,
+          provenance: 'inferred',
         });
       }
     }

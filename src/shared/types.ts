@@ -278,6 +278,7 @@ export type DiscoveredVia = 'csp' | 'cookie' | 'cors' | 'navigation' | 'api';
 export interface DiscoveredNode {
   hostname: string;
   discoveredVia: DiscoveredVia;
+  sourceHost?: string | undefined;
 }
 
 export interface GraphNode {

@@ -338,5 +338,31 @@ describe('Header & Set-Cookie value redaction (P1 privacy)', () => {
     const leakedCookieRecordState = structuredClone(validState);
     (leakedCookieRecordState.cookies[0] as unknown as { value: string }).value = 'V2_SYNTHETIC_CANARY';
     expect(() => assertNoSensitiveSecrets(leakedCookieRecordState)).toThrow(/Cookie value detected/);
+
+    // State with multi-cookie header having unredacted value after an empty cookie throws
+    const leakedMultiCookieState = structuredClone(validState);
+    const multiHop0 = leakedMultiCookieState.hops[0];
+    if (multiHop0 !== undefined) {
+      multiHop0.headers['cookie'] = 'empty=; session=CANARY';
+    }
+    expect(() => assertNoSensitiveSecrets(leakedMultiCookieState)).toThrow(/Unredacted cookie header/);
+  });
+
+  it('hasUnredactedCookieValue accurately inspects multi-cookie headers and Set-Cookie attributes', async () => {
+    const { hasUnredactedCookieValue } = await import('../../src/shared/storage');
+
+    // Cookie headers (multiple pairs separated by semicolons)
+    expect(hasUnredactedCookieValue('empty=; session=CANARY')).toBe(true);
+    expect(hasUnredactedCookieValue('foo=[REDACTED]; bar=SECRET')).toBe(true);
+    expect(hasUnredactedCookieValue('session=CANARY')).toBe(true);
+    expect(hasUnredactedCookieValue('empty=; session=[REDACTED]')).toBe(false);
+    expect(hasUnredactedCookieValue('a=[REDACTED]; b=[redacted]; c=')).toBe(false);
+    expect(hasUnredactedCookieValue('')).toBe(false);
+
+    // Set-Cookie headers (first segment is name=value, subsequent are attributes)
+    expect(hasUnredactedCookieValue('session=CANARY; Path=/; Secure', true)).toBe(true);
+    expect(hasUnredactedCookieValue('session=[REDACTED]; Path=/; Secure; Max-Age=3600', true)).toBe(false);
+    expect(hasUnredactedCookieValue('session=; Path=/; Secure', true)).toBe(false);
+    expect(hasUnredactedCookieValue('session=[redacted]; Domain=example.com', true)).toBe(false);
   });
 });

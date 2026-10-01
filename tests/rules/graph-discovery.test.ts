@@ -200,18 +200,24 @@ describe('Graph Discovery — mergeIntoGraph', () => {
 
     const corsNode = nodes.find((n) => n.hostname === 'gateway.example.com');
     expect(corsNode?.discoveredVia).toBe('cors');
+    expect(corsNode?.sourceHost).toBe('api.example.com');
   });
 
-  it('assigns observed provenance to CORS edges and inferred to others, and caps nodes at 100', () => {
+  it('assigns observed provenance to explicit CORS edges and inferred to synthetic apex edges, and caps nodes at 100', () => {
     const discovered: import('../../src/shared/types').DiscoveredNode[] = [
-      { hostname: 'cors-node.example.com', discoveredVia: 'cors' },
+      { hostname: 'cors-node.example.com', discoveredVia: 'cors', sourceHost: 'api.example.com' },
       { hostname: 'csp-node.example.com', discoveredVia: 'csp' },
       { hostname: 'cookie-node.example.com', discoveredVia: 'cookie' },
     ];
 
     const graph = mergeIntoGraph(null, 'app.example.com', 90, 'A', discovered, true);
-    const corsEdge = graph.edges.find((e) => e.source === 'cors-node.example.com');
-    expect(corsEdge?.provenance).toBe('observed');
+    // Explicit CORS observed edge: api.example.com -> cors-node.example.com
+    const observedCorsEdge = graph.edges.find((e) => e.source === 'api.example.com' && e.target === 'cors-node.example.com');
+    expect(observedCorsEdge?.provenance).toBe('observed');
+
+    // Synthetic hierarchy edges to apex are inferred
+    const syntheticCorsEdge = graph.edges.find((e) => e.source === 'cors-node.example.com' && e.target === 'example.com');
+    expect(syntheticCorsEdge?.provenance).toBe('inferred');
 
     const cspEdge = graph.edges.find((e) => e.source === 'csp-node.example.com');
     expect(cspEdge?.provenance).toBe('inferred');

@@ -1,5 +1,5 @@
 import { a as DEFAULT_SETTINGS, c as KEEPALIVE_PERIOD_MINUTES, d as SCORE_VERSION, i as BADGE_COLORS, l as POPUP_PORT_NAME, n as portSend, o as GRADE_THRESHOLDS, p as SIDEPANEL_PORT_NAME, s as KEEPALIVE_ALARM, t as PortRegistry, u as RESTRICTED_SCHEMES } from "./messaging-BiWicsg3.js";
-import { n as SessionStorage, t as LocalStorage } from "./storage-D5dK29a1.js";
+import { n as SessionStorage, t as LocalStorage } from "./storage-CJOthBSi.js";
 import { a as hasCspBypassProtection, c as normalizeHeaders, d as redactHeaderValue, f as redactUrlPath, i as extractSetCookieHeaders, l as originFromUrl, m as sanitizeEvidence, n as registrableDomain, o as headersDiffer, p as redactUrlQueryParams, r as checkDuplicateHeaders, s as isSensitiveCookie, t as checkSubdomainTrust, u as parseCspDirectives } from "./subdomain-trust-BxbNrVzS.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
@@ -3324,7 +3324,7 @@ function extractHostnameFromCspToken(token) {
 function discoverNodes(currentHostname, hops, cookies, apiEndpoints) {
 	const apex = registrableDomain(currentHostname) ?? currentHostname;
 	const discoveredMap = /* @__PURE__ */ new Map();
-	discoveredMap.set(currentHostname.toLowerCase(), "navigation");
+	discoveredMap.set(currentHostname.toLowerCase(), { via: "navigation" });
 	for (const hop of hops) {
 		const csp = hop.headers["content-security-policy"] ?? hop.headers["content-security-policy-report-only"];
 		if (csp != null && csp.length > 0) {
@@ -3332,7 +3332,7 @@ function discoverNodes(currentHostname, hops, cookies, apiEndpoints) {
 			for (const token of tokens) {
 				const host = extractHostnameFromCspToken(token);
 				if (host != null && host.length > 0 && (host === apex || host.endsWith(`.${apex}`))) {
-					if (!discoveredMap.has(host)) discoveredMap.set(host, "csp");
+					if (!discoveredMap.has(host)) discoveredMap.set(host, { via: "csp" });
 				}
 			}
 		}
@@ -3340,15 +3340,22 @@ function discoverNodes(currentHostname, hops, cookies, apiEndpoints) {
 	for (const cookie of cookies) if (cookie.domain != null && cookie.domain.length > 0) {
 		const cleanDomain = cookie.domain.replace(/^\./, "").toLowerCase();
 		if (cleanDomain.length > 0 && (cleanDomain === apex || cleanDomain.endsWith(`.${apex}`))) {
-			if (!discoveredMap.has(cleanDomain)) discoveredMap.set(cleanDomain, "cookie");
+			if (!discoveredMap.has(cleanDomain)) discoveredMap.set(cleanDomain, { via: "cookie" });
 		}
 	}
 	for (const hop of hops) {
 		const acao = hop.headers["access-control-allow-origin"]?.trim();
 		if (acao != null && acao.length > 0 && acao !== "*" && acao !== "null") try {
 			const host = new URL(acao).hostname.toLowerCase();
+			let hopHost;
+			try {
+				hopHost = new URL(hop.url).hostname.toLowerCase();
+			} catch {}
 			if (host === apex || host.endsWith(`.${apex}`)) {
-				if (!discoveredMap.has(host)) discoveredMap.set(host, "cors");
+				if (!discoveredMap.has(host)) discoveredMap.set(host, {
+					via: "cors",
+					sourceHost: hopHost
+				});
 			}
 		} catch {}
 	}
@@ -3357,20 +3364,28 @@ function discoverNodes(currentHostname, hops, cookies, apiEndpoints) {
 		try {
 			const host = new URL(hop.url).hostname.toLowerCase();
 			if (host === apex || host.endsWith(`.${apex}`)) {
-				if (!discoveredMap.has(host)) discoveredMap.set(host, "api");
+				if (!discoveredMap.has(host)) discoveredMap.set(host, { via: "api" });
 			}
 		} catch {}
 		const acao = hop.headers["access-control-allow-origin"]?.trim();
 		if (acao != null && acao.length > 0 && acao !== "*" && acao !== "null") try {
 			const host = new URL(acao).hostname.toLowerCase();
+			let hopHost;
+			try {
+				hopHost = new URL(hop.url).hostname.toLowerCase();
+			} catch {}
 			if (host === apex || host.endsWith(`.${apex}`)) {
-				if (!discoveredMap.has(host)) discoveredMap.set(host, "cors");
+				if (!discoveredMap.has(host)) discoveredMap.set(host, {
+					via: "cors",
+					sourceHost: hopHost
+				});
 			}
 		} catch {}
 	}
-	return Array.from(discoveredMap.entries()).map(([hostname, discoveredVia]) => ({
+	return Array.from(discoveredMap.entries()).map(([hostname, info]) => ({
 		hostname,
-		discoveredVia
+		discoveredVia: info.via,
+		sourceHost: info.sourceHost
 	}));
 }
 /**
@@ -3423,6 +3438,21 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 	}
 	const edges = [];
 	const edgeSet = /* @__PURE__ */ new Set();
+	for (const d of discovered) if (d.discoveredVia === "cors" && d.sourceHost !== void 0 && d.sourceHost.length > 0 && d.sourceHost !== d.hostname) {
+		const source = d.sourceHost.toLowerCase();
+		const target = d.hostname.toLowerCase();
+		const edgeKey = `${source}->${target}:cors-observed`;
+		if (!edgeSet.has(edgeKey)) {
+			edgeSet.add(edgeKey);
+			edges.push({
+				source,
+				target,
+				type: "cors",
+				severity: "medium",
+				provenance: "observed"
+			});
+		}
+	}
 	for (const node of nodeMap.values()) {
 		if (node.hostname === apex) continue;
 		for (const via of node.discoveredVia) {
@@ -3431,30 +3461,25 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 				edgeSet.add(edgeKey);
 				let severity = "low";
 				let edgeType = "csp";
-				let provenance = "inferred";
 				if (via === "cookie") {
 					edgeType = "cookie";
 					severity = "high";
-					provenance = "inferred";
 				} else if (via === "cors") {
 					edgeType = "cors";
 					severity = "medium";
-					provenance = "observed";
 				} else if (via === "csp") {
 					edgeType = "csp";
 					severity = "medium";
-					provenance = "inferred";
 				} else if (via === "api") {
 					edgeType = "cors";
 					severity = "low";
-					provenance = "inferred";
 				}
 				edges.push({
 					source: node.hostname,
 					target: apex,
 					type: edgeType,
 					severity,
-					provenance
+					provenance: "inferred"
 				});
 			}
 		}
@@ -3936,58 +3961,56 @@ chrome.storage.local.onChanged.addListener((changes) => {
 		...changes.settings.newValue
 	};
 });
-(async () => {
-	await hydrateFromSession();
-	initLifecycle();
-	registerCaptureListeners((tabId, hop) => {
-		onHopComplete(tabId, hop);
-	}, (apiHop) => {
-		const state = tabStates.get(apiHop.tabId);
-		if (!state) return;
-		const targetOrigin = originFromUrl(apiHop.url);
-		const isFirstParty = state.origin === targetOrigin;
-		apiHop.isThirdParty = !isFirstParty;
-		const findings = runApiRules(apiHop, {
-			alwaysSensitive: currentSettings.alwaysSensitiveCookies,
-			alwaysIgnore: currentSettings.alwaysIgnoreCookies
-		});
-		if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
-		const endpointState = {
-			normalizedPath: apiHop.normalizedPath,
-			lastHop: apiHop,
-			findings,
-			isFirstParty
-		};
-		state.apiEndpoints.set(apiHop.normalizedPath, endpointState);
-		if (state.apiEndpoints.size > 50) {
-			const firstKey = state.apiEndpoints.keys().next().value;
-			if (firstKey !== void 0) state.apiEndpoints.delete(firstKey);
-		}
-		pushLedgerEntry(state, {
-			type: "api",
-			url: apiHop.url,
-			source: apiHop.fromCache === true ? "cache" : "network",
-			status: apiHop.status,
-			timestamp: apiHop.timestamp ?? Date.now(),
-			notes: `${apiHop.method} ${apiHop.isThirdParty === true ? "(third-party)" : "(first-party)"}`
-		});
-		state.updatedAt = Date.now();
-		SessionStorage.setTabState(state);
-		(async () => {
-			try {
-				const hostname = new URL(state.origin).hostname;
-				const apex = registrableDomain(hostname) ?? hostname;
-				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-				const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
-				await LocalStorage.saveGraph(updatedGraph);
-			} catch {}
-		})();
-		portRegistry.broadcast(apiHop.tabId, {
-			type: "TAB_STATE_UPDATE",
-			state
-		});
+initLifecycle();
+registerCaptureListeners((tabId, hop) => {
+	onHopComplete(tabId, hop);
+}, (apiHop) => {
+	const state = tabStates.get(apiHop.tabId);
+	if (!state) return;
+	const targetOrigin = originFromUrl(apiHop.url);
+	const isFirstParty = state.origin === targetOrigin;
+	apiHop.isThirdParty = !isFirstParty;
+	const findings = runApiRules(apiHop, {
+		alwaysSensitive: currentSettings.alwaysSensitiveCookies,
+		alwaysIgnore: currentSettings.alwaysIgnoreCookies
 	});
-})();
+	if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
+	const endpointState = {
+		normalizedPath: apiHop.normalizedPath,
+		lastHop: apiHop,
+		findings,
+		isFirstParty
+	};
+	state.apiEndpoints.set(apiHop.normalizedPath, endpointState);
+	if (state.apiEndpoints.size > 50) {
+		const firstKey = state.apiEndpoints.keys().next().value;
+		if (firstKey !== void 0) state.apiEndpoints.delete(firstKey);
+	}
+	pushLedgerEntry(state, {
+		type: "api",
+		url: apiHop.url,
+		source: apiHop.fromCache === true ? "cache" : "network",
+		status: apiHop.status,
+		timestamp: apiHop.timestamp ?? Date.now(),
+		notes: `${apiHop.method} ${apiHop.isThirdParty === true ? "(third-party)" : "(first-party)"}`
+	});
+	state.updatedAt = Date.now();
+	SessionStorage.setTabState(state);
+	(async () => {
+		try {
+			const hostname = new URL(state.origin).hostname;
+			const apex = registrableDomain(hostname) ?? hostname;
+			const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+			const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
+			await LocalStorage.saveGraph(updatedGraph);
+		} catch {}
+	})();
+	portRegistry.broadcast(apiHop.tabId, {
+		type: "TAB_STATE_UPDATE",
+		state
+	});
+});
+hydrateFromSession();
 //#endregion
 
-//# sourceMappingURL=index.ts-CAm77PDx.js.map
+//# sourceMappingURL=index.ts-BF88DGY4.js.map

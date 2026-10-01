@@ -724,92 +724,90 @@ chrome.storage.local.onChanged.addListener((changes: { [key: string]: chrome.sto
   }
 });
 
-void (async (): Promise<void> => {
-  // 1. Restore in-memory state from session storage (survives SW restart).
-  await hydrateFromSession();
+// 1. Arm the keepalive alarm immediately on SW startup.
+initLifecycle();
 
-  // 2. Arm the keepalive alarm.
-  initLifecycle();
+// 2. Begin capturing WebRequest events synchronously to avoid missing early navigations.
+registerCaptureListeners(
+  (tabId: number, hop: import('../shared/types').Hop): void => {
+    void onHopComplete(tabId, hop);
+  },
+  (apiHop: ApiHop): void => {
+    const state = tabStates.get(apiHop.tabId);
+    if (!state) return;
 
-  // 3. Begin capturing WebRequest events.
-  registerCaptureListeners(
-    (tabId: number, hop: import('../shared/types').Hop): void => {
-      void onHopComplete(tabId, hop);
-    },
-    (apiHop: ApiHop): void => {
-      const state = tabStates.get(apiHop.tabId);
-      if (!state) return;
+    const targetOrigin = originFromUrl(apiHop.url);
+    const isFirstParty = state.origin === targetOrigin;
+    apiHop.isThirdParty = !isFirstParty;
 
-      const targetOrigin = originFromUrl(apiHop.url);
-      const isFirstParty = state.origin === targetOrigin;
-      apiHop.isThirdParty = !isFirstParty;
+    const findings = runApiRules(apiHop, {
+      alwaysSensitive: currentSettings.alwaysSensitiveCookies,
+      alwaysIgnore: currentSettings.alwaysIgnoreCookies,
+    });
 
-      const findings = runApiRules(apiHop, {
-        alwaysSensitive: currentSettings.alwaysSensitiveCookies,
-        alwaysIgnore: currentSettings.alwaysIgnoreCookies,
-      });
-
-      if (!state.apiEndpoints) {
-        state.apiEndpoints = new Map();
-      }
-
-      const endpointState: ApiEndpointState = {
-        normalizedPath: apiHop.normalizedPath,
-        lastHop: apiHop,
-        findings,
-        isFirstParty,
-      };
-
-      state.apiEndpoints.set(apiHop.normalizedPath, endpointState);
-
-      if (state.apiEndpoints.size > 50) {
-        const firstKey = state.apiEndpoints.keys().next().value;
-        if (firstKey !== undefined) {
-          state.apiEndpoints.delete(firstKey);
-        }
-      }
-
-      pushLedgerEntry(state, {
-        type: 'api',
-        url: apiHop.url,
-        source: apiHop.fromCache === true ? 'cache' : 'network',
-        status: apiHop.status,
-        timestamp: apiHop.timestamp ?? Date.now(),
-        notes: `${apiHop.method} ${apiHop.isThirdParty === true ? '(third-party)' : '(first-party)'}`,
-      });
-
-      state.updatedAt = Date.now();
-      void SessionStorage.setTabState(state);
-
-      // Accumulate attack surface graph for API host and CORS endpoints
-      void (async () => {
-        try {
-          const u = new URL(state.origin);
-          const hostname = u.hostname;
-          const apex = registrableDomain(hostname) ?? hostname;
-          const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-          const existingGraph = await LocalStorage.getGraph(apex);
-          const updatedGraph = mergeIntoGraph(
-            existingGraph,
-            hostname,
-            state.score,
-            state.grade,
-            discovered,
-            Boolean(currentSettings.isPro),
-          );
-          await LocalStorage.saveGraph(updatedGraph);
-        } catch {
-          // Silently ignore graph merge errors
-        }
-      })();
-
-      portRegistry.broadcast(apiHop.tabId, {
-        type: 'TAB_STATE_UPDATE',
-        state,
-      });
+    if (!state.apiEndpoints) {
+      state.apiEndpoints = new Map();
     }
-  );
-})();
+
+    const endpointState: ApiEndpointState = {
+      normalizedPath: apiHop.normalizedPath,
+      lastHop: apiHop,
+      findings,
+      isFirstParty,
+    };
+
+    state.apiEndpoints.set(apiHop.normalizedPath, endpointState);
+
+    if (state.apiEndpoints.size > 50) {
+      const firstKey = state.apiEndpoints.keys().next().value;
+      if (firstKey !== undefined) {
+        state.apiEndpoints.delete(firstKey);
+      }
+    }
+
+    pushLedgerEntry(state, {
+      type: 'api',
+      url: apiHop.url,
+      source: apiHop.fromCache === true ? 'cache' : 'network',
+      status: apiHop.status,
+      timestamp: apiHop.timestamp ?? Date.now(),
+      notes: `${apiHop.method} ${apiHop.isThirdParty === true ? '(third-party)' : '(first-party)'}`,
+    });
+
+    state.updatedAt = Date.now();
+    void SessionStorage.setTabState(state);
+
+    // Accumulate attack surface graph for API host and CORS endpoints
+    void (async () => {
+      try {
+        const u = new URL(state.origin);
+        const hostname = u.hostname;
+        const apex = registrableDomain(hostname) ?? hostname;
+        const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+        const existingGraph = await LocalStorage.getGraph(apex);
+        const updatedGraph = mergeIntoGraph(
+          existingGraph,
+          hostname,
+          state.score,
+          state.grade,
+          discovered,
+          Boolean(currentSettings.isPro),
+        );
+        await LocalStorage.saveGraph(updatedGraph);
+      } catch {
+        // Silently ignore graph merge errors
+      }
+    })();
+
+    portRegistry.broadcast(apiHop.tabId, {
+      type: 'TAB_STATE_UPDATE',
+      state,
+    });
+  }
+);
+
+// 3. Restore in-memory state from session storage in parallel (survives SW restart).
+void hydrateFromSession();
 
 
 

@@ -16,14 +16,30 @@ function deserializeTabState(raw) {
 	};
 	return rest;
 }
-function hasUnredactedCookieValue(headerStr) {
+function hasUnredactedCookieValue(headerStr, isSetCookie = false) {
 	if (!headerStr) return false;
-	const semiIdx = headerStr.indexOf(";");
-	const firstPart = semiIdx !== -1 ? headerStr.slice(0, semiIdx) : headerStr;
-	const eqIdx = firstPart.indexOf("=");
-	if (eqIdx !== -1) {
-		const val = firstPart.slice(eqIdx + 1).trim();
-		if (val !== "" && val !== "[REDACTED]" && val !== "[redacted]") return true;
+	if (isSetCookie) {
+		const lines = headerStr.split(/\r?\n/);
+		for (const line of lines) {
+			const semiIdx = line.indexOf(";");
+			const firstPart = semiIdx !== -1 ? line.slice(0, semiIdx) : line;
+			const eqIdx = firstPart.indexOf("=");
+			if (eqIdx !== -1) {
+				const val = firstPart.slice(eqIdx + 1).trim();
+				if (val !== "" && val !== "[REDACTED]" && val !== "[redacted]") return true;
+			}
+		}
+		return false;
+	}
+	const parts = headerStr.split(";");
+	for (const part of parts) {
+		const trimmed = part.trim();
+		if (!trimmed) continue;
+		const eqIdx = trimmed.indexOf("=");
+		if (eqIdx !== -1) {
+			const val = trimmed.slice(eqIdx + 1).trim();
+			if (val !== "" && val !== "[REDACTED]" && val !== "[redacted]") return true;
+		}
 	}
 	return false;
 }
@@ -35,7 +51,7 @@ function assertNoSensitiveSecrets(state) {
 		if (headers) for (const [k, v] of Object.entries(headers)) {
 			const lower = k.toLowerCase();
 			if (lower === "set-cookie" || lower === "cookie") {
-				if (hasUnredactedCookieValue(v)) throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+				if (hasUnredactedCookieValue(v, lower === "set-cookie")) throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
 			} else if (lower === "authorization" || lower === "proxy-authorization") {
 				if (v !== "[REDACTED]" && v !== "[redacted]") throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
 			}
@@ -43,7 +59,7 @@ function assertNoSensitiveSecrets(state) {
 		if (rawHeaders) for (const h of rawHeaders) {
 			const lower = h.name.toLowerCase();
 			if (lower === "set-cookie" || lower === "cookie") {
-				if (hasUnredactedCookieValue(h.value)) throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+				if (hasUnredactedCookieValue(h.value, lower === "set-cookie")) throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
 			} else if (lower === "authorization" || lower === "proxy-authorization") {
 				if (h.value !== "[REDACTED]" && h.value !== "[redacted]") throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
 			}
@@ -160,4 +176,4 @@ var LocalStorage = {
 //#endregion
 export { SessionStorage as n, LocalStorage as t };
 
-//# sourceMappingURL=storage-D5dK29a1.js.map
+//# sourceMappingURL=storage-CJOthBSi.js.map

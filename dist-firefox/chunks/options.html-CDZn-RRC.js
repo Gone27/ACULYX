@@ -1,5 +1,5 @@
 import { f as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BiWicsg3.js";
-import { t as LocalStorage } from "./storage-D5dK29a1.js";
+import { t as LocalStorage } from "./storage-CJOthBSi.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
@@ -177,4 +177,4 @@ function getEl(id) {
 }
 //#endregion
 
-//# sourceMappingURL=options.html-BT-lcBpN.js.map
+//# sourceMappingURL=options.html-CDZn-RRC.js.map
