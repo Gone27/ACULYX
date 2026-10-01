@@ -1,5 +1,6 @@
-import { f as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BiWicsg3.js";
-import { t as LocalStorage } from "./storage-CJOthBSi.js";
+import { f as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BCRf7spF.js";
+import { a as resolveCookieOverlaps, i as normalizeCookieList, r as SettingsService } from "./storage-DkrZ3D78.js";
+import { t as PermissionsService } from "./permissions-C601rqBC.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
@@ -14,6 +15,7 @@ var saveBtn;
 var saveStatus;
 var sectionAllowlist;
 var proModeToggle;
+var currentMode = "per-site";
 /**
 * In-memory working copy of the allowedOrigins array.
 * Mutated by remove buttons; committed to storage on Save.
@@ -38,20 +40,25 @@ document.addEventListener("DOMContentLoaded", () => {
 async function loadAndPopulate() {
 	let settings;
 	try {
-		settings = await LocalStorage.getSettings();
+		settings = await SettingsService.getSettings();
 	} catch {
 		setStatus("Failed to load settings.", true);
 		return;
 	}
+	currentMode = settings.monitoringMode;
 	for (const radio of modeRadios) radio.checked = radio.value === settings.monitoringMode;
 	updateAllowlistVisibility(settings.monitoringMode);
 	const filterSet = new Set(settings.severityFilter);
 	for (const cb of severityCheckboxes) cb.checked = filterSet.has(cb.value);
 	retainDaysInput.value = String(settings.retainHistoryDays);
-	alwaysSensitiveInput.value = settings.alwaysSensitiveCookies.join(", ");
-	alwaysIgnoreInput.value = settings.alwaysIgnoreCookies.join(", ");
-	proModeToggle.checked = Boolean(settings.isPro);
-	workingOrigins = [...settings.allowedOrigins];
+	alwaysSensitiveInput.value = (settings.sensitiveCookieNames ?? settings.alwaysSensitiveCookies ?? []).join(", ");
+	alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(", ");
+	proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
+	try {
+		workingOrigins = await PermissionsService.getAllGrantedOrigins();
+	} catch {
+		workingOrigins = [...settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? []];
+	}
 	renderAllowlist();
 }
 function wireSaveButton() {
@@ -67,7 +74,7 @@ async function handleSave() {
 		return;
 	}
 	try {
-		await LocalStorage.setSettings(settings);
+		await SettingsService.updateSettings(settings);
 		await sendToBackground({
 			type: "SETTINGS_CHANGED",
 			settings
@@ -92,15 +99,22 @@ function readFormValues() {
 		if (ALL_SEVERITIES.includes(val)) severityFilter.push(val);
 	}
 	const retainHistoryDays = Math.max(0, Math.min(365, parseInt(retainDaysInput.value, 10) || 0));
-	const alwaysSensitiveCookies = alwaysSensitiveInput.value.split(",").map((s) => s.trim()).filter(Boolean);
-	const alwaysIgnoreCookies = alwaysIgnoreInput.value.split(",").map((s) => s.trim()).filter(Boolean);
+	const rawSensitive = alwaysSensitiveInput.value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+	const rawIgnored = alwaysIgnoreInput.value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+	const { sensitive, ignored, overlaps } = resolveCookieOverlaps(normalizeCookieList(rawSensitive), normalizeCookieList(rawIgnored));
+	if (overlaps.length > 0) setStatus(`Notice: Cookie names in both lists are treated as ignored: ${overlaps.join(", ")}`, false);
 	return {
+		schemaVersion: 2,
 		monitoringMode,
 		allowedOrigins: [...workingOrigins],
 		severityFilter,
 		retainHistoryDays,
-		alwaysSensitiveCookies,
-		alwaysIgnoreCookies,
+		maxHistoryPerOrigin: 10,
+		sensitiveCookieNames: sensitive,
+		ignoredCookieNames: ignored,
+		evaluationMode: proModeToggle.checked,
+		alwaysSensitiveCookies: sensitive,
+		alwaysIgnoreCookies: ignored,
 		isPro: proModeToggle.checked
 	};
 }
@@ -142,14 +156,44 @@ function buildAllowlistItem(origin) {
 	li.appendChild(removeBtn);
 	return li;
 }
-/** Remove an origin from the working array and re-render the list. */
+/** Remove an origin from browser permissions and re-render the list. */
 function removeOrigin(origin) {
-	workingOrigins = workingOrigins.filter((o) => o !== origin);
-	renderAllowlist();
+	(async () => {
+		try {
+			if (await PermissionsService.removeOriginPermission(origin)) {
+				workingOrigins = workingOrigins.filter((o) => o !== origin);
+				renderAllowlist();
+				setStatus(`Revoked access for ${origin}`, false);
+			} else setStatus(`Failed to revoke access for ${origin}`, true);
+		} catch {
+			workingOrigins = workingOrigins.filter((o) => o !== origin);
+			renderAllowlist();
+		}
+	})();
 }
 function wireModeRadios() {
 	for (const radio of modeRadios) radio.addEventListener("change", () => {
-		if (radio.checked) updateAllowlistVisibility(radio.value);
+		if (!radio.checked) return;
+		const targetMode = radio.value;
+		if (targetMode === "all-sites" && currentMode !== "all-sites") {
+			if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") chrome.permissions.request({ origins: ["<all_urls>"] }, (granted) => {
+				if (!granted) {
+					for (const r of modeRadios) r.checked = r.value === currentMode;
+					updateAllowlistVisibility(currentMode);
+					setStatus("All-sites monitoring requires permission for all URLs. Kept previous mode.", true);
+				} else {
+					currentMode = "all-sites";
+					updateAllowlistVisibility("all-sites");
+				}
+			});
+			else {
+				currentMode = "all-sites";
+				updateAllowlistVisibility("all-sites");
+			}
+		} else {
+			currentMode = targetMode;
+			updateAllowlistVisibility(targetMode);
+		}
 	});
 }
 /**
@@ -175,6 +219,20 @@ function getEl(id) {
 	if (!el) throw new Error(`Missing required element #${id}`);
 	return el;
 }
+if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") {
+	if (typeof chrome.permissions.onRemoved !== "undefined") chrome.permissions.onRemoved.addListener(() => {
+		PermissionsService.getAllGrantedOrigins().then((origins) => {
+			workingOrigins = origins;
+			renderAllowlist();
+		});
+	});
+	if (typeof chrome.permissions.onAdded !== "undefined") chrome.permissions.onAdded.addListener(() => {
+		PermissionsService.getAllGrantedOrigins().then((origins) => {
+			workingOrigins = origins;
+			renderAllowlist();
+		});
+	});
+}
 //#endregion
 
-//# sourceMappingURL=options.html-CDZn-RRC.js.map
+//# sourceMappingURL=options.html-MqEAKDWq.js.map

@@ -1,5 +1,5 @@
-import { p as SIDEPANEL_PORT_NAME, r as sendToBackground } from "./messaging-BiWicsg3.js";
-import { n as registrableDomain } from "./subdomain-trust-BxbNrVzS.js";
+import { p as SIDEPANEL_PORT_NAME, r as sendToBackground } from "./messaging-BCRf7spF.js";
+import { n as registrableDomain } from "./subdomain-trust-B3Jbs8TC.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region node_modules/d3-force/src/center.js
 function center_default(x, y) {
@@ -1082,4 +1082,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-CKap0G-x.js.map
+//# sourceMappingURL=sidepanel.html-BhwGaSqV.js.map

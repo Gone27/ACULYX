@@ -1,5 +1,5 @@
-import { f as SEVERITY_ORDER, l as POPUP_PORT_NAME, r as sendToBackground } from "./messaging-BiWicsg3.js";
-import { t as LocalStorage } from "./storage-CJOthBSi.js";
+import { f as SEVERITY_ORDER, l as POPUP_PORT_NAME, r as sendToBackground } from "./messaging-BCRf7spF.js";
+import { t as LocalStorage } from "./storage-DkrZ3D78.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/popup/popup.ts
 var gradeBadge;
@@ -928,4 +928,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-BDxvBSKf.js.map
+//# sourceMappingURL=popup.html-H0DL7gsw.js.map

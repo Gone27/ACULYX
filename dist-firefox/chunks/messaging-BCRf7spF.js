@@ -68,8 +68,8 @@ var KEEPALIVE_ALARM = "keepalive";
 /** Period in minutes — must stay under the ~30 s Chrome idle threshold. */
 var KEEPALIVE_PERIOD_MINUTES = .4;
 var DEFAULT_SETTINGS = {
+	schemaVersion: 2,
 	monitoringMode: "per-site",
-	allowedOrigins: [],
 	severityFilter: [
 		"critical",
 		"high",
@@ -78,9 +78,10 @@ var DEFAULT_SETTINGS = {
 		"info"
 	],
 	retainHistoryDays: 7,
-	alwaysSensitiveCookies: [],
-	alwaysIgnoreCookies: [],
-	isPro: false
+	maxHistoryPerOrigin: 10,
+	sensitiveCookieNames: [],
+	ignoredCookieNames: [],
+	evaluationMode: false
 };
 //#endregion
 //#region src/shared/messaging.ts
@@ -138,4 +139,4 @@ function sendToBackground(msg) {
 //#endregion
 export { DEFAULT_SETTINGS as a, KEEPALIVE_PERIOD_MINUTES as c, SCORE_VERSION as d, SEVERITY_ORDER as f, BADGE_COLORS as i, POPUP_PORT_NAME as l, STORAGE_KEYS as m, portSend as n, GRADE_THRESHOLDS as o, SIDEPANEL_PORT_NAME as p, sendToBackground as r, KEEPALIVE_ALARM as s, PortRegistry as t, RESTRICTED_SCHEMES as u };
 
-//# sourceMappingURL=messaging-BiWicsg3.js.map
+//# sourceMappingURL=messaging-BCRf7spF.js.map

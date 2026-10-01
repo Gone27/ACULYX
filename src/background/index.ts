@@ -27,6 +27,11 @@ import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { SessionStorage, LocalStorage } from '../shared/storage';
 import { PortRegistry, portSend } from '../shared/messaging';
 import {
+  PermissionsService,
+  reconcilePermissionsOnRemoved,
+  reconcilePermissionsOnStartup,
+} from './permissions';
+import {
   BADGE_COLORS,
   RESTRICTED_SCHEMES,
   POPUP_PORT_NAME,
@@ -279,9 +284,7 @@ async function onHopComplete(
   const origin = state.origin;
   if (!origin || origin === hop.url) return; // originFromUrl returned null (non-http URL)
 
-  const permitted = await new Promise<boolean>((resolve) =>
-    chrome.permissions.contains({ origins: [`${origin}/*`] }, resolve),
-  );
+  const permitted = await PermissionsService.hasPermissionForOrigin(origin);
   if (!permitted) {
     // Not monitored — reset badge to '?' and do nothing further.
     state.coverage.isRestricted = false;
@@ -506,6 +509,21 @@ chrome.runtime.onMessage.addListener(
     if (message.type === 'PERMISSIONS_CHANGED') {
       void (async () => {
         try {
+          if (!message.granted && message.origins.length > 0) {
+            await reconcilePermissionsOnRemoved(message.origins, {
+              tabStates,
+              pendingServiceWorkerReports,
+              pendingMetaCspReports,
+              setBadge: (t, text) => {
+                if (text === '') {
+                  void chrome.action?.setBadgeText({ tabId: t, text: '' })?.catch?.(() => undefined);
+                } else {
+                  setBadgeForTab(t, text as Grade | '?');
+                }
+              },
+              broadcast: (t, msg) => portRegistry.broadcast(t, msg),
+            });
+          }
           const settings = await LocalStorage.getSettings();
 
           // Notify all connected ports about the settings change.
@@ -810,7 +828,44 @@ registerCaptureListeners(
 );
 
 // 3. Restore in-memory state from session storage in parallel (survives SW restart).
-void hydrateFromSession();
+void hydrateFromSession().then(async () => {
+  await reconcilePermissionsOnStartup({
+    tabStates,
+    pendingServiceWorkerReports,
+    pendingMetaCspReports,
+    setBadge: (t, text) => {
+      if (text === '') {
+        void chrome.action?.setBadgeText({ tabId: t, text: '' })?.catch?.(() => undefined);
+      } else {
+        setBadgeForTab(t, text as Grade | '?');
+      }
+    },
+    broadcast: (t, msg) => portRegistry.broadcast(t, msg),
+  });
+});
+
+if (
+  typeof chrome !== 'undefined' &&
+  typeof chrome.permissions !== 'undefined' &&
+  typeof chrome.permissions.onRemoved !== 'undefined'
+) {
+  chrome.permissions.onRemoved.addListener((removed) => {
+    const origins = removed.origins ?? [];
+    void reconcilePermissionsOnRemoved(origins, {
+      tabStates,
+      pendingServiceWorkerReports,
+      pendingMetaCspReports,
+      setBadge: (t, text) => {
+        if (text === '') {
+          void chrome.action?.setBadgeText({ tabId: t, text: '' })?.catch?.(() => undefined);
+        } else {
+          setBadgeForTab(t, text as Grade | '?');
+        }
+      },
+      broadcast: (t, msg) => portRegistry.broadcast(t, msg),
+    });
+  });
+}
 
 
 

@@ -1,247 +1,10 @@
-import { a as DEFAULT_SETTINGS, c as KEEPALIVE_PERIOD_MINUTES, d as SCORE_VERSION, i as BADGE_COLORS, l as POPUP_PORT_NAME, n as portSend, o as GRADE_THRESHOLDS, p as SIDEPANEL_PORT_NAME, s as KEEPALIVE_ALARM, t as PortRegistry, u as RESTRICTED_SCHEMES } from "./messaging-BiWicsg3.js";
-import { n as SessionStorage, t as LocalStorage } from "./storage-CJOthBSi.js";
-import { a as hasCspBypassProtection, c as normalizeHeaders, d as redactHeaderValue, f as redactUrlPath, i as extractSetCookieHeaders, l as originFromUrl, m as sanitizeEvidence, n as registrableDomain, o as headersDiffer, p as redactUrlQueryParams, r as checkDuplicateHeaders, s as isSensitiveCookie, t as checkSubdomainTrust, u as parseCspDirectives } from "./subdomain-trust-BxbNrVzS.js";
+import { a as DEFAULT_SETTINGS, d as SCORE_VERSION, i as BADGE_COLORS, l as POPUP_PORT_NAME, n as portSend, o as GRADE_THRESHOLDS, p as SIDEPANEL_PORT_NAME, t as PortRegistry, u as RESTRICTED_SCHEMES } from "./messaging-BCRf7spF.js";
+import { n as SessionStorage, r as SettingsService, t as LocalStorage } from "./storage-DkrZ3D78.js";
+import { a as registerCaptureListeners, c as originAuthBaselines, i as captureMap, l as tabStates, n as reconcilePermissionsOnRemoved, o as hydrateFromSession, r as reconcilePermissionsOnStartup, s as initLifecycle, t as PermissionsService } from "./permissions-C601rqBC.js";
+import { a as isSensitiveCookie, c as parseCspDirectives, f as sanitizeEvidence, n as extractSetCookieHeaders, r as hasCspBypassProtection, s as originFromUrl, t as checkDuplicateHeaders } from "./utils-DgBLspgH.js";
+import { n as registrableDomain, t as checkSubdomainTrust } from "./subdomain-trust-B3Jbs8TC.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
-//#endregion
-//#region src/background/lifecycle.ts
-/**
-* lifecycle.ts
-*
-* Manages MV3 service-worker keepalive (via chrome.alarms) and restores
-* in-memory tab state from chrome.storage.session after an SW revival.
-*
-* MV3 service workers are terminated after ~30 s of inactivity.  Firing a
-* periodic alarm forces the browser to wake the worker so it can keep
-* processing WebRequest events without dropping state.
-*/
-/**
-* Primary in-memory store for per-tab security analysis state.
-* Keyed by Chrome tabId.  Persisted to chrome.storage.session so it
-* survives SW restarts; re-hydrated via hydrateFromSession().
-*/
-var tabStates = /* @__PURE__ */ new Map();
-/**
-* In-memory cache for origin pre/post auth baselines.
-* Persisted to chrome.storage.session so it survives SW restarts.
-*/
-var originAuthBaselines = /* @__PURE__ */ new Map();
-/**
-* Registers the recurring keepalive alarm and its listener.
-*
-* Call once at SW startup (both fresh install and revival).
-* chrome.alarms.create is idempotent for a given name — calling it again
-* while the alarm already exists simply resets the period, which is fine.
-*/
-function initLifecycle() {
-	chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_PERIOD_MINUTES });
-	chrome.alarms.onAlarm.addListener((alarm) => {
-		if (alarm.name === "keepalive") {}
-	});
-}
-/**
-* Loads all previously persisted TabState records from chrome.storage.session
-* into the in-memory {@link tabStates} map.
-*
-* Must be awaited before registering WebRequest listeners so that any
-* in-flight state from before the SW restart is available immediately.
-*/
-async function hydrateFromSession() {
-	const all = await SessionStorage.getAllTabStates();
-	for (const state of all) tabStates.set(state.tabId, state);
-	const baselines = await SessionStorage.getAllAuthBaselines();
-	for (const [origin, baseline] of baselines) originAuthBaselines.set(origin, baseline);
-}
-//#endregion
-//#region src/background/capture.ts
-/**
-* capture.ts
-*
-* Registers chrome.webRequest listeners that intercept HTTP response headers
-* at two distinct pipeline stages:
-*
-*   1. onHeadersReceived  — headers as the browser first sees them (may differ
-*                           from final values if extensions modify them).
-*   2. onResponseStarted  — final headers after all modifications.
-*
-* Comparing the two snapshots lets us detect header mutations by other
-* extensions or intermediaries (headersDiffer flag on the Hop).
-*
-* Captures top-level (`main_frame`) navigations and in-page `xmlhttprequest` (XHR/fetch)
-* API responses. Passive sub-resources (images, stylesheets, fonts, iframes) are excluded
-* to avoid noise. All captures are strictly origin-gated and require user permission.
-*/
-/**
-* Keyed by Chrome's `requestId`.  Entries are created on onHeadersReceived
-* and deleted after onResponseStarted finishes processing.
-*/
-var captureMap = /* @__PURE__ */ new Map();
-/**
-* Detect the Non-Authoritative-Reason: HSTS header (case-insensitive name)
-* which indicates the browser silently upgraded the request from HTTP→HTTPS.
-*/
-function detectHstsUpgrade(raw) {
-	return raw.some((h) => h.name.toLowerCase() === "non-authoritative-reason" && h.value.toUpperCase() === "HSTS");
-}
-/**
-* Convert a chrome.webRequest.HttpHeader array to the project's raw-header
-* format, ensuring the value is always a string.
-*/
-function toRawHeaders(headers) {
-	return headers.map((h) => ({
-		name: h.name,
-		value: redactHeaderValue(h.name, h.value ?? "")
-	}));
-}
-/**
-* Registers all WebRequest listeners needed to capture response hops.
-*
-* @param onHopComplete - Callback invoked for every captured response, including
-*   intermediate redirect responses.
-* @param onApiHopComplete - Optional callback invoked for each captured XHR/Fetch response.
-*/
-function registerCaptureListeners(onHopComplete, onApiHopComplete) {
-	const filter = { urls: ["<all_urls>"] };
-	const extraInfoSpec = ["responseHeaders", "extraHeaders"];
-	const inFlightRequests = /* @__PURE__ */ new Map();
-	try {
-		chrome.webRequest.onBeforeSendHeaders.addListener((details) => {
-			if (details.type !== "xmlhttprequest" || details.tabId < 0) return;
-			const originHeader = details.requestHeaders?.find((h) => h.name.toLowerCase() === "origin")?.value;
-			if (inFlightRequests.size > 100) {
-				const oldestKey = inFlightRequests.keys().next().value;
-				if (oldestKey !== void 0) inFlightRequests.delete(oldestKey);
-			}
-			inFlightRequests.set(details.requestId, {
-				method: details.method,
-				origin: originHeader,
-				timestamp: details.timeStamp
-			});
-		}, filter, ["requestHeaders", "extraHeaders"]);
-		chrome.webRequest.onErrorOccurred.addListener((details) => {
-			inFlightRequests.delete(details.requestId);
-		}, filter);
-		chrome.webRequest.onCompleted.addListener((details) => {
-			inFlightRequests.delete(details.requestId);
-		}, filter);
-	} catch {}
-	chrome.webRequest.onHeadersReceived.addListener((details) => {
-		if (details.type !== "main_frame" || details.tabId < 0) return;
-		const raw = details.responseHeaders ?? [];
-		const partial = {
-			tabId: details.tabId,
-			url: details.url,
-			status: details.statusCode,
-			headersReceived: normalizeHeaders(raw),
-			rawHeadersReceived: toRawHeaders(raw),
-			headersStarted: null,
-			rawHeadersStarted: [],
-			fromCache: false,
-			wasRedirected: false,
-			timestamp: details.timeStamp,
-			redirectCount: 0
-		};
-		captureMap.set(details.requestId, partial);
-	}, filter, extraInfoSpec);
-	chrome.webRequest.onResponseStarted.addListener((details) => {
-		if (details.type === "xmlhttprequest" && details.tabId >= 0) {
-			if (onApiHopComplete !== void 0) {
-				const reqMeta = inFlightRequests.get(details.requestId);
-				inFlightRequests.delete(details.requestId);
-				const raw = details.responseHeaders ?? [];
-				const apiHeaders = normalizeHeaders(raw);
-				const apiRawHeaders = toRawHeaders(raw);
-				let normalizedPath;
-				try {
-					const u = new URL(details.url);
-					normalizedPath = u.origin + redactUrlPath(u.pathname);
-				} catch {
-					normalizedPath = redactUrlQueryParams(details.url);
-				}
-				const sanitizedUrl = redactUrlQueryParams(details.url);
-				onApiHopComplete({
-					requestId: details.requestId,
-					tabId: details.tabId,
-					url: sanitizedUrl,
-					normalizedPath,
-					method: reqMeta?.method ?? "GET",
-					requestOrigin: reqMeta?.origin,
-					status: details.statusCode,
-					headers: apiHeaders,
-					rawHeaders: apiRawHeaders,
-					timestamp: reqMeta?.timestamp ?? details.timeStamp,
-					fromCache: details.fromCache ?? false
-				});
-			}
-			return;
-		}
-		if (details.type !== "main_frame" || details.tabId < 0) return;
-		const raw = details.responseHeaders ?? [];
-		const normalised = normalizeHeaders(raw);
-		const rawHeaders = toRawHeaders(raw);
-		let partial = captureMap.get(details.requestId);
-		if (!partial) partial = {
-			tabId: details.tabId,
-			url: redactUrlQueryParams(details.url),
-			status: details.statusCode,
-			headersReceived: null,
-			rawHeadersReceived: [],
-			headersStarted: null,
-			rawHeadersStarted: [],
-			fromCache: details.fromCache ?? false,
-			wasRedirected: false,
-			timestamp: details.timeStamp,
-			redirectCount: 0
-		};
-		const sanitizedUrl = redactUrlQueryParams(details.url);
-		partial.headersStarted = normalised;
-		partial.rawHeadersStarted = rawHeaders;
-		partial.fromCache = details.fromCache ?? false;
-		partial.status = details.statusCode;
-		partial.url = sanitizedUrl;
-		const canonicalRaw = rawHeaders;
-		const canonicalNormalised = normalised;
-		const differ = partial.headersReceived !== null ? headersDiffer(partial.headersReceived, canonicalNormalised) : false;
-		const hop = {
-			requestId: details.requestId,
-			url: sanitizedUrl,
-			status: details.statusCode,
-			headers: canonicalNormalised,
-			rawHeaders: canonicalRaw,
-			fromCache: partial.fromCache,
-			isHstsUpgrade: detectHstsUpgrade(canonicalRaw),
-			capturedAt: "onResponseStarted",
-			headersDiffer: differ,
-			timestamp: partial.timestamp,
-			redirectCount: partial.redirectCount
-		};
-		captureMap.delete(details.requestId);
-		onHopComplete(details.tabId, hop);
-	}, filter, extraInfoSpec);
-	chrome.webRequest.onBeforeRedirect.addListener((details) => {
-		if (details.type !== "main_frame" || details.tabId < 0) return;
-		const existing = captureMap.get(details.requestId);
-		const raw = details.responseHeaders ?? existing?.rawHeadersReceived ?? [];
-		const headers = normalizeHeaders(raw);
-		const rawHeaders = toRawHeaders(raw);
-		const beforeHeaders = existing?.headersReceived;
-		const hop = {
-			requestId: details.requestId,
-			url: redactUrlQueryParams(details.url),
-			status: details.statusCode,
-			headers,
-			rawHeaders,
-			fromCache: false,
-			isHstsUpgrade: detectHstsUpgrade(rawHeaders),
-			capturedAt: "onResponseStarted",
-			headersDiffer: beforeHeaders !== null && beforeHeaders !== void 0 ? headersDiffer(beforeHeaders, headers) : false,
-			timestamp: existing?.timestamp ?? details.timeStamp,
-			redirectCount: 0
-		};
-		captureMap.delete(details.requestId);
-		onHopComplete(details.tabId, hop);
-	}, filter, extraInfoSpec);
-}
 //#endregion
 //#region src/background/correlate.ts
 /**
@@ -3514,9 +3277,12 @@ var portRegistry = new PortRegistry();
 var pendingServiceWorkerReports = /* @__PURE__ */ new Map();
 var pendingMetaCspReports = /* @__PURE__ */ new Set();
 var currentSettings = DEFAULT_SETTINGS;
-LocalStorage.getSettings().then((s) => {
+SettingsService.getSettings().then((s) => {
 	currentSettings = s;
 }).catch(() => {});
+SettingsService.onSettingsChanged((s) => {
+	currentSettings = s;
+});
 function recomputeTabState(tabId, state) {
 	const result = runRules({
 		hops: state.hops,
@@ -3525,8 +3291,8 @@ function recomputeTabState(tabId, state) {
 		metaCspFound: state.coverage.metaCspFound,
 		captureFindings: state.captureFindings ?? [],
 		cookieSettings: {
-			alwaysSensitive: currentSettings.alwaysSensitiveCookies,
-			alwaysIgnore: currentSettings.alwaysIgnoreCookies
+			alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
+			alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []
 		}
 	});
 	state.findings = result.findings;
@@ -3660,7 +3426,7 @@ async function onHopComplete(tabId, hop) {
 	}
 	const origin = state.origin;
 	if (!origin || origin === hop.url) return;
-	if (!await new Promise((resolve) => chrome.permissions.contains({ origins: [`${origin}/*`] }, resolve))) {
+	if (!await PermissionsService.hasPermissionForOrigin(origin)) {
 		state.coverage.isRestricted = false;
 		setBadgeForTab(tabId, "?");
 		return;
@@ -3771,6 +3537,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message.type === "PERMISSIONS_CHANGED") {
 		(async () => {
 			try {
+				if (!message.granted && message.origins.length > 0) await reconcilePermissionsOnRemoved(message.origins, {
+					tabStates,
+					pendingServiceWorkerReports,
+					pendingMetaCspReports,
+					setBadge: (t, text) => {
+						if (text === "") chrome.action?.setBadgeText({
+							tabId: t,
+							text: ""
+						})?.catch?.(() => void 0);
+						else setBadgeForTab(t, text);
+					},
+					broadcast: (t, msg) => portRegistry.broadcast(t, msg)
+				});
 				const settingsMsg = {
 					type: "SETTINGS_CHANGED",
 					settings: await LocalStorage.getSettings()
@@ -3971,8 +3750,8 @@ registerCaptureListeners((tabId, hop) => {
 	const isFirstParty = state.origin === targetOrigin;
 	apiHop.isThirdParty = !isFirstParty;
 	const findings = runApiRules(apiHop, {
-		alwaysSensitive: currentSettings.alwaysSensitiveCookies,
-		alwaysIgnore: currentSettings.alwaysIgnoreCookies
+		alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
+		alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []
 	});
 	if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
 	const endpointState = {
@@ -4010,7 +3789,37 @@ registerCaptureListeners((tabId, hop) => {
 		state
 	});
 });
-hydrateFromSession();
+hydrateFromSession().then(async () => {
+	await reconcilePermissionsOnStartup({
+		tabStates,
+		pendingServiceWorkerReports,
+		pendingMetaCspReports,
+		setBadge: (t, text) => {
+			if (text === "") chrome.action?.setBadgeText({
+				tabId: t,
+				text: ""
+			})?.catch?.(() => void 0);
+			else setBadgeForTab(t, text);
+		},
+		broadcast: (t, msg) => portRegistry.broadcast(t, msg)
+	});
+});
+if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" && typeof chrome.permissions.onRemoved !== "undefined") chrome.permissions.onRemoved.addListener((removed) => {
+	const origins = removed.origins ?? [];
+	reconcilePermissionsOnRemoved(origins, {
+		tabStates,
+		pendingServiceWorkerReports,
+		pendingMetaCspReports,
+		setBadge: (t, text) => {
+			if (text === "") chrome.action?.setBadgeText({
+				tabId: t,
+				text: ""
+			})?.catch?.(() => void 0);
+			else setBadgeForTab(t, text);
+		},
+		broadcast: (t, msg) => portRegistry.broadcast(t, msg)
+	});
+});
 //#endregion
 
-//# sourceMappingURL=index.ts-BF88DGY4.js.map
+//# sourceMappingURL=index.ts-NWe8Qpy8.js.map

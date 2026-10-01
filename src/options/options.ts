@@ -9,6 +9,7 @@
 
 import type { Settings, Severity } from '../shared/types';
 import { SettingsService, normalizeCookieList, resolveCookieOverlaps } from '../shared/settings';
+import { PermissionsService } from '../background/permissions';
 import { sendToBackground } from '../shared/messaging';
 import { SEVERITY_ORDER } from '../shared/constants';
 
@@ -27,6 +28,7 @@ let saveBtn: HTMLButtonElement;
 let saveStatus: HTMLSpanElement;
 let sectionAllowlist: HTMLElement;
 let proModeToggle: HTMLInputElement;
+let currentMode: Settings['monitoringMode'] = 'per-site';
 
 /**
  * In-memory working copy of the allowedOrigins array.
@@ -71,6 +73,7 @@ async function loadAndPopulate(): Promise<void> {
   }
 
   // ── Monitoring mode ──────────────────────────────────────────
+  currentMode = settings.monitoringMode;
   for (const radio of modeRadios) {
     radio.checked = radio.value === settings.monitoringMode;
   }
@@ -88,8 +91,13 @@ async function loadAndPopulate(): Promise<void> {
   alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(', ');
   proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
 
-  // ── Allowlist ────────────────────────────────────────────────
-  workingOrigins = [...(settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? [])];
+  // ── Allowlist: load authoritative granted origins from chrome.permissions ──
+  try {
+    const granted = await PermissionsService.getAllGrantedOrigins();
+    workingOrigins = granted;
+  } catch {
+    workingOrigins = [...(settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? [])];
+  }
   renderAllowlist();
 }
 
@@ -242,10 +250,23 @@ function buildAllowlistItem(origin: string): HTMLLIElement {
   return li;
 }
 
-/** Remove an origin from the working array and re-render the list. */
+/** Remove an origin from browser permissions and re-render the list. */
 function removeOrigin(origin: string): void {
-  workingOrigins = workingOrigins.filter((o) => o !== origin);
-  renderAllowlist();
+  void (async () => {
+    try {
+      const removed = await PermissionsService.removeOriginPermission(origin);
+      if (removed) {
+        workingOrigins = workingOrigins.filter((o) => o !== origin);
+        renderAllowlist();
+        setStatus(`Revoked access for ${origin}`, false);
+      } else {
+        setStatus(`Failed to revoke access for ${origin}`, true);
+      }
+    } catch {
+      workingOrigins = workingOrigins.filter((o) => o !== origin);
+      renderAllowlist();
+    }
+  })();
 }
 
 /* ================================================================
@@ -255,8 +276,30 @@ function removeOrigin(origin: string): void {
 function wireModeRadios(): void {
   for (const radio of modeRadios) {
     radio.addEventListener('change', () => {
-      if (radio.checked) {
-        updateAllowlistVisibility(radio.value);
+      if (!radio.checked) return;
+      const targetMode = radio.value as Settings['monitoringMode'];
+
+      if (targetMode === 'all-sites' && currentMode !== 'all-sites') {
+        if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
+          chrome.permissions.request({ origins: ['<all_urls>'] }, (granted) => {
+            if (!granted) {
+              for (const r of modeRadios) {
+                r.checked = r.value === currentMode;
+              }
+              updateAllowlistVisibility(currentMode);
+              setStatus('All-sites monitoring requires permission for all URLs. Kept previous mode.', true);
+            } else {
+              currentMode = 'all-sites';
+              updateAllowlistVisibility('all-sites');
+            }
+          });
+        } else {
+          currentMode = 'all-sites';
+          updateAllowlistVisibility('all-sites');
+        }
+      } else {
+        currentMode = targetMode;
+        updateAllowlistVisibility(targetMode);
       }
     });
   }
@@ -304,4 +347,24 @@ function getEl<T extends HTMLElement>(id: string): T {
   if (!el) throw new Error(`Missing required element #${id}`);
   return el as T;
 }
+
+if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
+  if (typeof chrome.permissions.onRemoved !== 'undefined') {
+    chrome.permissions.onRemoved.addListener(() => {
+      void PermissionsService.getAllGrantedOrigins().then((origins) => {
+        workingOrigins = origins;
+        renderAllowlist();
+      });
+    });
+  }
+  if (typeof chrome.permissions.onAdded !== 'undefined') {
+    chrome.permissions.onAdded.addListener(() => {
+      void PermissionsService.getAllGrantedOrigins().then((origins) => {
+        workingOrigins = origins;
+        renderAllowlist();
+      });
+    });
+  }
+}
+
 
