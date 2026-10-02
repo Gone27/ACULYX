@@ -158,9 +158,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   SettingsService.onSettingsChanged((newSettings) => {
     currentSettings = newSettings;
-    if (currentFindings.length > 0) {
-      renderFindings(currentFindings);
-    }
   });
 
   wireSettingsLink();
@@ -220,8 +217,8 @@ async function initPopup(): Promise<void> {
   if (!gate.allowed) {
     if (gate.reason === 'off') {
       originText.textContent = tab.url;
-      showStateMessage('Monitoring is turned off in Settings.', 'restricted');
-      setPopupState('restricted');
+      showStateMessage('Monitoring is turned off in Settings.');
+      setPopupState('not-monitored');
       return;
     }
     if (gate.reason === 'broad-access-conflict') {

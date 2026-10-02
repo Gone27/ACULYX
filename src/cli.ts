@@ -248,6 +248,13 @@ export function buildCliReport(input: CliInput): CliReport {
       return fix ? { ...finding, fix } : finding;
     }),
     subdomainTrust: result.subdomainTrust,
+    metadata: {
+      schemaVersion: '2',
+      rulesetVersion: result.scoreVersion,
+      captureScope: 'document',
+      coverageHopsExpected: 1,
+      coverageHopsCaptured: 1,
+    },
   };
 }
 

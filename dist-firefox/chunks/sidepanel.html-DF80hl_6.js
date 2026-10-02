@@ -1184,4 +1184,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-kSW7FgZ3.js.map
+//# sourceMappingURL=sidepanel.html-DF80hl_6.js.map

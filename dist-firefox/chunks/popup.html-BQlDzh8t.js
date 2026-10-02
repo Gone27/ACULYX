@@ -1,5 +1,5 @@
 import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { b as SettingsService, f as isModeCaptureAllowed, l as patternFromOrigin, s as PermissionsService, v as LocalStorage } from "./capture-kosxRNgw.js";
+import { b as SettingsService, f as isModeCaptureAllowed, l as patternFromOrigin, s as PermissionsService, v as LocalStorage } from "./capture-CCR6EOFJ.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/shared/filters.ts
@@ -130,7 +130,6 @@ document.addEventListener("DOMContentLoaded", () => {
 	});
 	SettingsService.onSettingsChanged((newSettings) => {
 		currentSettings = newSettings;
-		if (currentFindings.length > 0) renderFindings(currentFindings);
 	});
 	wireSettingsLink();
 	wireMonitorButton();
@@ -176,8 +175,8 @@ async function initPopup() {
 	if (!gate.allowed) {
 		if (gate.reason === "off") {
 			originText.textContent = tab.url;
-			showStateMessage("Monitoring is turned off in Settings.", "restricted");
-			setPopupState("restricted");
+			showStateMessage("Monitoring is turned off in Settings.");
+			setPopupState("not-monitored");
 			return;
 		}
 		if (gate.reason === "broad-access-conflict") {
@@ -1079,4 +1078,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-CTh9Ta_U.js.map
+//# sourceMappingURL=popup.html-BQlDzh8t.js.map

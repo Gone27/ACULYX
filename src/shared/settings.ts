@@ -231,10 +231,12 @@ export class SettingsTransitionPipeline {
     if (b.severityFilter.some((s) => !aSev.has(s))) return false;
 
     if (a.sensitiveCookieNames.length !== b.sensitiveCookieNames.length) return false;
-    if (a.sensitiveCookieNames.some((v, i) => v !== b.sensitiveCookieNames[i])) return false;
+    const aSens = new Set(a.sensitiveCookieNames);
+    if (b.sensitiveCookieNames.some((s) => !aSens.has(s))) return false;
 
     if (a.ignoredCookieNames.length !== b.ignoredCookieNames.length) return false;
-    if (a.ignoredCookieNames.some((v, i) => v !== b.ignoredCookieNames[i])) return false;
+    const aIgn = new Set(a.ignoredCookieNames);
+    if (b.ignoredCookieNames.some((s) => !aIgn.has(s))) return false;
 
     return true;
   }

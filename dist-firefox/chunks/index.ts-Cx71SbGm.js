@@ -1,5 +1,5 @@
 import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BtJyJf3R.js";
-import { C as settingsTransitionPipeline, _ as tabStates, a as registerCaptureListeners, b as SettingsService, c as isBroadGrant, d as reconcilePermissionsOnStartup, f as isModeCaptureAllowed, g as originAuthBaselines, h as initLifecycle, i as incognitoTabIds, m as hydrateFromSession, n as clearInFlightCaptures, o as CapturePolicy, p as isRestrictedUrl$1, r as inFlightRequests, t as captureMap, u as reconcilePermissionsOnRemoved, v as LocalStorage, y as SessionStorage } from "./capture-kosxRNgw.js";
+import { C as settingsTransitionPipeline, _ as tabStates, a as registerCaptureListeners, b as SettingsService, c as isBroadGrant, d as reconcilePermissionsOnStartup, f as isModeCaptureAllowed, g as originAuthBaselines, h as initLifecycle, i as incognitoTabIds, m as hydrateFromSession, n as clearInFlightCaptures, o as CapturePolicy, p as isRestrictedUrl$1, r as inFlightRequests, t as captureMap, u as reconcilePermissionsOnRemoved, v as LocalStorage, y as SessionStorage } from "./capture-CCR6EOFJ.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -4260,4 +4260,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-Cjv7BI2V.js.map
+//# sourceMappingURL=index.ts-Cx71SbGm.js.map

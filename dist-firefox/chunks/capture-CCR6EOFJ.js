@@ -154,9 +154,11 @@ var SettingsTransitionPipeline = class {
 		const aSev = new Set(a.severityFilter);
 		if (b.severityFilter.some((s) => !aSev.has(s))) return false;
 		if (a.sensitiveCookieNames.length !== b.sensitiveCookieNames.length) return false;
-		if (a.sensitiveCookieNames.some((v, i) => v !== b.sensitiveCookieNames[i])) return false;
+		const aSens = new Set(a.sensitiveCookieNames);
+		if (b.sensitiveCookieNames.some((s) => !aSens.has(s))) return false;
 		if (a.ignoredCookieNames.length !== b.ignoredCookieNames.length) return false;
-		if (a.ignoredCookieNames.some((v, i) => v !== b.ignoredCookieNames[i])) return false;
+		const aIgn = new Set(a.ignoredCookieNames);
+		if (b.ignoredCookieNames.some((s) => !aIgn.has(s))) return false;
 		return true;
 	}
 	async transition(incoming, _source = "storage") {
@@ -1412,7 +1414,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 				normalizedPath = redactUrlQueryParams(details.url);
 			}
 			const sanitizedUrl = redactUrlQueryParams(details.url);
-			onApiHopComplete({
+			const apiHop = {
 				requestId: details.requestId,
 				tabId: details.tabId,
 				url: sanitizedUrl,
@@ -1424,7 +1426,12 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 				rawHeaders: apiRawHeaders,
 				timestamp: reqMeta?.timestamp ?? details.timeStamp,
 				fromCache: details.fromCache ?? false
-			}, incognitoTabIds.has(details.tabId));
+			};
+			const isIncog = incognitoTabIds.has(details.tabId);
+			try {
+				const res = onApiHopComplete(apiHop, isIncog);
+				if (res instanceof Promise) res.catch(() => {});
+			} catch {}
 			return;
 		}
 		if (details.type !== "main_frame" || details.tabId < 0) return;
@@ -1476,7 +1483,10 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			redirectCount: partial.redirectCount
 		};
 		captureMap.delete(details.requestId);
-		onHopComplete(details.tabId, hop, partial.isIncognito ?? false);
+		try {
+			const res = onHopComplete(details.tabId, hop, partial.isIncognito ?? false);
+			if (res instanceof Promise) res.catch(() => {});
+		} catch {}
 	}, filter, extraInfoSpec);
 	chrome.webRequest.onBeforeRedirect.addListener((details) => {
 		if (details.type !== "main_frame" || details.tabId < 0) return;
@@ -1510,4 +1520,4 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 //#endregion
 export { settingsTransitionPipeline as C, resolveCookieOverlaps as S, tabStates as _, registerCaptureListeners as a, SettingsService as b, isBroadGrant as c, reconcilePermissionsOnStartup as d, isModeCaptureAllowed as f, originAuthBaselines as g, initLifecycle as h, incognitoTabIds as i, patternFromOrigin as l, hydrateFromSession as m, clearInFlightCaptures as n, CapturePolicy as o, isRestrictedUrl as p, inFlightRequests as r, PermissionsService as s, captureMap as t, reconcilePermissionsOnRemoved as u, LocalStorage as v, normalizeCookieList as x, SessionStorage as y };
 
-//# sourceMappingURL=capture-kosxRNgw.js.map
+//# sourceMappingURL=capture-CCR6EOFJ.js.map

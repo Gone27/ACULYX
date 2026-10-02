@@ -1,5 +1,5 @@
 import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { S as resolveCookieOverlaps, b as SettingsService, s as PermissionsService, v as LocalStorage, x as normalizeCookieList } from "./capture-kosxRNgw.js";
+import { S as resolveCookieOverlaps, b as SettingsService, s as PermissionsService, v as LocalStorage, x as normalizeCookieList } from "./capture-CCR6EOFJ.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/options/options.ts
@@ -392,4 +392,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-lrr_ZnUs.js.map
+//# sourceMappingURL=options.html-DwFcivgH.js.map

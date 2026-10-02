@@ -244,7 +244,14 @@ export function registerCaptureListeners(
           fromCache: details.fromCache ?? false,
         };
         const isIncog = incognitoTabIds.has(details.tabId);
-        onApiHopComplete(apiHop, isIncog);
+        try {
+          const res = onApiHopComplete(apiHop, isIncog) as unknown;
+          if (res instanceof Promise) {
+            res.catch(() => {});
+          }
+        } catch {
+          // Safe fail-closed: avoid crashing service worker
+        }
         return;
       }
 
@@ -319,8 +326,15 @@ export function registerCaptureListeners(
       // Clean up in-flight state.
       captureMap.delete(details.requestId);
 
-      // Notify the orchestrator.
-      void onHopComplete(details.tabId, hop, partial.isIncognito ?? false);
+      // Notify the orchestrator safely.
+      try {
+        const res = onHopComplete(details.tabId, hop, partial.isIncognito ?? false) as unknown;
+        if (res instanceof Promise) {
+          res.catch(() => {});
+        }
+      } catch {
+        // Safe fail-closed: avoid crashing service worker
+      }
     },
     filter,
     extraInfoSpec,
