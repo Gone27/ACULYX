@@ -2918,25 +2918,37 @@ function runRules(input) {
 		subdomainTrust: emptySubdomainTrust
 	};
 	const findings = [];
-	const redirectFindings = detectRedirectDegradation(hops);
+	const redirectFindings = detectRedirectDegradation(hops).map((f) => ({
+		...f,
+		provenance: "redirect"
+	}));
 	findings.push(...redirectFindings);
 	findings.push(...input.captureFindings ?? []);
-	findings.push(...checkDuplicateHeaders(finalHop));
-	findings.push(...checkHsts(finalHop));
+	const headerFindings = [];
+	headerFindings.push(...checkDuplicateHeaders(finalHop));
+	headerFindings.push(...checkHsts(finalHop));
 	const { findings: cspFindings, directives } = checkCsp(finalHop, input.metaCspFound);
-	findings.push(...cspFindings);
-	findings.push(...checkXfo(finalHop, directives));
-	findings.push(...checkXcto(finalHop));
-	findings.push(...checkReferrer(finalHop));
-	findings.push(...checkIsolationHeaders(finalHop));
-	findings.push(...checkReportingHeaders(finalHop));
-	findings.push(...checkPolicyHardeningHeaders(finalHop));
-	findings.push(...checkCors(finalHop));
-	findings.push(...checkDeprecated(finalHop));
-	findings.push(...checkInfoLeak(finalHop));
-	findings.push(...checkCacheCookie(finalHop, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore));
+	headerFindings.push(...cspFindings);
+	headerFindings.push(...checkXfo(finalHop, directives));
+	headerFindings.push(...checkXcto(finalHop));
+	headerFindings.push(...checkReferrer(finalHop));
+	headerFindings.push(...checkIsolationHeaders(finalHop));
+	headerFindings.push(...checkReportingHeaders(finalHop));
+	headerFindings.push(...checkPolicyHardeningHeaders(finalHop));
+	headerFindings.push(...checkCors(finalHop));
+	headerFindings.push(...checkDeprecated(finalHop));
+	headerFindings.push(...checkInfoLeak(finalHop));
+	headerFindings.push(...checkCacheCookie(finalHop, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore));
+	findings.push(...headerFindings.map((f) => ({
+		...f,
+		provenance: "response-header"
+	})));
 	const isHttps = finalHop.url.startsWith("https://");
-	findings.push(...checkCookies(input.cookies, isHttps, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore));
+	const cookieFindings = checkCookies(input.cookies, isHttps, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore);
+	findings.push(...cookieFindings.map((f) => ({
+		...f,
+		provenance: "cookie-metadata"
+	})));
 	const subdomainResult = checkSubdomainTrust(finalHop, input.cookies, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore);
 	findings.push(...subdomainResult.findings);
 	const heuristicRules = /* @__PURE__ */ new Set([
@@ -2955,10 +2967,13 @@ function runRules(input) {
 	]);
 	const findingsWithSource = findings.map((finding) => {
 		const isHeuristic = heuristicRules.has(finding.ruleId) || finding.title.includes("(name-based heuristic)");
+		const isPass = finding.severity === "info" || finding.severity === "pass";
 		return {
 			...finding,
 			sourceUrl: finding.sourceUrl ?? finalHop.url,
-			confidence: finding.confidence ?? (isHeuristic ? "heuristic" : "deterministic")
+			provenance: finding.provenance ?? "response-header",
+			confidence: finding.confidence ?? (isHeuristic ? "heuristic" : "deterministic"),
+			outcome: finding.outcome ?? (isPass ? "pass" : "fail")
 		};
 	});
 	const { score, grade, qualityScore, qualityGrade, breakdown, scoreVersion } = computeScore(findingsWithSource, finalHop.fromCache);
@@ -2986,7 +3001,9 @@ function runApiRules(apiHop, cookieSettings) {
 	return findings.map((f) => ({
 		...f,
 		sourceUrl: apiHop.url,
-		confidence: f.confidence ?? (f.ruleId === "LEAK-001" ? "heuristic" : "deterministic")
+		confidence: f.confidence ?? (f.ruleId === "LEAK-001" ? "heuristic" : "deterministic"),
+		provenance: "response-header",
+		outcome: "fail"
 	}));
 }
 var REDIRECT_SECURITY_HEADERS = [
@@ -4243,4 +4260,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-DhDg3nzr.js.map
+//# sourceMappingURL=index.ts-Cjv7BI2V.js.map

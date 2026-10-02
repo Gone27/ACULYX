@@ -118,6 +118,17 @@ export interface Finding {
    * vs heuristic (name pattern matching, bypass-prone host heuristics, version string regex).
    */
   confidence?: 'deterministic' | 'heuristic';
+  provenance?: 'response-header' | 'redirect' | 'cookie-metadata' | 'dom-signal' | 'har-json' | 'cli-fetch';
+  outcome?: 'pass' | 'fail' | 'not-observed' | 'not-applicable' | 'partial-coverage';
+}
+
+export interface BaselineMetadata {
+  schemaVersion: string;
+  rulesetVersion: string;
+  environmentLabel?: string;
+  captureScope?: string;
+  coverageHopsExpected?: number;
+  coverageHopsCaptured?: number;
 }
 
 export interface OriginHistoryItem {

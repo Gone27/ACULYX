@@ -6,7 +6,7 @@ import process from 'node:process';
 import packageInfo from '../package.json';
 import fixesData from '../fixes.json';
 import { runRules } from './rules/engine';
-import type { CookieRecord, Finding, Hop, Grade, ScoreBreakdown, SubdomainTrustAnalysis } from './shared/types';
+import type { CookieRecord, Finding, Hop, Grade, ScoreBreakdown, SubdomainTrustAnalysis, BaselineMetadata } from './shared/types';
 
 interface CliInput {
   url: string;
@@ -32,6 +32,7 @@ export interface CliReport {
   scoreBreakdown: ScoreBreakdown[];
   findings: Array<Finding & { fix?: FixSuggestion }>;
   subdomainTrust: SubdomainTrustAnalysis;
+  metadata?: BaselineMetadata;
 }
 
 export interface SarifLog {
@@ -330,6 +331,8 @@ export function formatSarif(report: CliReport): SarifLog {
           impact: finding.impact,
           category: finding.category,
           confidence: finding.confidence ?? 'deterministic',
+          provenance: finding.provenance,
+          outcome: finding.outcome,
           scoreVersion: report.scoreVersion,
         },
       })),
@@ -356,6 +359,7 @@ export interface FindingDiff {
   fixes: Finding[];
   unchanged: Finding[];
   changed: Array<{ before: Finding; after: Finding }>;
+  warnings?: string[];
 }
 
 export function computeFindingDiff(baselineReport: CliReport, currentReport: CliReport): FindingDiff {
@@ -405,6 +409,13 @@ export function computeFindingDiff(baselineReport: CliReport, currentReport: Cli
   // 4. Resolved findings from baseline (fixes)
   fixes.push(...remainingBaseline);
 
+  const warnings: string[] = [];
+  const baseHops = baselineReport.metadata?.coverageHopsCaptured;
+  const currHops = currentReport.metadata?.coverageHopsCaptured;
+  if (baseHops !== undefined && currHops !== undefined && currHops < baseHops) {
+    warnings.push(`comparison incomplete (coverage decreased from ${baseHops} to ${currHops})`);
+  }
+
   return {
     target: currentReport.target,
     baselineDate: baselineReport.generatedAt,
@@ -416,6 +427,7 @@ export function computeFindingDiff(baselineReport: CliReport, currentReport: Cli
     fixes,
     unchanged,
     changed,
+    warnings,
   };
 }
 
@@ -638,6 +650,9 @@ async function main(args: string[]): Promise<void> {
         ] : []),
         `## Persistent Findings: ${diff.unchanged.length}`,
       ];
+      if (diff.warnings && diff.warnings.length > 0) {
+        md.splice(2, 0, '', ...diff.warnings.map(w => `> [!WARNING]\n> ${w}`));
+      }
       process.stdout.write(`${md.join('\n')}\n`);
     } else {
       process.stdout.write(`${JSON.stringify(diff, null, 2)}\n`);

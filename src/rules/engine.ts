@@ -121,53 +121,58 @@ export function runRules(input: RuleInput): RuleOutput {
 
   const findings: Finding[] = [];
 
-  const redirectFindings = detectRedirectDegradation(hops);
+  const redirectFindings = detectRedirectDegradation(hops).map(f => ({ ...f, provenance: 'redirect' as const }));
   findings.push(...redirectFindings);
   findings.push(...(input.captureFindings ?? []));
-  findings.push(...checkDuplicateHeaders(finalHop));
+  
+  const headerFindings: Finding[] = [];
+  headerFindings.push(...checkDuplicateHeaders(finalHop));
 
   // 1. HSTS
-  findings.push(...checkHsts(finalHop));
+  headerFindings.push(...checkHsts(finalHop));
 
   // 2. CSP — also returns the parsed directives map for downstream rules.
   const { findings: cspFindings, directives } = checkCsp(finalHop, input.metaCspFound);
-  findings.push(...cspFindings);
+  headerFindings.push(...cspFindings);
 
   // 3. XFO — needs the CSP directives to decide if frame-ancestors supersedes it.
-  findings.push(...checkXfo(finalHop, directives));
+  headerFindings.push(...checkXfo(finalHop, directives));
 
   // 4. X-Content-Type-Options
-  findings.push(...checkXcto(finalHop));
+  headerFindings.push(...checkXcto(finalHop));
 
   // 5. Referrer-Policy
-  findings.push(...checkReferrer(finalHop));
+  headerFindings.push(...checkReferrer(finalHop));
 
-  findings.push(...checkIsolationHeaders(finalHop));
-  findings.push(...checkReportingHeaders(finalHop));
-  findings.push(...checkPolicyHardeningHeaders(finalHop));
-  findings.push(...checkCors(finalHop));
+  headerFindings.push(...checkIsolationHeaders(finalHop));
+  headerFindings.push(...checkReportingHeaders(finalHop));
+  headerFindings.push(...checkPolicyHardeningHeaders(finalHop));
+  headerFindings.push(...checkCors(finalHop));
 
   // 6. Deprecated headers (X-XSS-Protection, etc.)
-  findings.push(...checkDeprecated(finalHop));
+  headerFindings.push(...checkDeprecated(finalHop));
 
   // 7. Information leakage via server/framework version headers
-  findings.push(...checkInfoLeak(finalHop));
+  headerFindings.push(...checkInfoLeak(finalHop));
 
   // 8. Cache-Control on responses that set cookies
-  findings.push(...checkCacheCookie(
+  headerFindings.push(...checkCacheCookie(
     finalHop,
     input.cookieSettings?.alwaysSensitive,
     input.cookieSettings?.alwaysIgnore
   ));
+  
+  findings.push(...headerFindings.map(f => ({ ...f, provenance: 'response-header' as const })));
 
   // 9. Cookie attribute rules (Secure, HttpOnly, SameSite, prefix compliance)
   const isHttps = finalHop.url.startsWith('https://');
-  findings.push(...checkCookies(
+  const cookieFindings = checkCookies(
     input.cookies,
     isHttps,
     input.cookieSettings?.alwaysSensitive,
     input.cookieSettings?.alwaysIgnore
-  ));
+  );
+  findings.push(...cookieFindings.map(f => ({ ...f, provenance: 'cookie-metadata' as const })));
 
   // 10. Subdomain → main-domain escalation trust analysis
   const subdomainResult = checkSubdomainTrust(
@@ -197,11 +202,14 @@ export function runRules(input: RuleInput): RuleOutput {
     const isHeuristic =
       heuristicRules.has(finding.ruleId) ||
       finding.title.includes('(name-based heuristic)');
+    const isPass = finding.severity === 'info' || finding.severity === 'pass';
     return {
       ...finding,
       sourceUrl: finding.sourceUrl ?? finalHop.url,
+      provenance: finding.provenance ?? 'response-header',
       confidence:
         finding.confidence ?? (isHeuristic ? 'heuristic' : 'deterministic'),
+      outcome: finding.outcome ?? (isPass ? 'pass' : 'fail'),
     };
   });
 
@@ -246,6 +254,8 @@ export function runApiRules(
     ...f,
     sourceUrl: apiHop.url,
     confidence: f.confidence ?? (f.ruleId === 'LEAK-001' ? 'heuristic' : 'deterministic'),
+    provenance: 'response-header',
+    outcome: 'fail',
   }));
 }
 

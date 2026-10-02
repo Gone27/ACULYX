@@ -12,7 +12,9 @@ npm run seccheck -- --har capture.har --url https://example.com/account --format
 
 `--format` accepts `json`, `markdown`, or `sarif`. `--fail-on` accepts `critical`, `high`, `medium`, `low`, `info`, or `never`; the default is `high`.
 
-SARIF output uses version 2.1.0 and includes rule metadata, finding messages, severity levels, evidence properties, and the affected page URL as a location. It can be consumed by GitHub Code Scanning with `github/codeql-action/upload-sarif`. JSON and Markdown reports include both the security score/grade and the separate configuration-quality score/grade.
+SARIF output uses version 2.1.0 and includes rule metadata, finding messages, severity levels, evidence properties, and the affected page URL as a location. It also includes `provenance`, `confidence`, and `outcome` for each finding in the result's properties. JSON and Markdown reports include both the security score/grade and the separate configuration-quality score/grade, with JSON additionally preserving `provenance`, `confidence`, and `outcome` fields on findings.
+
+You can compare two reports using the `--diff` mode. When `--input current.json --diff baseline.json` is passed, the CLI identifies regressions, fixes, and modified findings. If the baseline JSON includes coverage metadata (`coverageHopsCaptured`) and the current run has lower captured hops, the tool will surface a "comparison incomplete" warning to prevent treating missing findings from a degraded capture as fixes.
 
 HAR input is local and does not make a network request. `--url` selects the most recent exact URL match in the HAR; query strings are part of the match and URL fragments are ignored. Response `Set-Cookie` values are redacted before analysis, and HAR cookie objects contribute attributes only. HAR request bodies, response bodies, and TLS details are not analyzed.
 

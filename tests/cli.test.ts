@@ -138,7 +138,24 @@ describe('SecCheck CLI report', () => {
     expect(run?.properties.qualityScore).toBe(report.qualityScore);
     expect(report.qualityScore).toBeLessThan(100);
     expect(run?.results[0]).toHaveProperty('partialFingerprints');
-    expect(typeof (run?.results[0] as { partialFingerprints?: { primaryLocationLineHash?: string } })?.partialFingerprints?.primaryLocationLineHash).toBe('string');
+    const firstResult = run?.results[0] as {
+      partialFingerprints?: { primaryLocationLineHash?: string };
+      properties?: { confidence?: string; provenance?: string; outcome?: string };
+    } | undefined;
+    expect(typeof firstResult?.partialFingerprints?.primaryLocationLineHash).toBe('string');
+    expect(firstResult?.properties?.confidence).toBeDefined();
+    expect(firstResult?.properties?.provenance).toBeDefined();
+    expect(firstResult?.properties?.outcome).toBeDefined();
+  });
+
+  it('includes provenance, outcome, and confidence in CliReport findings', () => {
+    const report = buildCliReport({ url: 'https://example.com', headers: { 'content-type': 'text/html' } });
+    expect(report.findings.length).toBeGreaterThan(0);
+    for (const finding of report.findings) {
+      expect(finding.provenance).toBeDefined();
+      expect(finding.confidence).toBeDefined();
+      expect(finding.outcome).toBeDefined();
+    }
   });
 
   it('computes stable SHA-256 fingerprints for findings', () => {
@@ -154,17 +171,28 @@ describe('SecCheck CLI report', () => {
 
   it('detects regressions, fixes, and unchanged findings in diff mode', () => {
     const baseline = buildCliReport({ url: 'https://example.com', headers: {} });
-    const improved = buildCliReport({
+    const current = buildCliReport({
       url: 'https://example.com',
       headers: {
         'strict-transport-security': 'max-age=31536000; includeSubDomains',
       },
     });
 
-    const diff = computeFindingDiff(baseline, improved);
+    const diff = computeFindingDiff(baseline, current);
     expect(diff.fixes.some((f) => f.ruleId === 'HSTS-001')).toBe(true);
     expect(diff.regressions.some((f) => f.ruleId === 'HSTS-005')).toBe(true);
     expect(diff.currentScore).toBeGreaterThan(diff.baselineScore ?? 0);
+  });
+
+  it('outputs comparison incomplete warning when coverage decreases in diff', () => {
+    const baseline = buildCliReport({ url: 'https://example.com', headers: {} });
+    baseline.metadata = { schemaVersion: '1', rulesetVersion: '1', coverageHopsCaptured: 5 };
+    const current = buildCliReport({ url: 'https://example.com', headers: {} });
+    current.metadata = { schemaVersion: '1', rulesetVersion: '1', coverageHopsCaptured: 3 };
+
+    const diff = computeFindingDiff(baseline, current);
+    expect(diff.warnings).toBeDefined();
+    expect(diff.warnings?.[0]).toContain('comparison incomplete (coverage decreased from 5 to 3)');
   });
 
   it('preserves duplicate rule findings and tracks modified findings in diff', () => {

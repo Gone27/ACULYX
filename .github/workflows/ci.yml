@@ -27,14 +27,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Security audit
+        run: npm audit --audit-level=high
+
       - name: Type check
         run: npx tsc --noEmit
 
       - name: Lint
         run: npx eslint src/ tests/
 
-      - name: Unit tests
+      - name: Unit and fuzz tests
         run: npx vitest run
+
+      - name: Manifest and build integrity checks
+        run: npx vitest run tests/security/artifact-scan.test.ts
 
       - name: Build Chrome extension
         run: npm run build

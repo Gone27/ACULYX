@@ -125,6 +125,16 @@ Exit codes: `0` means no finding met the threshold, `1` means a finding met or e
 npm run build && npm run test:e2e
 ```
 
+### Property & Fuzz tests (Security)
+
+```bash
+npx vitest run tests/fuzz/property-fuzz.test.ts
+npx vitest run tests/security/artifact-scan.test.ts
+```
+
+### Manual QA
+Please refer to the [Manual QA Checklist](docs/MANUAL_QA.md) for verifying browser APIs, MV3 lifecycle constraints, privacy isolation, and visual accessibility.
+
 ## Project Structure
 
 ```
@@ -168,7 +178,9 @@ The `scoreVersion` field is stored with every result so historical comparisons r
 | 2 | ✅ | Cookie store integration, cookie rules, cookie correlation & origin tracking, subdomain trust analysis |
 | 3 | ✅ | Score breakdown, JSON/Markdown audit reports, historical score trend |
 | 4 | ✅ | Side panel, redirect-chain analysis, SRI coverage, historical score trend, CI pipeline, full automated test suite (150+ tests), Firefox build, CLI/SARIF export, audit bundles & finding diffs |
-| 5 | Stretch | Opt-in iframe subresource coverage, semantic meta-CSP evaluation, DevTools panel, mixed-content detection, signed remote rule updates |
+| 5 | ✅ | Attack surface graphing, history diffing, cross-browser compatibility |
+| 6 | ✅ | Rule engine separation, CLI refinement, CLI offline import/export |
+| 7 | ✅ | Release Confidence & Maintenance: CI security audits, property/fuzz tests, manifest integrity checks, Manual QA |
 
 ## License
 
