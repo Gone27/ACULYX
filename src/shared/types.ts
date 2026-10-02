@@ -62,6 +62,8 @@ export interface Hop {
   timestamp: number;
   /** Number of redirects represented before this captured response. */
   redirectCount?: number;
+  /** Navigation generation counter for the owning tab. */
+  generation?: number;
 }
 
 // ─── Cookies ──────────────────────────────────────────────────────────────────
@@ -203,6 +205,8 @@ export interface TabState {
   monitoredByUser: boolean;
   apiEndpoints?: Map<string, ApiEndpointState>;
   updatedAt: number;
+  /** Navigation generation counter for this tab's current document lifecycle. */
+  navigationGeneration?: number;
 }
 
 export interface SettingsV2 {
@@ -237,6 +241,8 @@ export interface ApiHop {
   isThirdParty?: boolean | undefined; // computed after capture
   timestamp?: number | undefined;
   fromCache?: boolean | undefined;
+  /** Navigation generation counter for the owning tab. */
+  generation?: number;
 }
 
 export interface ApiEndpointState {

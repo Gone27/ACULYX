@@ -3,6 +3,76 @@ import { STORAGE_KEYS } from './constants';
 import { SettingsService } from './settings';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 
+// ─── Keyed Asynchronous Mutex ────────────────────────────────────────────────
+// Serializes read-modify-write operations per tab, origin, or apex domain
+// to eliminate lost history records, auth baselines, and graph updates.
+
+export class KeyedAsyncMutex {
+  private locks = new Map<string, Promise<void>>();
+
+  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const currentLock = this.locks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const nextLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = currentLock.then(() => nextLock, () => nextLock);
+    this.locks.set(key, tail);
+
+    try {
+      await currentLock;
+      return await fn();
+    } finally {
+      release();
+      if (this.locks.get(key) === tail) {
+        this.locks.delete(key);
+      }
+    }
+  }
+
+  isLocked(key: string): boolean {
+    return this.locks.has(key);
+  }
+}
+
+export const storageMutex = new KeyedAsyncMutex();
+
+// ─── Storage Health & Degraded State Tracking ────────────────────────────────
+
+export interface StorageHealth {
+  isDegraded: boolean;
+  lastError: string | null;
+  lastErrorTimestamp: number | null;
+}
+
+const storageHealth: StorageHealth = {
+  isDegraded: false,
+  lastError: null,
+  lastErrorTimestamp: null,
+};
+
+export function getStorageHealth(): Readonly<StorageHealth> {
+  return { ...storageHealth };
+}
+
+export function resetStorageHealth(): void {
+  storageHealth.isDegraded = false;
+  storageHealth.lastError = null;
+  storageHealth.lastErrorTimestamp = null;
+}
+
+export function recordStorageFailure(error: unknown): void {
+  storageHealth.isDegraded = true;
+  storageHealth.lastError = error instanceof Error ? error.message : String(error);
+  storageHealth.lastErrorTimestamp = Date.now();
+}
+
+// ─── Graph Bounding Constants ────────────────────────────────────────────────
+
+export const MAX_GRAPH_NODES = 100;
+export const MAX_GRAPH_EDGES = 150;
+export const GRAPH_NODE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 // ─── Session storage ──────────────────────────────────────────────────────────
 //
 // Stores per-tab live state. chrome.storage.session persists across
@@ -140,14 +210,28 @@ export const SessionStorage = {
 
   async setTabState(state: TabState): Promise<void> {
     assertNoSensitiveSecrets(state);
-    const serialized = serializeTabState(state);
-    const key = `${STORAGE_KEYS.TAB_PREFIX}${state.tabId}`;
-    await chrome.storage.session.set({ [key]: serialized });
+    return storageMutex.runExclusive(`tab:${state.tabId}`, async () => {
+      const serialized = serializeTabState(state);
+      const key = `${STORAGE_KEYS.TAB_PREFIX}${state.tabId}`;
+      try {
+        await chrome.storage.session.set({ [key]: serialized });
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
   },
 
   async removeTabState(tabId: number): Promise<void> {
-    const key = `${STORAGE_KEYS.TAB_PREFIX}${tabId}`;
-    await chrome.storage.session.remove(key);
+    return storageMutex.runExclusive(`tab:${tabId}`, async () => {
+      const key = `${STORAGE_KEYS.TAB_PREFIX}${tabId}`;
+      try {
+        await chrome.storage.session.remove(key);
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
   },
 
   async clearAllTabStates(): Promise<void> {
@@ -158,10 +242,15 @@ export const SessionStorage = {
     ) {
       return;
     }
-    const all = await chrome.storage.session.get(null);
-    const tabKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.TAB_PREFIX));
-    if (tabKeys.length > 0) {
-      await chrome.storage.session.remove(tabKeys);
+    try {
+      const all = await chrome.storage.session.get(null);
+      const tabKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.TAB_PREFIX));
+      if (tabKeys.length > 0) {
+        await chrome.storage.session.remove(tabKeys);
+      }
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
     }
   },
 
@@ -181,8 +270,15 @@ export const SessionStorage = {
 
   async setAuthBaseline(origin: string, baseline: import('./types').AuthBaseline): Promise<void> {
     if (!origin) return;
-    const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
-    await chrome.storage.session.set({ [key]: baseline });
+    return storageMutex.runExclusive(`auth_baseline:${origin}`, async () => {
+      const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+      try {
+        await chrome.storage.session.set({ [key]: baseline });
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
   },
 
   async getAllAuthBaselines(): Promise<Map<string, import('./types').AuthBaseline>> {
@@ -257,101 +353,120 @@ export const LocalStorage = {
 
   async recordOriginHistory(origin: string, item: OriginHistoryItem): Promise<void> {
     if (!origin) return;
-    const history = await this.getOriginHistory(origin);
-    // Avoid spamming history if the score and grade haven't changed in the last 60 seconds
-    const last = history[history.length - 1];
-    if (last && last.score === item.score && last.grade === item.grade && (item.timestamp - last.timestamp) < 60_000) {
-      return;
-    }
-    const settings = await this.getSettings();
-    const updated = pruneHistoryItems(
-      [...history, item],
-      item.timestamp,
-      settings.retainHistoryDays,
-      settings.maxHistoryPerOrigin,
-    );
-    const key = `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`;
-    await chrome.storage.local.set({ [key]: updated });
+    return storageMutex.runExclusive(`origin:${origin}`, async () => {
+      try {
+        const history = await this.getOriginHistory(origin);
+        // Avoid spamming history if the score and grade haven't changed in the last 60 seconds
+        const last = history[history.length - 1];
+        if (last && last.score === item.score && last.grade === item.grade && (item.timestamp - last.timestamp) < 60_000) {
+          return;
+        }
+        const settings = await this.getSettings();
+        const updated = pruneHistoryItems(
+          [...history, item],
+          item.timestamp,
+          settings.retainHistoryDays,
+          settings.maxHistoryPerOrigin,
+        );
+        const key = `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`;
+        await chrome.storage.local.set({ [key]: updated });
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
   },
 
   async pruneAllHistory(now: number = Date.now(), settings?: SettingsV2): Promise<void> {
     if (typeof chrome === 'undefined' || chrome.storage?.local === undefined) {
       return;
     }
-    const currentSettings = settings ?? (await this.getSettings());
-    const all = await chrome.storage.local.get(null);
-    const updates: Record<string, OriginHistoryItem[]> = {};
-    const toRemove: string[] = [];
+    try {
+      const currentSettings = settings ?? (await this.getSettings());
+      const all = await chrome.storage.local.get(null);
+      const updates: Record<string, OriginHistoryItem[]> = {};
+      const toRemove: string[] = [];
 
-    for (const [key, value] of Object.entries(all)) {
-      if (key.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || key.startsWith('history:')) {
-        if (Array.isArray(value)) {
-          const pruned = pruneHistoryItems(
-            value as OriginHistoryItem[],
-            now,
-            currentSettings.retainHistoryDays,
-            currentSettings.maxHistoryPerOrigin,
-          );
-          if (pruned.length === 0) {
-            toRemove.push(key);
-          } else {
-            updates[key] = pruned;
+      for (const [key, value] of Object.entries(all)) {
+        if (key.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || key.startsWith('history:')) {
+          if (Array.isArray(value)) {
+            const pruned = pruneHistoryItems(
+              value as OriginHistoryItem[],
+              now,
+              currentSettings.retainHistoryDays,
+              currentSettings.maxHistoryPerOrigin,
+            );
+            if (pruned.length === 0) {
+              toRemove.push(key);
+            } else {
+              updates[key] = pruned;
+            }
           }
         }
       }
-    }
 
-    if (Object.keys(updates).length > 0) {
-      await chrome.storage.local.set(updates);
-    }
-    if (toRemove.length > 0) {
-      await chrome.storage.local.remove(toRemove);
+      if (Object.keys(updates).length > 0) {
+        await chrome.storage.local.set(updates);
+      }
+      if (toRemove.length > 0) {
+        await chrome.storage.local.remove(toRemove);
+      }
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
     }
   },
 
   async purgeOriginData(origin: string): Promise<void> {
     if (!origin || typeof chrome === 'undefined' || chrome.storage?.local === undefined) return;
-    const keysToRemove = [
-      `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`,
-      `history:${origin}`,
-      `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`,
-      `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`,
-    ];
+    return storageMutex.runExclusive(`origin:${origin}`, async () => {
+      try {
+        const keysToRemove = [
+          `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`,
+          `history:${origin}`,
+          `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`,
+          `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`,
+        ];
 
-    let hostname = origin;
-    try {
-      hostname = new URL(origin).hostname;
-    } catch {
-      // not a parseable URL
-    }
+        let hostname = origin;
+        try {
+          hostname = new URL(origin).hostname;
+        } catch {
+          // not a parseable URL
+        }
 
-    const apex = registrableDomain(hostname) ?? hostname;
+        const apex = registrableDomain(hostname) ?? hostname;
 
-    if (apex) {
-      if (hostname === apex) {
-        keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
-      } else {
-        const graph = await this.getGraph(apex);
-        if (graph) {
-          graph.nodes = graph.nodes.filter((n) => n.hostname !== hostname);
-          graph.edges = graph.edges.filter((e) => e.source !== hostname && e.target !== hostname);
-          if (graph.nodes.length <= 1 && graph.nodes.every((n) => n.isApex)) {
+        if (apex) {
+          if (hostname === apex) {
             keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
           } else {
-            await this.saveGraph(graph);
+            const graph = await this.getGraph(apex);
+            if (graph) {
+              graph.nodes = graph.nodes.filter((n) => n.hostname !== hostname);
+              graph.edges = graph.edges.filter((e) => e.source !== hostname && e.target !== hostname);
+              if (graph.nodes.length <= 1 && graph.nodes.every((n) => n.isApex)) {
+                keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
+              } else {
+                await this.saveGraph(graph);
+              }
+            }
           }
         }
+
+        if (hostname && hostname !== apex) {
+          keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${hostname}`);
+        }
+
+        await chrome.storage.local.remove(keysToRemove);
+        if (typeof chrome !== 'undefined' && chrome.storage?.session !== undefined) {
+          await chrome.storage.session.remove(`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`).catch(() => {});
+        }
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
       }
-    }
-
-    if (hostname && hostname !== apex) {
-      keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${hostname}`);
-    }
-
-    await chrome.storage.local.remove(keysToRemove);
-    if (typeof chrome !== 'undefined' && chrome.storage?.session !== undefined) {
-      await chrome.storage.session.remove(`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`).catch(() => {});
-    }
+    });
   },
 
   async getAuthDiffHistory(origin: string): Promise<import('./types').AuthDiffRecord[]> {
@@ -368,10 +483,17 @@ export const LocalStorage = {
 
   async recordAuthDiff(origin: string, diff: import('./types').AuthDiffRecord): Promise<void> {
     if (!origin) return;
-    const history = await this.getAuthDiffHistory(origin);
-    const updated = [...history, diff].slice(-DEFAULT_MAX_HISTORY_PER_ORIGIN);
-    const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
-    await chrome.storage.local.set({ [key]: updated });
+    return storageMutex.runExclusive(`auth_diff:${origin}`, async () => {
+      try {
+        const history = await this.getAuthDiffHistory(origin);
+        const updated = [...history, diff].slice(-DEFAULT_MAX_HISTORY_PER_ORIGIN);
+        const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
+        await chrome.storage.local.set({ [key]: updated });
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
   },
 
   async getGraph(apexDomain: string): Promise<import('./types').AttackSurfaceGraph | null> {
@@ -383,8 +505,86 @@ export const LocalStorage = {
 
   async saveGraph(graph: import('./types').AttackSurfaceGraph): Promise<void> {
     if (!graph.apexDomain) return;
-    const key = `${STORAGE_KEYS.GRAPH_PREFIX}${graph.apexDomain}`;
-    await chrome.storage.local.set({ [key]: graph });
+    return storageMutex.runExclusive(`graph:${graph.apexDomain}`, async () => {
+      try {
+        const now = Date.now();
+        const maxLastSeen = Math.max(0, ...graph.nodes.map((n) => n.lastSeen || 0));
+        const refTime = maxLastSeen > 0 ? maxLastSeen : now;
+        let nodes = graph.nodes.filter(
+          (n) => n.isApex || !n.lastSeen || Math.abs(refTime - n.lastSeen) <= GRAPH_NODE_TTL_MS,
+        );
+        if (nodes.length > MAX_GRAPH_NODES) {
+          const apex = nodes.find((n) => n.isApex);
+          const nonApex = nodes.filter((n) => !n.isApex).sort((a, b) => b.lastSeen - a.lastSeen);
+          nodes = apex ? [apex, ...nonApex.slice(0, MAX_GRAPH_NODES - 1)] : nonApex.slice(0, MAX_GRAPH_NODES);
+        }
+        const validHosts = new Set(nodes.map((n) => n.hostname));
+        let edges = graph.edges.filter(
+          (e) => validHosts.has(e.source) && validHosts.has(e.target),
+        );
+        if (edges.length > MAX_GRAPH_EDGES) {
+          edges = edges.slice(0, MAX_GRAPH_EDGES);
+        }
+        const boundedGraph: import('./types').AttackSurfaceGraph = {
+          ...graph,
+          nodes,
+          edges,
+          lastUpdated: now,
+        };
+        const key = `${STORAGE_KEYS.GRAPH_PREFIX}${graph.apexDomain}`;
+        await chrome.storage.local.set({ [key]: boundedGraph });
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
+  },
+
+  /**
+   * Atomically mutates the attack surface graph for an apex domain within a mutex.
+   * Guarantees read-modify-write safety without lost updates.
+   */
+  async mutateGraph(
+    apexDomain: string,
+    mutator: (current: import('./types').AttackSurfaceGraph | null) => import('./types').AttackSurfaceGraph,
+  ): Promise<import('./types').AttackSurfaceGraph | null> {
+    if (!apexDomain) return null;
+    return storageMutex.runExclusive(`graph:${apexDomain}`, async () => {
+      try {
+        const current = await this.getGraph(apexDomain);
+        const updated = mutator(current);
+        const now = Date.now();
+        const maxLastSeen = Math.max(0, ...updated.nodes.map((n) => n.lastSeen || 0));
+        const refTime = maxLastSeen > 0 ? maxLastSeen : now;
+        let nodes = updated.nodes.filter(
+          (n) => n.isApex || !n.lastSeen || Math.abs(refTime - n.lastSeen) <= GRAPH_NODE_TTL_MS,
+        );
+        if (nodes.length > MAX_GRAPH_NODES) {
+          const apex = nodes.find((n) => n.isApex);
+          const nonApex = nodes.filter((n) => !n.isApex).sort((a, b) => b.lastSeen - a.lastSeen);
+          nodes = apex ? [apex, ...nonApex.slice(0, MAX_GRAPH_NODES - 1)] : nonApex.slice(0, MAX_GRAPH_NODES);
+        }
+        const validHosts = new Set(nodes.map((n) => n.hostname));
+        let edges = updated.edges.filter(
+          (e) => validHosts.has(e.source) && validHosts.has(e.target),
+        );
+        if (edges.length > MAX_GRAPH_EDGES) {
+          edges = edges.slice(0, MAX_GRAPH_EDGES);
+        }
+        const boundedGraph: import('./types').AttackSurfaceGraph = {
+          ...updated,
+          nodes,
+          edges,
+          lastUpdated: now,
+        };
+        const key = `${STORAGE_KEYS.GRAPH_PREFIX}${apexDomain}`;
+        await chrome.storage.local.set({ [key]: boundedGraph });
+        return boundedGraph;
+      } catch (err) {
+        recordStorageFailure(err);
+        throw err;
+      }
+    });
   },
 
   async isOnboardingDismissed(): Promise<boolean> {

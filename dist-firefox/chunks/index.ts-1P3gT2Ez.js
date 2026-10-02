@@ -1,66 +1,7 @@
-import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-cpmoITPm.js";
-import { a as captureMap, c as isModeCaptureAllowed, d as initLifecycle, f as originAuthBaselines, g as SettingsService, h as SessionStorage, i as reconcilePermissionsOnStartup, l as isRestrictedUrl$1, m as LocalStorage, n as isBroadGrant, o as clearInFlightCaptures, p as tabStates, r as reconcilePermissionsOnRemoved, s as registerCaptureListeners, t as PermissionsService, u as hydrateFromSession } from "./permissions-BZvSKL0Y.js";
+import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BtJyJf3R.js";
+import { S as settingsTransitionPipeline, _ as LocalStorage, a as CapturePolicy, d as isModeCaptureAllowed, f as isRestrictedUrl$1, g as tabStates, h as originAuthBaselines, i as registerCaptureListeners, l as reconcilePermissionsOnRemoved, m as initLifecycle, n as clearInFlightCaptures, p as hydrateFromSession, r as inFlightRequests, s as isBroadGrant, t as captureMap, u as reconcilePermissionsOnStartup, v as SessionStorage, y as SettingsService } from "./capture-fPtlzvO-.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
-//#endregion
-//#region src/background/capture-policy.ts
-/**
-* capture-policy.ts
-*
-* Single authoritative fail-closed capture policy across navigation, API,
-* and page-signal paths.
-*/
-var CapturePolicy = {
-	/**
-	* Authoritative fail-closed evaluation of whether capture is permitted for a URL.
-	* Awaits settings hydration and evaluates mode, broad grants, and origin permissions.
-	*/
-	async evaluate(url) {
-		if (url.length === 0 || isRestrictedUrl$1(url)) return {
-			allowed: false,
-			reason: "restricted-url"
-		};
-		const origin = originFromUrl(url);
-		if (origin === null || origin.length === 0) return {
-			allowed: false,
-			reason: "invalid-url"
-		};
-		let settings;
-		try {
-			settings = await SettingsService.getSettings();
-		} catch {
-			return {
-				allowed: false,
-				reason: "settings-error"
-			};
-		}
-		if (settings.monitoringMode === "off") return {
-			allowed: false,
-			reason: "off"
-		};
-		const broadActive = await PermissionsService.isBroadGrantPresent();
-		const gate = isModeCaptureAllowed(url, settings, broadActive);
-		if (!gate.allowed) {
-			if (gate.reason === "off" || gate.reason === "broad-access-conflict" || gate.reason === "restricted-url") return {
-				allowed: false,
-				reason: gate.reason
-			};
-			return { allowed: false };
-		}
-		if (broadActive) return { allowed: true };
-		if (!await PermissionsService.hasPermissionForOrigin(origin)) return {
-			allowed: false,
-			reason: "not-permitted"
-		};
-		return { allowed: true };
-	},
-	/**
-	* Helper returning boolean allowed status.
-	*/
-	async isAllowed(url) {
-		return (await this.evaluate(url)).allowed;
-	}
-};
 //#endregion
 //#region src/background/correlate.ts
 /**
@@ -102,7 +43,7 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 	};
 }
 function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
-	const metadata = setCookieHeaders.map(parseCookieHeaderMetadata);
+	const metadata = setCookieHeaders.slice(0, 100).map(parseCookieHeaderMetadata);
 	const url = (() => {
 		try {
 			return new URL(tabUrl);
@@ -147,7 +88,7 @@ function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
 			reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie",
 			sourceUrl: url.href
 		}];
-	});
+	}).slice(0, 50);
 }
 function cookiePathMatches(requestPath, cookiePath) {
 	if (requestPath === cookiePath) return true;
@@ -188,63 +129,92 @@ function isThirdPartyCookie(pageHostname, cookieDomain) {
 	const normalisedPage = pageHostname.toLowerCase();
 	return normalisedPage !== normalised && !normalisedPage.endsWith(`.${normalised}`);
 }
+var inFlightCorrelations = /* @__PURE__ */ new Map();
+var MAX_IN_FLIGHT_CORRELATIONS = 50;
 /**
 * Fetches all cookies accessible for `tabUrl` from the live cookie store and
 * correlates them with the Set-Cookie headers emitted by the most recent
 * response so we can tell whether each cookie was set by the server (via
 * headers) or by JavaScript.
 *
+* Generation-aware: discards late arrivals if the tab's navigation generation
+* has advanced before or during the live store query.
+*
 * Cookie *values* are intentionally never accessed or stored.
 *
-* @param tabId          - The tab being analysed (unused directly but kept for
-*                         potential future use, e.g. per-tab JS-cookie heuristics).
-* @param tabUrl         - The full URL of the page (used to scope the query).
-* @param setCookieHeaders - Raw `Set-Cookie` header strings from the response.
-* @returns              Array of {@link CookieRecord} metadata objects.
+* @param tabId               - The tab being analysed.
+* @param tabUrl              - The full URL of the page (used to scope the query).
+* @param setCookieHeaders    - Raw `Set-Cookie` header strings from the response.
+* @param generation          - Optional navigation generation counter.
+* @param isCurrentGeneration - Optional callback verifying whether generation is still current.
+* @returns                   Array of {@link CookieRecord} metadata objects and findings.
 */
-async function correlateCookies(_tabId, tabUrl, setCookieHeaders) {
-	const headerMetadata = setCookieHeaders.map(parseCookieHeaderMetadata);
-	const headerSetNames = new Set(headerMetadata.map((item) => item.name));
-	let urlScopedCookies;
-	try {
-		urlScopedCookies = await chrome.cookies.getAll({ url: tabUrl });
-	} catch {
-		return {
-			records: [],
-			findings: []
-		};
-	}
-	let pageHostname;
-	try {
-		pageHostname = new URL(tabUrl).hostname;
-	} catch {
-		pageHostname = "";
-	}
-	return {
-		records: urlScopedCookies.map((cookie) => {
-			const setByJs = headerSetNames.has(cookie.name) ? false : null;
-			const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
-			const headerMatch = matchingHeaders.find((item) => item.path === cookie.path) ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : void 0);
-			const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
-			const partitioned = cookie.partitionKey != null;
-			const expiresAt = cookie.session ? null : Math.round(cookie.expirationDate ?? 0) * 1e3;
-			return {
-				name: cookie.name,
-				domain: cookie.domain,
-				domainAttributePresent: setByJs === null ? null : headerMatch?.domainAttributePresent ?? false,
-				path: cookie.path,
-				secure: cookie.secure,
-				httpOnly: cookie.httpOnly,
-				sameSite: mapSameSite(cookie.sameSite),
-				session: cookie.session,
-				expiresAt,
-				partitioned,
-				setByJs,
-				isThirdParty: thirdParty
-			};
-		}),
-		findings: findUnobservedCookieFindings(setCookieHeaders, urlScopedCookies, tabUrl)
+async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isCurrentGeneration) {
+	if (generation !== void 0 && isCurrentGeneration !== void 0 && !isCurrentGeneration(tabId, generation)) return {
+		records: [],
+		findings: [],
+		discarded: true
 	};
+	const dedupKey = `${tabId}:${tabUrl}:${generation ?? 0}`;
+	const existing = inFlightCorrelations.get(dedupKey);
+	if (existing) return existing;
+	const correlationPromise = (async () => {
+		const boundedSetCookieHeaders = setCookieHeaders.slice(0, 100);
+		const headerMetadata = boundedSetCookieHeaders.map(parseCookieHeaderMetadata);
+		const headerSetNames = new Set(headerMetadata.map((item) => item.name));
+		let urlScopedCookies;
+		try {
+			urlScopedCookies = await chrome.cookies.getAll({ url: tabUrl });
+		} catch {
+			return {
+				records: [],
+				findings: []
+			};
+		}
+		if (generation !== void 0 && isCurrentGeneration !== void 0 && !isCurrentGeneration(tabId, generation)) return {
+			records: [],
+			findings: [],
+			discarded: true
+		};
+		let pageHostname;
+		try {
+			pageHostname = new URL(tabUrl).hostname;
+		} catch {
+			pageHostname = "";
+		}
+		const boundedLiveCookies = urlScopedCookies.slice(0, 100);
+		return {
+			records: boundedLiveCookies.map((cookie) => {
+				const setByJs = headerSetNames.has(cookie.name) ? false : null;
+				const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
+				const headerMatch = matchingHeaders.find((item) => item.path === cookie.path) ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : void 0);
+				const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
+				const partitioned = cookie.partitionKey != null;
+				const expiresAt = cookie.session ? null : Math.round(cookie.expirationDate ?? 0) * 1e3;
+				return {
+					name: cookie.name,
+					domain: cookie.domain,
+					domainAttributePresent: setByJs === null ? null : headerMatch?.domainAttributePresent ?? false,
+					path: cookie.path,
+					secure: cookie.secure,
+					httpOnly: cookie.httpOnly,
+					sameSite: mapSameSite(cookie.sameSite),
+					session: cookie.session,
+					expiresAt,
+					partitioned,
+					setByJs,
+					isThirdParty: thirdParty
+				};
+			}),
+			findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl)
+		};
+	})();
+	if (inFlightCorrelations.size < MAX_IN_FLIGHT_CORRELATIONS) inFlightCorrelations.set(dedupKey, correlationPromise);
+	try {
+		return await correlationPromise;
+	} finally {
+		inFlightCorrelations.delete(dedupKey);
+	}
 }
 //#endregion
 //#region src/content/service-worker-detection.ts
@@ -333,11 +303,26 @@ function reportPageSignals() {
 }
 //#endregion
 //#region src/background/page-signals.ts
-function injectPageSignals(tabId, url) {
+async function injectPageSignals(tabId, url) {
 	if (isRestrictedUrl$1(url)) return;
 	const origin = originFromUrl(url);
 	if (origin === null || origin.length === 0) return;
-	const settings = SettingsService.getCachedSettings();
+	let settings;
+	if (!SettingsService.isReady()) try {
+		settings = await SettingsService.whenReady();
+	} catch {
+		return;
+	}
+	else settings = SettingsService.getCachedSettings();
+	if (typeof chrome !== "undefined" && typeof chrome.tabs !== "undefined" && typeof chrome.tabs.get === "function") try {
+		const tab = await new Promise((resolve) => {
+			chrome.tabs.get(tabId, (t) => {
+				if (chrome.runtime.lastError !== void 0 || t === void 0 || t === null) resolve(null);
+				else resolve(t);
+			});
+		});
+		if (tab?.url !== void 0 && tab.url !== "" && tab.url !== url) return;
+	} catch {}
 	if (settings.monitoringMode === "off") return;
 	if (typeof chrome === "undefined" || typeof chrome.permissions === "undefined") return;
 	const performInjection = (broadGrantPresent) => {
@@ -3358,20 +3343,103 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 * All side-effects are confined to listener callbacks; no top-level async
 * work is performed so the module is safe to import during SW startup.
 */
+var tabGenerations = /* @__PURE__ */ new Map();
+function getTabGeneration(tabId) {
+	return tabGenerations.get(tabId) ?? 0;
+}
+function incrementTabGeneration(tabId) {
+	const next = (tabGenerations.get(tabId) ?? 0) + 1;
+	tabGenerations.set(tabId, next);
+	return next;
+}
+var TabActionQueue = class {
+	queues = /* @__PURE__ */ new Map();
+	enqueue(tabId, generation, action) {
+		const current = this.queues.get(tabId) ?? Promise.resolve();
+		let release;
+		const next = new Promise((resolve) => {
+			release = resolve;
+		});
+		const tail = current.then(() => next, () => next);
+		this.queues.set(tabId, tail);
+		return current.then(async () => {
+			try {
+				if (getTabGeneration(tabId) !== generation) return;
+				return await action();
+			} finally {
+				release();
+				if (this.queues.get(tabId) === tail) this.queues.delete(tabId);
+			}
+		});
+	}
+	clearTab(tabId) {
+		this.queues.delete(tabId);
+	}
+	clearAll() {
+		this.queues.clear();
+	}
+};
+var tabActionQueue = new TabActionQueue();
+var processedEvents = /* @__PURE__ */ new Map();
+var MAX_DEDUP_EVENTS = 150;
+var DEDUP_EVENT_TTL_MS = 6e4;
+function isDuplicateEvent(eventId, now = Date.now()) {
+	const prev = processedEvents.get(eventId);
+	if (prev !== void 0 && now - prev < DEDUP_EVENT_TTL_MS) return true;
+	if (processedEvents.size >= MAX_DEDUP_EVENTS) {
+		for (const [id, ts] of processedEvents.entries()) if (now - ts >= DEDUP_EVENT_TTL_MS) processedEvents.delete(id);
+		if (processedEvents.size >= MAX_DEDUP_EVENTS) {
+			const oldestKey = processedEvents.keys().next().value;
+			if (oldestKey !== void 0) processedEvents.delete(oldestKey);
+		}
+	}
+	processedEvents.set(eventId, now);
+	return false;
+}
+function pruneTransientStructures(now = Date.now()) {
+	for (const [requestId, partial] of captureMap.entries()) if (now - partial.timestamp > 6e4) captureMap.delete(requestId);
+	if (captureMap.size > 100) {
+		const excess = captureMap.size - 100;
+		let count = 0;
+		for (const requestId of captureMap.keys()) {
+			captureMap.delete(requestId);
+			count++;
+			if (count >= excess) break;
+		}
+	}
+	for (const [requestId, req] of inFlightRequests.entries()) if (now - req.timestamp > 6e4) inFlightRequests.delete(requestId);
+	if (inFlightRequests.size > 100) {
+		const excess = inFlightRequests.size - 100;
+		let count = 0;
+		for (const requestId of inFlightRequests.keys()) {
+			inFlightRequests.delete(requestId);
+			count++;
+			if (count >= excess) break;
+		}
+	}
+}
 var portRegistry = new PortRegistry();
+var badgeTrackedTabs = /* @__PURE__ */ new Set();
 var pendingServiceWorkerReports = /* @__PURE__ */ new Map();
 var pendingMetaCspReports = /* @__PURE__ */ new Set();
 var currentSettings = {
 	...DEFAULT_SETTINGS,
 	monitoringMode: "off"
 };
-var settingsReady = SettingsService.whenReady().then((s) => {
+var settingsReady = SettingsService.whenReady().then(async (s) => {
 	currentSettings = s;
+	settingsTransitionPipeline.setLastAppliedSettings(s);
+	await CapturePolicy.refreshSnapshot();
 	return s;
 });
 SettingsService.onSettingsChanged((s) => {
 	currentSettings = s;
 });
+var resolveSessionHydration;
+var sessionHydrationReady = new Promise((resolve) => {
+	resolveSessionHydration = resolve;
+});
+var startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(() => void 0);
 function recomputeTabState(tabId, state) {
 	const result = runRules({
 		hops: state.hops,
@@ -3393,6 +3461,7 @@ function recomputeTabState(tabId, state) {
 	state.scoreVersion = result.scoreVersion;
 	state.subdomainTrust = result.subdomainTrust;
 	state.coverage.blindSpots = computeBlindSpots(state.coverage);
+	state.navigationGeneration = getTabGeneration(tabId);
 	state.updatedAt = Date.now();
 	tabStates.set(tabId, state);
 	SessionStorage.setTabState(state);
@@ -3412,8 +3481,7 @@ function recomputeTabState(tabId, state) {
 				const hostname = new URL(state.origin).hostname;
 				const apex = registrableDomain(hostname) ?? hostname;
 				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-				const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
-				await LocalStorage.saveGraph(updatedGraph);
+				await LocalStorage.mutateGraph(apex, (existingGraph) => mergeIntoGraph(existingGraph, hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro)));
 			} catch {}
 		})();
 	}
@@ -3436,6 +3504,7 @@ function isRestrictedUrl(url) {
 */
 function setBadgeForTab(tabId, grade) {
 	if (!Number.isInteger(tabId) || tabId < 0) return;
+	badgeTrackedTabs.add(tabId);
 	const color = BADGE_COLORS[grade];
 	const text = grade === "?" ? "?" : grade;
 	chrome.action.setBadgeText({
@@ -3447,6 +3516,60 @@ function setBadgeForTab(tabId, grade) {
 		tabId
 	}).catch(() => void 0);
 }
+/**
+* Universal action badge clearing: clears badges across ALL open tabs
+* (including tabs that do not have TabState records, restricted tabs, etc.).
+*/
+async function clearBadgesOnAllTabs() {
+	if (typeof chrome !== "undefined" && typeof chrome.action !== "undefined") try {
+		await chrome.action.setBadgeText({ text: "" });
+	} catch {}
+	if (typeof chrome !== "undefined" && typeof chrome.tabs !== "undefined" && typeof chrome.tabs.query === "function") try {
+		const allTabs = await new Promise((resolve) => {
+			chrome.tabs.query({}, (tabs) => resolve(tabs ?? []));
+		});
+		for (const tab of allTabs) if (tab.id !== void 0 && tab.id >= 0) chrome.action?.setBadgeText?.({
+			tabId: tab.id,
+			text: ""
+		})?.catch?.(() => void 0);
+	} catch {
+		for (const tabId of Array.from(tabStates.keys())) chrome.action?.setBadgeText?.({
+			tabId,
+			text: ""
+		})?.catch?.(() => void 0);
+	}
+	else for (const tabId of Array.from(tabStates.keys())) chrome.action?.setBadgeText?.({
+		tabId,
+		text: ""
+	})?.catch?.(() => void 0);
+}
+settingsTransitionPipeline.registerHooks({
+	onRescoreTabs: (_prev, _next) => {
+		for (const [tabId, state] of Array.from(tabStates.entries())) {
+			recomputeTabState(tabId, state);
+			SessionStorage.setTabState(state).catch(() => void 0);
+			portRegistry.broadcast(tabId, {
+				type: "TAB_STATE_UPDATE",
+				state
+			});
+		}
+	},
+	onModeChange: async (_prevMode, newMode) => {
+		if (newMode === "off") {
+			clearInFlightCaptures();
+			const activeTabIds = Array.from(tabStates.keys());
+			tabStates.clear();
+			pendingServiceWorkerReports.clear();
+			pendingMetaCspReports.clear();
+			await SessionStorage.clearAllTabStates();
+			await clearBadgesOnAllTabs();
+			for (const tabId of activeTabIds) portRegistry.broadcast(tabId, {
+				type: "STATE_RESPONSE",
+				state: null
+			});
+		}
+	}
+});
 function computeBlindSpots(coverage) {
 	const spots = [];
 	if (coverage.isRestricted) spots.push("Restricted URL: browser security policy blocks inspection of internal browser pages.");
@@ -3462,7 +3585,10 @@ function pushLedgerEntry(state, entry) {
 }
 function createDefaultTabState(tabId, url) {
 	const origin = originFromUrl(url) ?? url;
+	const currentGen = getTabGeneration(tabId);
 	const serviceWorkerReport = pendingServiceWorkerReports.get(tabId);
+	const isSwCurrent = serviceWorkerReport !== void 0 && serviceWorkerReport.generation === currentGen;
+	const isMetaCurrent = pendingMetaCspReports.has(tabId);
 	return {
 		tabId,
 		origin,
@@ -3481,11 +3607,11 @@ function createDefaultTabState(tabId, url) {
 			hopsExpected: 1,
 			hopsCaptured: 0,
 			hasCache: false,
-			hasServiceWorker: serviceWorkerReport?.status === "controlled",
-			serviceWorkerStatus: serviceWorkerReport?.status ?? "unknown",
-			serviceWorkerUrl: serviceWorkerReport?.serviceWorkerUrl ?? null,
+			hasServiceWorker: isSwCurrent && serviceWorkerReport?.status === "controlled",
+			serviceWorkerStatus: isSwCurrent ? serviceWorkerReport?.status ?? "unknown" : "unknown",
+			serviceWorkerUrl: isSwCurrent ? serviceWorkerReport?.serviceWorkerUrl ?? null : null,
 			isRestricted: isRestrictedUrl(url),
-			metaCspFound: pendingMetaCspReports.has(tabId),
+			metaCspFound: isMetaCurrent,
 			ledger: [],
 			blindSpots: []
 		},
@@ -3494,72 +3620,85 @@ function createDefaultTabState(tabId, url) {
 			vectors: []
 		},
 		monitoredByUser: false,
-		updatedAt: Date.now()
+		updatedAt: Date.now(),
+		navigationGeneration: currentGen
 	};
 }
 /**
 * Invoked by capture.ts after both WebRequest stages have completed for a
-* given request.  Runs the full analysis pipeline and pushes updates to all
-* connected ports.
+* given request.  Runs the full analysis pipeline through the per-tab ordered
+* reducer queue and pushes updates to all connected ports.
 */
 async function onHopComplete(tabId, hop) {
 	if (!Number.isInteger(tabId) || tabId < 0) return;
-	const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
-	state.url = hop.url;
-	state.origin = originFromUrl(hop.url) ?? hop.url;
-	const captureCheck = await CapturePolicy.evaluate(hop.url);
-	if (!captureCheck.allowed) {
-		if (captureCheck.reason === "off") {
-			chrome.action?.setBadgeText({
-				tabId,
-				text: ""
-			})?.catch?.(() => void 0);
-			return;
-		}
-		if (captureCheck.reason === "broad-access-conflict") {
+	const currentGen = getTabGeneration(tabId);
+	if (hop.generation !== void 0 && hop.generation !== currentGen) return;
+	const gen = hop.generation ?? currentGen;
+	hop.generation = gen;
+	pruneTransientStructures();
+	await tabActionQueue.enqueue(tabId, gen, async () => {
+		await startupReady;
+		if (getTabGeneration(tabId) !== gen) return;
+		const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
+		state.navigationGeneration = gen;
+		state.url = hop.url;
+		state.origin = originFromUrl(hop.url) ?? hop.url;
+		const captureCheck = await CapturePolicy.evaluate(hop.url);
+		if (!captureCheck.allowed) {
+			if (captureCheck.reason === "off") {
+				chrome.action?.setBadgeText({
+					tabId,
+					text: ""
+				})?.catch?.(() => void 0);
+				return;
+			}
+			if (captureCheck.reason === "broad-access-conflict") {
+				setBadgeForTab(tabId, "?");
+				return;
+			}
+			if (captureCheck.reason === "restricted-url") {
+				state.coverage.isRestricted = true;
+				tabStates.set(tabId, state);
+				setBadgeForTab(tabId, "?");
+				return;
+			}
+			state.coverage.isRestricted = false;
 			setBadgeForTab(tabId, "?");
 			return;
 		}
-		if (captureCheck.reason === "restricted-url") {
-			state.coverage.isRestricted = true;
-			tabStates.set(tabId, state);
-			setBadgeForTab(tabId, "?");
-			return;
-		}
-		state.coverage.isRestricted = false;
-		setBadgeForTab(tabId, "?");
-		return;
-	}
-	state.coverage.metaCspFound ||= pendingMetaCspReports.has(tabId);
-	state.monitoredByUser = true;
-	state.hops = [...state.hops, hop].sort((left, right) => left.timestamp - right.timestamp);
-	const minExpectedHops = hop.status >= 300 && hop.status < 400 ? state.hops.length + 1 : state.hops.length;
-	state.coverage.hopsExpected = Math.max(state.coverage.hopsExpected, minExpectedHops);
-	state.coverage.hopsCaptured = state.hops.length;
-	state.coverage.hasCache = state.coverage.hasCache || hop.fromCache;
-	const ledgerSource = hop.fromCache ? "cache" : hop.isHstsUpgrade ? "hsts-upgrade" : "network";
-	pushLedgerEntry(state, {
-		type: hop.isHstsUpgrade ? "redirect" : "navigation",
-		url: hop.url,
-		source: ledgerSource,
-		status: hop.status,
-		timestamp: hop.timestamp,
-		notes: hop.headersDiffer ? "Headers modified by extension" : void 0
+		if (pendingMetaCspReports.has(tabId)) state.coverage.metaCspFound = true;
+		state.monitoredByUser = true;
+		state.hops = [...state.hops, hop].sort((left, right) => left.timestamp - right.timestamp);
+		const minExpectedHops = hop.status >= 300 && hop.status < 400 ? state.hops.length + 1 : state.hops.length;
+		state.coverage.hopsExpected = Math.max(state.coverage.hopsExpected, minExpectedHops);
+		state.coverage.hopsCaptured = state.hops.length;
+		state.coverage.hasCache = state.coverage.hasCache || hop.fromCache;
+		const ledgerSource = hop.fromCache ? "cache" : hop.isHstsUpgrade ? "hsts-upgrade" : "network";
+		pushLedgerEntry(state, {
+			type: hop.isHstsUpgrade ? "redirect" : "navigation",
+			url: hop.url,
+			source: ledgerSource,
+			status: hop.status,
+			timestamp: hop.timestamp,
+			notes: hop.headersDiffer ? "Headers modified by extension" : void 0
+		});
+		const setCookieValues = extractSetCookieHeaders(hop.rawHeaders);
+		const correlation = await correlateCookies(tabId, hop.url, setCookieValues, gen, (t, g) => getTabGeneration(t) === g);
+		if (correlation.discarded === true) return;
+		state.cookies = correlation.records;
+		state.captureFindings = [...new Map([...state.captureFindings ?? [], ...correlation.findings].map((finding) => [`${finding.ruleId}:${finding.sourceUrl ?? ""}:${finding.evidence}`, finding])).values()];
+		recomputeTabState(tabId, state);
 	});
-	const setCookieValues = extractSetCookieHeaders(hop.rawHeaders);
-	const correlation = await correlateCookies(tabId, hop.url, setCookieValues);
-	state.cookies = correlation.records;
-	state.captureFindings = [...new Map([...state.captureFindings ?? [], ...correlation.findings].map((finding) => [`${finding.ruleId}:${finding.sourceUrl ?? ""}:${finding.evidence}`, finding])).values()];
-	recomputeTabState(tabId, state);
 }
 /**
 * Clears stale analysis state when the user navigates away from a page.
-* Runs before the network request for the new page fires so there is no
-* flash of old data.
+* Increments per-tab navigation generation counter and invalidates pending tasks.
 */
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 	if (details.frameId !== 0) return;
 	const { tabId } = details;
+	incrementTabGeneration(tabId);
+	tabActionQueue.clearTab(tabId);
 	pendingServiceWorkerReports.delete(tabId);
 	pendingMetaCspReports.delete(tabId);
 	tabStates.delete(tabId);
@@ -3572,7 +3711,7 @@ chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() =>
 /**
 * Handles live cookie mutations (including JS-set cookies).
 * Re-correlates and re-scores every tab whose origin matches the affected
-* cookie domain.
+* cookie domain using the per-tab ordered action queue.
 */
 chrome.cookies.onChanged.addListener((changeInfo) => {
 	if (changeInfo.removed) return;
@@ -3585,18 +3724,26 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
 				return "";
 			}
 		})().endsWith(affectedDomain)) continue;
-		(async () => {
+		const gen = getTabGeneration(tabId);
+		tabActionQueue.enqueue(tabId, gen, async () => {
 			try {
-				const correlation = await correlateCookies(tabId, state.url, []);
+				const correlation = await correlateCookies(tabId, state.url, [], gen, (t, g) => getTabGeneration(t) === g);
+				if (correlation.discarded === true) return;
 				state.cookies = correlation.records;
 				recomputeTabState(tabId, state);
 			} catch {}
-		})();
+		});
 	}
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
+	tabGenerations.delete(tabId);
+	tabActionQueue.clearTab(tabId);
 	tabStates.delete(tabId);
+	pendingServiceWorkerReports.delete(tabId);
 	pendingMetaCspReports.delete(tabId);
+	portRegistry.unregisterTab(tabId);
+	badgeTrackedTabs.delete(tabId);
+	for (const [requestId, partial] of captureMap.entries()) if (partial.tabId === tabId) captureMap.delete(requestId);
 	SessionStorage.removeTabState(tabId).catch(() => void 0);
 });
 chrome.runtime.onConnect.addListener((port) => {
@@ -3606,10 +3753,12 @@ chrome.runtime.onConnect.addListener((port) => {
 	const senderTabId = port.sender?.tab?.id;
 	if (senderTabId !== void 0) {
 		portRegistry.register(port, senderTabId);
-		const current = currentSettings.monitoringMode !== "off" ? tabStates.get(senderTabId) : void 0;
-		if (current) portSend(port, {
-			type: "STATE_RESPONSE",
-			state: current
+		startupReady.then(() => {
+			const current = currentSettings.monitoringMode !== "off" ? tabStates.get(senderTabId) : void 0;
+			if (current) portSend(port, {
+				type: "STATE_RESPONSE",
+				state: current
+			});
 		});
 	}
 	port.onMessage.addListener((msg) => {
@@ -3617,21 +3766,25 @@ chrome.runtime.onConnect.addListener((port) => {
 			const resolvedTabId = msg.tabId ?? senderTabId;
 			if (resolvedTabId === void 0) return;
 			portRegistry.register(port, resolvedTabId);
-			const response = {
-				type: "STATE_RESPONSE",
-				state: currentSettings.monitoringMode !== "off" ? tabStates.get(resolvedTabId) ?? null : null
-			};
-			portSend(port, response);
+			startupReady.then(() => {
+				const response = {
+					type: "STATE_RESPONSE",
+					state: currentSettings.monitoringMode !== "off" ? tabStates.get(resolvedTabId) ?? null : null
+				};
+				portSend(port, response);
+			});
 		}
 	});
 });
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message.type === "REQUEST_STATE") {
-		sendResponse({
-			type: "STATE_RESPONSE",
-			state: message.tabId !== void 0 && currentSettings.monitoringMode !== "off" ? tabStates.get(message.tabId) ?? null : null
+		startupReady.then(() => {
+			sendResponse({
+				type: "STATE_RESPONSE",
+				state: message.tabId !== void 0 && currentSettings.monitoringMode !== "off" ? tabStates.get(message.tabId) ?? null : null
+			});
 		});
-		return false;
+		return true;
 	}
 	if (message.type === "PERMISSIONS_CHANGED") {
 		(async () => {
@@ -3649,6 +3802,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					},
 					broadcast: (t, msg) => portRegistry.broadcast(t, msg)
 				});
+				await CapturePolicy.refreshSnapshot();
 				const settingsMsg = {
 					type: "SETTINGS_CHANGED",
 					settings: await LocalStorage.getSettings()
@@ -3660,39 +3814,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	}
 	if (message.type === "SETTINGS_CHANGED") {
 		(async () => {
-			const previousSettings = currentSettings;
-			currentSettings = message.settings;
-			if (message.settings.monitoringMode === "off") {
-				clearInFlightCaptures();
-				const activeTabIds = Array.from(tabStates.keys());
-				tabStates.clear();
-				pendingServiceWorkerReports.clear();
-				pendingMetaCspReports.clear();
-				await SessionStorage.clearAllTabStates();
-				for (const tabId of activeTabIds) chrome.action?.setBadgeText?.({
-					tabId,
-					text: ""
-				})?.catch?.(() => void 0);
-				for (const tabId of activeTabIds) portRegistry.broadcast(tabId, {
-					type: "STATE_RESPONSE",
-					state: null
-				});
-			} else {
-				const prevSens = previousSettings.sensitiveCookieNames ?? previousSettings.alwaysSensitiveCookies ?? [];
-				const newSens = message.settings.sensitiveCookieNames ?? message.settings.alwaysSensitiveCookies ?? [];
-				const prevIgn = previousSettings.ignoredCookieNames ?? previousSettings.alwaysIgnoreCookies ?? [];
-				const newIgn = message.settings.ignoredCookieNames ?? message.settings.alwaysIgnoreCookies ?? [];
-				const sensitiveChanged = prevSens.length !== newSens.length || prevSens.some((v, i) => v !== newSens[i]);
-				const ignoredChanged = prevIgn.length !== newIgn.length || prevIgn.some((v, i) => v !== newIgn[i]);
-				if (sensitiveChanged || ignoredChanged) for (const [tabId, state] of Array.from(tabStates.entries())) {
-					recomputeTabState(tabId, state);
-					SessionStorage.setTabState(state).catch(() => void 0);
-					portRegistry.broadcast(tabId, {
-						type: "TAB_STATE_UPDATE",
-						state
-					});
-				}
-			}
+			try {
+				await settingsTransitionPipeline.transition(message.settings, "message");
+			} catch {}
 			portRegistry.broadcastAll(message);
 		})();
 		sendResponse(message);
@@ -3701,86 +3825,114 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message.type === "SERVICE_WORKER_STATUS") {
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
+			const currentGen = getTabGeneration(senderTabId);
+			if (message.generation !== void 0 && message.generation !== currentGen) return false;
+			const gen = message.generation ?? currentGen;
+			if (isDuplicateEvent(message.eventId ?? `sw:${senderTabId}:${gen}:${message.status}:${message.serviceWorkerUrl ?? ""}`)) return false;
 			const report = {
 				status: message.status,
-				serviceWorkerUrl: message.serviceWorkerUrl
+				serviceWorkerUrl: message.serviceWorkerUrl,
+				generation: gen
 			};
 			pendingServiceWorkerReports.set(senderTabId, report);
-			const state = tabStates.get(senderTabId);
-			if (state) {
-				state.coverage.serviceWorkerStatus = report.status;
-				state.coverage.serviceWorkerUrl = report.serviceWorkerUrl;
-				state.coverage.hasServiceWorker = report.status === "controlled";
-				if (report.status === "controlled") pushLedgerEntry(state, {
-					type: "service-worker",
-					url: report.serviceWorkerUrl ?? state.url,
-					source: "service-worker",
-					timestamp: Date.now(),
-					notes: "Page is controlled by active service worker"
-				});
-				recomputeTabState(senderTabId, state);
-			}
+			tabActionQueue.enqueue(senderTabId, gen, async () => {
+				await startupReady;
+				if (getTabGeneration(senderTabId) !== gen) return;
+				const state = tabStates.get(senderTabId);
+				if (state) {
+					state.coverage.serviceWorkerStatus = report.status;
+					state.coverage.serviceWorkerUrl = report.serviceWorkerUrl;
+					state.coverage.hasServiceWorker = report.status === "controlled";
+					if (report.status === "controlled") pushLedgerEntry(state, {
+						type: "service-worker",
+						url: report.serviceWorkerUrl ?? state.url,
+						source: "service-worker",
+						timestamp: Date.now(),
+						notes: "Page is controlled by active service worker"
+					});
+					recomputeTabState(senderTabId, state);
+				}
+			});
 		}
 		return false;
 	}
 	if (message.type === "META_CSP_FOUND") {
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
+			const currentGen = getTabGeneration(senderTabId);
+			if (message.generation !== void 0 && message.generation !== currentGen) return false;
+			const gen = message.generation ?? currentGen;
+			const policiesStr = (message.policies ?? []).join(";");
+			if (isDuplicateEvent(message.eventId ?? `meta-csp:${senderTabId}:${gen}:${policiesStr}`)) return false;
 			pendingMetaCspReports.add(senderTabId);
-			const state = tabStates.get(senderTabId);
-			if (state) {
-				state.coverage.metaCspFound = true;
-				if (message.policies !== void 0 && message.policies.length > 0) {
-					state.coverage.metaCspPolicies = message.policies.slice(0, 5).map((p) => p.slice(0, 2048));
-					pushLedgerEntry(state, {
-						type: "subresource",
-						url: state.url,
-						source: "dom",
-						timestamp: Date.now(),
-						notes: `${message.policies.length} <meta> CSP tag(s) detected in DOM`
-					});
-					if (!(state.hops.at(-1)?.headers["content-security-policy"] !== void 0)) {
-						if (!(state.captureFindings ?? []).some((f) => f.ruleId === "CSP-META-001")) (state.captureFindings ?? (state.captureFindings = [])).push({
-							ruleId: "CSP-META-001",
-							category: "header",
-							severity: "info",
-							title: "CSP delivered via <meta> tag, not HTTP header",
-							impact: "Meta-tag CSP cannot restrict navigation, workers, or plugin content. HTTP header CSP provides broader enforcement.",
-							evidence: `${message.policies.length} meta-CSP policy/policies found`,
-							recommendation: "Prefer Content-Security-Policy HTTP response header; keep the meta tag as a fallback only.",
-							reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#meta"
+			tabActionQueue.enqueue(senderTabId, gen, async () => {
+				await startupReady;
+				if (getTabGeneration(senderTabId) !== gen) return;
+				const state = tabStates.get(senderTabId);
+				if (state) {
+					state.coverage.metaCspFound = true;
+					if (message.policies !== void 0 && message.policies.length > 0) {
+						state.coverage.metaCspPolicies = message.policies.slice(0, 5).map((p) => p.slice(0, 2048));
+						pushLedgerEntry(state, {
+							type: "subresource",
+							url: state.url,
+							source: "dom",
+							timestamp: Date.now(),
+							notes: `${message.policies.length} <meta> CSP tag(s) detected in DOM`
 						});
+						if (!(state.hops.at(-1)?.headers["content-security-policy"] !== void 0)) {
+							if (!(state.captureFindings ?? []).some((f) => f.ruleId === "CSP-META-001")) (state.captureFindings ?? (state.captureFindings = [])).push({
+								ruleId: "CSP-META-001",
+								category: "header",
+								severity: "info",
+								title: "CSP delivered via <meta> tag, not HTTP header",
+								impact: "Meta-tag CSP cannot restrict navigation, workers, or plugin content. HTTP header CSP provides broader enforcement.",
+								evidence: `${message.policies.length} meta-CSP policy/policies found`,
+								recommendation: "Prefer Content-Security-Policy HTTP response header; keep the meta tag as a fallback only.",
+								reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#meta"
+							});
+						}
 					}
+					recomputeTabState(senderTabId, state);
 				}
-				recomputeTabState(senderTabId, state);
-			}
+			});
 		}
 		return false;
 	}
 	if (message.type === "SRI_SCAN") {
 		const senderTabId = _sender.tab?.id;
-		const state = senderTabId === void 0 ? void 0 : tabStates.get(senderTabId);
-		if (senderTabId !== void 0 && state) {
-			state.captureFindings = (state.captureFindings ?? []).filter((finding) => finding.ruleId !== "SRI-001");
+		if (senderTabId !== void 0) {
+			const currentGen = getTabGeneration(senderTabId);
+			if (message.generation !== void 0 && message.generation !== currentGen) return false;
+			const gen = message.generation ?? currentGen;
 			const missingScripts = message.missingIntegrity ?? 0;
 			const missingStyles = message.missingStyleIntegrity ?? 0;
 			const totalMissing = missingScripts + missingStyles;
-			if (totalMissing > 0) {
-				const parts = [];
-				if (missingScripts > 0) parts.push(`${missingScripts}/${message.externalScripts ?? 0} script(s)`);
-				if (missingStyles > 0) parts.push(`${missingStyles}/${message.externalStylesheets ?? 0} stylesheet(s)`);
-				state.captureFindings.push({
-					ruleId: "SRI-001",
-					category: "header",
-					severity: "medium",
-					title: `${totalMissing} external resource(s) lack Subresource Integrity`,
-					impact: "A compromised or modified third-party script or stylesheet may run with the privileges of this page.",
-					evidence: `Missing integrity attribute on: ${parts.join(", ")}`,
-					recommendation: "Add integrity hashes and crossorigin=\"anonymous\" to external scripts and stylesheets, or self-host resources whose content you control.",
-					reference: "https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity"
-				});
-			}
-			recomputeTabState(senderTabId, state);
+			if (isDuplicateEvent(message.eventId ?? `sri:${senderTabId}:${gen}:${missingScripts}:${missingStyles}:${message.externalScripts ?? 0}:${message.externalStylesheets ?? 0}`)) return false;
+			tabActionQueue.enqueue(senderTabId, gen, async () => {
+				await startupReady;
+				if (getTabGeneration(senderTabId) !== gen) return;
+				const state = tabStates.get(senderTabId);
+				if (state) {
+					state.captureFindings = (state.captureFindings ?? []).filter((finding) => finding.ruleId !== "SRI-001");
+					if (totalMissing > 0) {
+						const parts = [];
+						if (missingScripts > 0) parts.push(`${missingScripts}/${message.externalScripts ?? 0} script(s)`);
+						if (missingStyles > 0) parts.push(`${missingStyles}/${message.externalStylesheets ?? 0} stylesheet(s)`);
+						state.captureFindings.push({
+							ruleId: "SRI-001",
+							category: "header",
+							severity: "medium",
+							title: `${totalMissing} external resource(s) lack Subresource Integrity`,
+							impact: "A compromised or modified third-party script or stylesheet may run with the privileges of this page.",
+							evidence: `Missing integrity attribute on: ${parts.join(", ")}`,
+							recommendation: "Add integrity hashes and crossorigin=\"anonymous\" to external scripts and stylesheets, or self-host resources whose content you control.",
+							reference: "https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity"
+						});
+					}
+					recomputeTabState(senderTabId, state);
+				}
+			});
 		}
 		return false;
 	}
@@ -3871,10 +4023,20 @@ initLifecycle();
 registerCaptureListeners((tabId, hop) => {
 	onHopComplete(tabId, hop);
 }, (apiHop) => {
-	const state = tabStates.get(apiHop.tabId);
-	if (!state) return;
-	(async () => {
+	const tabId = apiHop.tabId;
+	if (!Number.isInteger(tabId) || tabId < 0) return;
+	const currentGen = getTabGeneration(tabId);
+	if (apiHop.generation !== void 0 && apiHop.generation !== currentGen) return;
+	const gen = apiHop.generation ?? currentGen;
+	apiHop.generation = gen;
+	pruneTransientStructures();
+	tabActionQueue.enqueue(tabId, gen, async () => {
+		await startupReady;
+		if (getTabGeneration(tabId) !== gen) return;
+		const state = tabStates.get(tabId);
+		if (!state) return;
 		if (!await CapturePolicy.isAllowed(apiHop.url)) return;
+		if (getTabGeneration(tabId) !== gen) return;
 		const targetOrigin = originFromUrl(apiHop.url);
 		const isFirstParty = state.origin === targetOrigin;
 		apiHop.isThirdParty = !isFirstParty;
@@ -3903,21 +4065,21 @@ registerCaptureListeners((tabId, hop) => {
 			notes: `${apiHop.method} ${apiHop.isThirdParty === true ? "(third-party)" : "(first-party)"}`
 		});
 		state.updatedAt = Date.now();
+		state.navigationGeneration = gen;
 		SessionStorage.setTabState(state);
 		(async () => {
 			try {
 				const hostname = new URL(state.origin).hostname;
 				const apex = registrableDomain(hostname) ?? hostname;
 				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-				const updatedGraph = mergeIntoGraph(await LocalStorage.getGraph(apex), hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro));
-				await LocalStorage.saveGraph(updatedGraph);
+				await LocalStorage.mutateGraph(apex, (existingGraph) => mergeIntoGraph(existingGraph, hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro)));
 			} catch {}
 		})();
 		portRegistry.broadcast(apiHop.tabId, {
 			type: "TAB_STATE_UPDATE",
 			state
 		});
-	})();
+	});
 });
 hydrateFromSession().then(async () => {
 	await reconcilePermissionsOnStartup({
@@ -3933,6 +4095,8 @@ hydrateFromSession().then(async () => {
 		},
 		broadcast: (t, msg) => portRegistry.broadcast(t, msg)
 	});
+}).finally(() => {
+	resolveSessionHydration();
 });
 if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" && typeof chrome.permissions.onRemoved !== "undefined") chrome.permissions.onRemoved.addListener((removed) => {
 	const origins = removed.origins ?? [];
@@ -3951,6 +4115,6 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 	});
 });
 //#endregion
-export { settingsReady };
+export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-BL-cs0ra.js.map
+//# sourceMappingURL=index.ts-1P3gT2Ez.js.map

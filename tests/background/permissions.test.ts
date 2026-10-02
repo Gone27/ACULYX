@@ -1,13 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   isBroadGrant,
+  hasAllSitesCoverage,
   normalizePermissionOrigin,
+  patternFromOrigin,
   isOriginPermitted,
   clearTabCapture,
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
   PermissionsService,
 } from '../../src/background/permissions';
+import { CapturePolicy } from '../../src/background/capture-policy';
+import { SettingsService } from '../../src/shared/settings';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 import type { TabState } from '../../src/shared/types';
 
 describe('Permissions Representation and Helpers', () => {
@@ -31,10 +36,22 @@ describe('Permissions Representation and Helpers', () => {
     expect(normalizePermissionOrigin('')).toBe('');
   });
 
-  it('determines whether an origin is permitted by granted patterns', () => {
-    const patterns = ['https://example.com/*', 'https://api.test/*'];
+  it('generates valid Chrome match patterns without ports via patternFromOrigin', () => {
+    expect(patternFromOrigin('http://127.0.0.1:3464')).toBe('http://127.0.0.1/*');
+    expect(patternFromOrigin('http://127.0.0.1:3464/')).toBe('http://127.0.0.1/*');
+    expect(patternFromOrigin('https://example.com:8443/test')).toBe('https://example.com/*');
+    expect(patternFromOrigin('https://example.com')).toBe('https://example.com/*');
+    expect(patternFromOrigin('<all_urls>')).toBe('<all_urls>');
+    expect(patternFromOrigin('*://*/*')).toBe('*://*/*');
+    expect(patternFromOrigin('')).toBe('');
+  });
+
+  it('determines whether an origin is permitted by granted patterns (including port tolerance)', () => {
+    const patterns = ['https://example.com/*', 'https://api.test/*', 'http://127.0.0.1/*'];
     expect(isOriginPermitted('https://example.com', patterns)).toBe(true);
     expect(isOriginPermitted('https://api.test', patterns)).toBe(true);
+    expect(isOriginPermitted('http://127.0.0.1:3464', patterns)).toBe(true);
+    expect(isOriginPermitted('https://example.com:8443', patterns)).toBe(true);
     expect(isOriginPermitted('https://other.com', patterns)).toBe(false);
     expect(isOriginPermitted('http://example.com', patterns)).toBe(false);
 
@@ -284,6 +301,137 @@ describe('PermissionsService.removeAllBroadGrants', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('WS1 1B: Truthful All-Sites Permission and Fallthrough Elimination', () => {
+  it('hasAllSitesCoverage validates full coverage across schemes and rejects partial grants', () => {
+    // Complete broad patterns
+    expect(hasAllSitesCoverage(['<all_urls>'])).toBe(true);
+    expect(hasAllSitesCoverage(['*://*/*'])).toBe(true);
+    expect(hasAllSitesCoverage(['*://*'])).toBe(true);
+    expect(hasAllSitesCoverage(['https://*/*', 'http://*/*'])).toBe(true);
+    expect(hasAllSitesCoverage(['https://*/', 'http://*/'])).toBe(true);
+
+    // Incomplete one-scheme-only broad patterns
+    expect(hasAllSitesCoverage(['https://*/*'])).toBe(false);
+    expect(hasAllSitesCoverage(['http://*/*'])).toBe(false);
+    expect(hasAllSitesCoverage(['https://*/*', 'https://example.com/*'])).toBe(false);
+
+    // Narrow origin grants only
+    expect(hasAllSitesCoverage(['https://example.com/*', 'https://api.test/*'])).toBe(false);
+    expect(hasAllSitesCoverage([])).toBe(false);
+  });
+
+  it('PermissionsService.hasCompleteBroadGrant queries browser permissions truthfully', async () => {
+    // 1. One-scheme-only grant in browser
+    const oneSchemeChrome = {
+      permissions: {
+        getAll: vi.fn().mockResolvedValue({ origins: ['https://*/*'] }),
+      },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', oneSchemeChrome);
+
+    try {
+      expect(await PermissionsService.hasCompleteBroadGrant()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    // 2. Full broad grant in browser
+    const fullChrome = {
+      permissions: {
+        getAll: vi.fn().mockResolvedValue({ origins: ['<all_urls>'] }),
+      },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', fullChrome);
+
+    try {
+      expect(await PermissionsService.hasCompleteBroadGrant()).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('CapturePolicy.evaluate in All-sites mode eliminates fallthrough to individual origin grants', async () => {
+    const getSettingsSpy = vi.spyOn(SettingsService, 'getSettings').mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      monitoringMode: 'all-sites',
+    });
+
+    // Simulate browser state: broad grant is missing, but origin https://granted.com has an individual grant!
+    const chromeMock = {
+      permissions: {
+        getAll: vi.fn().mockResolvedValue({ origins: ['https://granted.com/*'] }),
+        contains: vi.fn((_opt: { origins: string[] }, cb: (res: boolean) => void) => {
+          cb(true); // Individual grant passes
+        }),
+      },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', chromeMock);
+
+    try {
+      // Synthetic probe on granted origin: must STILL be denied because All-sites broad grant is missing!
+      const grantedSiteResult = await CapturePolicy.evaluate('https://granted.com/app');
+      expect(grantedSiteResult.allowed).toBe(false);
+      expect(grantedSiteResult.reason).toBe('all-sites-missing-grant');
+      expect(grantedSiteResult.monitoringState).toBe('Paused — All-sites permission missing');
+
+      // Synthetic probe on ungranted origin: also denied with identical reason!
+      const ungrantedSiteResult = await CapturePolicy.evaluate('https://ungranted.com/app');
+      expect(ungrantedSiteResult.allowed).toBe(false);
+      expect(ungrantedSiteResult.reason).toBe('all-sites-missing-grant');
+      expect(ungrantedSiteResult.monitoringState).toBe('Paused — All-sites permission missing');
+    } finally {
+      vi.unstubAllGlobals();
+      getSettingsSpy.mockRestore();
+    }
+  });
+
+  it('CapturePolicy.getMonitoringState returns truthful state across all modes and conditions', async () => {
+    const getSettingsSpy = vi.spyOn(SettingsService, 'getSettings');
+
+    // 1. Off mode
+    getSettingsSpy.mockResolvedValueOnce({ ...DEFAULT_SETTINGS, monitoringMode: 'off' });
+    expect(await CapturePolicy.getMonitoringState()).toBe('Off');
+
+    // 2. All-sites mode with missing broad grant
+    getSettingsSpy.mockResolvedValueOnce({ ...DEFAULT_SETTINGS, monitoringMode: 'all-sites' });
+    const missingBroadChrome = {
+      permissions: { getAll: vi.fn().mockResolvedValue({ origins: ['https://example.com/*'] }) },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', missingBroadChrome);
+    expect(await CapturePolicy.getMonitoringState()).toBe('Paused — All-sites permission missing');
+    vi.unstubAllGlobals();
+
+    // 3. All-sites mode with active broad grant
+    getSettingsSpy.mockResolvedValueOnce({ ...DEFAULT_SETTINGS, monitoringMode: 'all-sites' });
+    const activeBroadChrome = {
+      permissions: { getAll: vi.fn().mockResolvedValue({ origins: ['<all_urls>'] }) },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', activeBroadChrome);
+    expect(await CapturePolicy.getMonitoringState()).toBe('Active — All sites');
+    vi.unstubAllGlobals();
+
+    // 4. Per-site mode with broad grant conflict
+    getSettingsSpy.mockResolvedValueOnce({ ...DEFAULT_SETTINGS, monitoringMode: 'per-site' });
+    const conflictChrome = {
+      permissions: { getAll: vi.fn().mockResolvedValue({ origins: ['<all_urls>'] }) },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', conflictChrome);
+    expect(await CapturePolicy.getMonitoringState()).toBe('Paused — Broad access conflict');
+    vi.unstubAllGlobals();
+
+    // 5. Per-site mode without broad grant (normal active per-site)
+    getSettingsSpy.mockResolvedValueOnce({ ...DEFAULT_SETTINGS, monitoringMode: 'per-site' });
+    const normalChrome = {
+      permissions: { getAll: vi.fn().mockResolvedValue({ origins: ['https://example.com/*'] }) },
+    } as unknown as typeof chrome;
+    vi.stubGlobal('chrome', normalChrome);
+    expect(await CapturePolicy.getMonitoringState()).toBe('Active — Per-site');
+    vi.unstubAllGlobals();
+
+    getSettingsSpy.mockRestore();
   });
 });
 

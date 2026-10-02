@@ -843,6 +843,10 @@ var PortRegistry = class {
 			this.ports.delete(k);
 		});
 	}
+	/** Remove registered ports for a closed or navigated tab. */
+	unregisterTab(tabId) {
+		for (const portName of [POPUP_PORT_NAME, SIDEPANEL_PORT_NAME]) this.ports.delete(this.key(portName, tabId));
+	}
 	/** Send a message to every open port for a given tab. */
 	broadcast(tabId, msg) {
 		for (const portName of [POPUP_PORT_NAME, SIDEPANEL_PORT_NAME]) {
@@ -879,4 +883,4 @@ function sendToBackground(msg) {
 //#endregion
 export { RESTRICTED_SCHEMES as C, STORAGE_KEYS as D, SIDEPANEL_PORT_NAME as E, POPUP_PORT_NAME as S, SEVERITY_ORDER as T, sanitizeEvidence as _, registrableDomain as a, GRADE_THRESHOLDS as b, hasCspBypassProtection as c, normalizeHeaders as d, originFromUrl as f, redactUrlQueryParams as g, redactUrlPath as h, checkSubdomainTrust as i, headersDiffer as l, redactHeaderValue as m, portSend as n, checkDuplicateHeaders as o, parseCspDirectives as p, sendToBackground as r, extractSetCookieHeaders as s, PortRegistry as t, isSensitiveCookie as u, BADGE_COLORS as v, SCORE_VERSION as w, MAINTENANCE_ALARM as x, DEFAULT_SETTINGS as y };
 
-//# sourceMappingURL=messaging-cpmoITPm.js.map
+//# sourceMappingURL=messaging-BtJyJf3R.js.map

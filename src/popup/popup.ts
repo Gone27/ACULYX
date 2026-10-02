@@ -27,7 +27,7 @@ import { sendToBackground } from '../shared/messaging';
 import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
 import { LocalStorage } from '../shared/storage';
 import { SettingsService } from '../shared/settings';
-import { PermissionsService } from '../background/permissions';
+import { PermissionsService, patternFromOrigin } from '../background/permissions';
 import { isModeCaptureAllowed } from '../shared/gating';
 import { selectVisibleFindings } from '../shared/filters';
 
@@ -918,15 +918,16 @@ function wireStopMonitoringButton(): void {
   stopMonitoringBtn.addEventListener('click', () => {
     if (!currentOrigin) return;
 
+    const pattern = patternFromOrigin(currentOrigin);
     chrome.permissions.remove(
-      { origins: [`${currentOrigin}/*`] },
+      { origins: [pattern] },
       (removed) => {
         if (removed) {
           // Notify SW so it can flush state and reset badge
           void sendToBackground({
             type: 'PERMISSIONS_CHANGED',
             granted: false,
-            origins: [`${currentOrigin}/*`],
+            origins: [pattern],
           }).catch(() => undefined);
 
           // Return to un-monitored UI
@@ -1291,8 +1292,9 @@ function wireMonitorButton(): void {
   monitorBtn.addEventListener('click', () => {
     if (!currentOrigin) return;
 
+    const pattern = patternFromOrigin(currentOrigin);
     chrome.permissions.request(
-      { origins: [`${currentOrigin}/*`] },
+      { origins: [pattern] },
       (granted) => {
         if (granted) {
           monitorSection.hidden = true;
@@ -1302,7 +1304,7 @@ function wireMonitorButton(): void {
             void sendToBackground({
               type: 'PERMISSIONS_CHANGED',
               granted: true,
-              origins: [`${currentOrigin}/*`],
+              origins: [pattern],
             }).catch(() => undefined);
 
             openLivePort();
@@ -1372,8 +1374,20 @@ function showBroadAccessConflictNotice(): void {
 }
 
 function checkPermission(origin: string): Promise<boolean> {
+  const pattern = patternFromOrigin(origin);
   return new Promise((resolve) => {
-    chrome.permissions.contains({ origins: [`${origin}/*`] }, resolve);
+    chrome.permissions.contains({ origins: [pattern] }, (result) => {
+      if (result) {
+        resolve(true);
+        return;
+      }
+      const direct = `${origin}/*`;
+      if (direct !== pattern) {
+        chrome.permissions.contains({ origins: [direct] }, resolve);
+      } else {
+        resolve(false);
+      }
+    });
   });
 }
 

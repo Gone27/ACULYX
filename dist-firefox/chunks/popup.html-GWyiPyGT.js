@@ -1,5 +1,5 @@
-import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-cpmoITPm.js";
-import { c as isModeCaptureAllowed, g as SettingsService, m as LocalStorage, t as PermissionsService } from "./permissions-BZvSKL0Y.js";
+import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
+import { _ as LocalStorage, c as patternFromOrigin, d as isModeCaptureAllowed, o as PermissionsService, y as SettingsService } from "./capture-fPtlzvO-.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/shared/filters.ts
 /**
@@ -686,12 +686,13 @@ function renderApiEndpoints(state) {
 function wireStopMonitoringButton() {
 	stopMonitoringBtn.addEventListener("click", () => {
 		if (!currentOrigin) return;
-		chrome.permissions.remove({ origins: [`${currentOrigin}/*`] }, (removed) => {
+		const pattern = patternFromOrigin(currentOrigin);
+		chrome.permissions.remove({ origins: [pattern] }, (removed) => {
 			if (removed) {
 				sendToBackground({
 					type: "PERMISSIONS_CHANGED",
 					granted: false,
-					origins: [`${currentOrigin}/*`]
+					origins: [pattern]
 				}).catch(() => void 0);
 				stopMonitoringBtn.hidden = true;
 				exportBtn.hidden = true;
@@ -947,7 +948,8 @@ function wireSettingsLink() {
 function wireMonitorButton() {
 	monitorBtn.addEventListener("click", () => {
 		if (!currentOrigin) return;
-		chrome.permissions.request({ origins: [`${currentOrigin}/*`] }, (granted) => {
+		const pattern = patternFromOrigin(currentOrigin);
+		chrome.permissions.request({ origins: [pattern] }, (granted) => {
 			if (granted) {
 				monitorSection.hidden = true;
 				showStateMessage("Permission granted. Refreshing this page to begin monitoring…", "waiting");
@@ -955,7 +957,7 @@ function wireMonitorButton() {
 					sendToBackground({
 						type: "PERMISSIONS_CHANGED",
 						granted: true,
-						origins: [`${currentOrigin}/*`]
+						origins: [pattern]
 					}).catch(() => void 0);
 					openLivePort();
 					chrome.tabs.reload(currentTabId, {}, () => {
@@ -1007,8 +1009,17 @@ function showBroadAccessConflictNotice() {
 	showStateMessage("Capture paused due to broad access conflict.", "waiting");
 }
 function checkPermission(origin) {
+	const pattern = patternFromOrigin(origin);
 	return new Promise((resolve) => {
-		chrome.permissions.contains({ origins: [`${origin}/*`] }, resolve);
+		chrome.permissions.contains({ origins: [pattern] }, (result) => {
+			if (result) {
+				resolve(true);
+				return;
+			}
+			const direct = `${origin}/*`;
+			if (direct !== pattern) chrome.permissions.contains({ origins: [direct] }, resolve);
+			else resolve(false);
+		});
 	});
 }
 function formatSourceHost(sourceUrl) {
@@ -1026,4 +1037,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-DQGQnjvm.js.map
+//# sourceMappingURL=popup.html-GWyiPyGT.js.map

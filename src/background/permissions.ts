@@ -38,6 +38,40 @@ export function isBroadGrant(pattern: string): boolean {
 }
 
 /**
+ * Checks whether a collection of permission patterns satisfies complete "All-sites" coverage
+ * across all supported web schemes (http://* and https://*, or <all_urls> / *://*).
+ */
+export function hasAllSitesCoverage(patterns: readonly string[]): boolean {
+  if (patterns.length === 0) return false;
+  let hasHttp = false;
+  let hasHttps = false;
+
+  for (const raw of patterns) {
+    if (!raw) continue;
+    const trimmed = raw.trim();
+    if (trimmed === '<all_urls>' || trimmed === '*://*/*' || trimmed === '*://*') {
+      return true;
+    }
+    if (
+      trimmed === 'http://*/*' ||
+      trimmed === 'http://*' ||
+      trimmed === 'http://*/'
+    ) {
+      hasHttp = true;
+    }
+    if (
+      trimmed === 'https://*/*' ||
+      trimmed === 'https://*' ||
+      trimmed === 'https://*/'
+    ) {
+      hasHttps = true;
+    }
+  }
+
+  return hasHttp && hasHttps;
+}
+
+/**
  * Normalizes a Chrome permission origin pattern into an origin string (scheme + host[:port]).
  * E.g., "https://example.com/*" -> "https://example.com"
  */
@@ -56,16 +90,44 @@ export function normalizePermissionOrigin(pattern: string): string {
 }
 
 /**
+ * Generates a valid Chrome match pattern from an origin or URL string.
+ * Chrome match patterns cannot specify ports.
+ * E.g., "http://127.0.0.1:3464" -> "http://127.0.0.1/*"
+ *       "https://example.com" -> "https://example.com/*"
+ */
+export function patternFromOrigin(originOrUrl: string): string {
+  if (!originOrUrl) return '';
+  const trimmed = originOrUrl.trim();
+  if (isBroadGrant(trimmed)) return trimmed;
+
+  try {
+    const u = new URL(trimmed.endsWith('/') ? trimmed : `${trimmed}/`);
+    return `${u.protocol}//${u.hostname}/*`;
+  } catch {
+    const cleaned = trimmed.replace(/\/\*.*$/, '').replace(/\/+$/, '');
+    return `${cleaned}/*`;
+  }
+}
+
+/**
  * Checks whether an origin is permitted by a list of permission patterns.
  */
 export function isOriginPermitted(origin: string, grantedPatterns: readonly string[]): boolean {
   if (!origin) return false;
   const normOrigin = normalizePermissionOrigin(origin);
+  let withoutPort = '';
+  try {
+    const u = new URL(origin.endsWith('/') ? origin : `${origin}/`);
+    withoutPort = `${u.protocol}//${u.hostname}`;
+  } catch {
+    // ignore invalid URL
+  }
 
   for (const pattern of grantedPatterns) {
     if (isBroadGrant(pattern)) return true;
     const normPattern = normalizePermissionOrigin(pattern);
     if (normPattern === normOrigin) return true;
+    if (withoutPort.length > 0 && normPattern === withoutPort) return true;
   }
   return false;
 }
@@ -89,6 +151,23 @@ export const PermissionsService = {
     const perms = await chrome.permissions.getAll();
     const origins = perms.origins ?? [];
     return origins.some((o) => isBroadGrant(o));
+  },
+
+  /**
+   * Authoritative query: returns true if the granted permissions satisfy complete
+   * All-sites coverage across all supported web schemes.
+   */
+  async hasCompleteBroadGrant(): Promise<boolean> {
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.permissions === 'undefined' ||
+      typeof chrome.permissions.getAll === 'undefined'
+    ) {
+      return false;
+    }
+    const perms = await chrome.permissions.getAll();
+    const origins = perms.origins ?? [];
+    return hasAllSitesCoverage(origins);
   },
 
   /**
@@ -126,10 +205,31 @@ export const PermissionsService = {
     if (!origin || typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') {
       return false;
     }
-    const pattern = `${normalizePermissionOrigin(origin)}/*`;
-    return new Promise<boolean>((resolve) => {
-      chrome.permissions.contains({ origins: [pattern] }, resolve);
+    const pattern = patternFromOrigin(origin);
+    const directCheck = await new Promise<boolean>((resolve) => {
+      chrome.permissions.contains({ origins: [pattern] }, (result) => {
+        if (chrome.runtime?.lastError) {
+          resolve(false);
+        } else {
+          resolve(Boolean(result));
+        }
+      });
     });
+    if (directCheck) return true;
+
+    const norm = normalizePermissionOrigin(origin);
+    if (`${norm}/*` !== pattern) {
+      return new Promise<boolean>((resolve) => {
+        chrome.permissions.contains({ origins: [`${norm}/*`] }, (result) => {
+          if (chrome.runtime?.lastError) {
+            resolve(false);
+          } else {
+            resolve(Boolean(result));
+          }
+        });
+      });
+    }
+    return false;
   },
 
   /**
@@ -139,10 +239,31 @@ export const PermissionsService = {
     if (!origin || typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') {
       return false;
     }
-    const pattern = `${normalizePermissionOrigin(origin)}/*`;
-    return new Promise<boolean>((resolve) => {
-      chrome.permissions.remove({ origins: [pattern] }, resolve);
+    const pattern = patternFromOrigin(origin);
+    const directRemoved = await new Promise<boolean>((resolve) => {
+      chrome.permissions.remove({ origins: [pattern] }, (result) => {
+        if (chrome.runtime?.lastError) {
+          resolve(false);
+        } else {
+          resolve(Boolean(result));
+        }
+      });
     });
+    if (directRemoved) return true;
+
+    const norm = normalizePermissionOrigin(origin);
+    if (`${norm}/*` !== pattern) {
+      return new Promise<boolean>((resolve) => {
+        chrome.permissions.remove({ origins: [`${norm}/*`] }, (result) => {
+          if (chrome.runtime?.lastError) {
+            resolve(false);
+          } else {
+            resolve(Boolean(result));
+          }
+        });
+      });
+    }
+    return false;
   },
 
   /**
@@ -292,7 +413,16 @@ export async function reconcilePermissionsOnRemoved(
 
   for (const [tabId, state] of Array.from(targetTabStates.entries())) {
     const tabOrigin = normalizePermissionOrigin(state.origin);
-    const stillPermitted = activeOriginSet.has(tabOrigin);
+    let tabOriginWithoutPort = '';
+    try {
+      const u = new URL(state.origin.endsWith('/') ? state.origin : `${state.origin}/`);
+      tabOriginWithoutPort = `${u.protocol}//${u.hostname}`;
+    } catch {
+      // ignore invalid URL
+    }
+    const stillPermitted =
+      activeOriginSet.has(tabOrigin) ||
+      (tabOriginWithoutPort.length > 0 && activeOriginSet.has(tabOriginWithoutPort));
 
     if (!stillPermitted) {
       await clearTabCapture(tabId, options);
@@ -327,7 +457,17 @@ export async function reconcilePermissionsOnStartup(
 
   for (const [tabId, state] of Array.from(targetTabStates.entries())) {
     const tabOrigin = normalizePermissionOrigin(state.origin);
-    const hasPermission = isBroadActive || activeOriginSet.has(tabOrigin);
+    let tabOriginWithoutPort = '';
+    try {
+      const u = new URL(state.origin.endsWith('/') ? state.origin : `${state.origin}/`);
+      tabOriginWithoutPort = `${u.protocol}//${u.hostname}`;
+    } catch {
+      // ignore invalid URL
+    }
+    const hasPermission =
+      isBroadActive ||
+      activeOriginSet.has(tabOrigin) ||
+      (tabOriginWithoutPort.length > 0 && activeOriginSet.has(tabOriginWithoutPort));
 
     if (!hasPermission) {
       await clearTabCapture(tabId, options);

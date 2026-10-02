@@ -33,12 +33,16 @@ export interface ServiceWorkerStatusMessage {
   type: 'SERVICE_WORKER_STATUS';
   status: 'controlled' | 'not-controlled';
   serviceWorkerUrl: string | null;
+  generation?: number;
+  eventId?: string;
 }
 
 export interface MetaCspFoundMessage {
   type: 'META_CSP_FOUND';
   /** Raw CSP policy strings found in <meta http-equiv="Content-Security-Policy"> tags. */
   policies?: string[];
+  generation?: number;
+  eventId?: string;
 }
 
 export interface SriScanMessage {
@@ -49,6 +53,8 @@ export interface SriScanMessage {
   externalStylesheets?: number;
   /** Stylesheets missing an integrity attribute. */
   missingStyleIntegrity?: number;
+  generation?: number;
+  eventId?: string;
 }
 
 export interface RequestGraphMessage {
@@ -113,6 +119,13 @@ export class PortRegistry {
     port.onDisconnect.addListener(() => {
       this.ports.delete(k);
     });
+  }
+
+  /** Remove registered ports for a closed or navigated tab. */
+  unregisterTab(tabId: number): void {
+    for (const portName of [POPUP_PORT_NAME, SIDEPANEL_PORT_NAME]) {
+      this.ports.delete(this.key(portName, tabId));
+    }
   }
 
   /** Send a message to every open port for a given tab. */

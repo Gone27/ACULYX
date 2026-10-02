@@ -1,11 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  haveCookieListsChanged,
   migrateSettings,
   normalizeCookieList,
   resolveCookieOverlaps,
   SettingsService,
+  SettingsTransitionPipeline,
   UnsupportedSchemaError,
 } from '../../src/shared/settings';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 import { runRules } from '../../src/rules/engine';
 import type { Hop, CookieRecord } from '../../src/shared/types';
 
@@ -233,6 +236,130 @@ describe('Settings schema v2 and migration', () => {
       vi.unstubAllGlobals();
       SettingsService.clearCache();
     }
+  });
+});
+
+describe('SettingsTransitionPipeline and atomic transitions (WS1 1C)', () => {
+  it('haveCookieListsChanged detects additions, removals, and content changes', () => {
+    const base = { ...DEFAULT_SETTINGS, sensitiveCookieNames: ['sid'], ignoredCookieNames: ['ga'] };
+
+    // Same content, same order
+    expect(haveCookieListsChanged(base, { ...base })).toBe(false);
+
+    // Added sensitive cookie
+    expect(haveCookieListsChanged(base, { ...base, sensitiveCookieNames: ['sid', 'token'] })).toBe(true);
+
+    // Removed sensitive cookie
+    expect(haveCookieListsChanged(base, { ...base, sensitiveCookieNames: [] })).toBe(true);
+
+    // Added ignored cookie
+    expect(haveCookieListsChanged(base, { ...base, ignoredCookieNames: ['ga', 'theme'] })).toBe(true);
+
+    // Removed ignored cookie
+    expect(haveCookieListsChanged(base, { ...base, ignoredCookieNames: [] })).toBe(true);
+
+    // Other settings changed without cookie list changes
+    expect(haveCookieListsChanged(base, { ...base, monitoringMode: 'all-sites', retainHistoryDays: 30 })).toBe(false);
+  });
+
+  it('storage event arriving before message executes transition once and deduplicates subsequent message', async () => {
+    const pipeline = new SettingsTransitionPipeline();
+    const onRescoreTabs = vi.fn().mockResolvedValue(undefined);
+    pipeline.registerHooks({ onRescoreTabs });
+
+    // Initial state
+    await pipeline.transition({ ...DEFAULT_SETTINGS, sensitiveCookieNames: ['a'] }, 'storage');
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+    onRescoreTabs.mockClear();
+
+    // 1. Storage event arrives first with updated cookie list
+    const updated = { ...DEFAULT_SETTINGS, sensitiveCookieNames: ['a', 'b'] };
+    const res1 = await pipeline.transition(updated, 'storage');
+    expect(res1.sensitiveCookieNames).toEqual(['a', 'b']);
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+
+    // 2. Runtime message arrives subsequently with identical payload
+    const res2 = await pipeline.transition(updated, 'message');
+    expect(res2.sensitiveCookieNames).toEqual(['a', 'b']);
+    // Deduplication should prevent second rescore call
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('message arriving before storage event executes transition once and deduplicates subsequent storage event', async () => {
+    const pipeline = new SettingsTransitionPipeline();
+    const onRescoreTabs = vi.fn().mockResolvedValue(undefined);
+    pipeline.registerHooks({ onRescoreTabs });
+
+    // Initial state
+    await pipeline.transition({ ...DEFAULT_SETTINGS, sensitiveCookieNames: ['a'] }, 'storage');
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+    onRescoreTabs.mockClear();
+
+    // 1. Message arrives first
+    const updated = { ...DEFAULT_SETTINGS, sensitiveCookieNames: ['a', 'c'] };
+    const res1 = await pipeline.transition(updated, 'message');
+    expect(res1.sensitiveCookieNames).toEqual(['a', 'c']);
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+
+    // 2. Storage event arrives subsequently
+    const res2 = await pipeline.transition(updated, 'storage');
+    expect(res2.sensitiveCookieNames).toEqual(['a', 'c']);
+    // Deduplication should prevent second rescore call
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('presentation-only updates (severityFilter) update snapshot without triggering tab re-scoring', async () => {
+    const pipeline = new SettingsTransitionPipeline();
+    const onRescoreTabs = vi.fn().mockResolvedValue(undefined);
+    const onModeChange = vi.fn().mockResolvedValue(undefined);
+    pipeline.registerHooks({ onRescoreTabs, onModeChange });
+
+    await pipeline.transition({ ...DEFAULT_SETTINGS, sensitiveCookieNames: ['sid'] }, 'storage');
+    expect(onRescoreTabs).toHaveBeenCalledTimes(1);
+    onRescoreTabs.mockClear();
+    onModeChange.mockClear();
+
+    // Change only severityFilter
+    const updated = { ...DEFAULT_SETTINGS, sensitiveCookieNames: ['sid'], severityFilter: ['critical', 'high'] };
+    const result = await pipeline.transition(updated, 'storage');
+
+    expect(result.severityFilter).toEqual(['critical', 'high']);
+    expect(onRescoreTabs).not.toHaveBeenCalled();
+    expect(onModeChange).not.toHaveBeenCalled();
+    expect(pipeline.getLastAppliedSettings()?.severityFilter).toEqual(['critical', 'high']);
+  });
+
+  it('mode change invokes onModeChange hook with previous and next mode', async () => {
+    const pipeline = new SettingsTransitionPipeline();
+    const onModeChange = vi.fn().mockResolvedValue(undefined);
+    pipeline.registerHooks({ onModeChange });
+
+    // Initial state is per-site
+    await pipeline.transition({ ...DEFAULT_SETTINGS, monitoringMode: 'per-site' }, 'storage');
+    onModeChange.mockClear();
+
+    // Transition to off
+    await pipeline.transition({ ...DEFAULT_SETTINGS, monitoringMode: 'off' }, 'storage');
+    expect(onModeChange).toHaveBeenCalledTimes(1);
+    expect(onModeChange).toHaveBeenCalledWith('per-site', 'off');
+
+    // Transition to all-sites
+    await pipeline.transition({ ...DEFAULT_SETTINGS, monitoringMode: 'all-sites' }, 'message');
+    expect(onModeChange).toHaveBeenCalledTimes(2);
+    expect(onModeChange).toHaveBeenCalledWith('off', 'all-sites');
+  });
+
+  it('future schema versions (> 2) are rejected and preserve lastAppliedSettings unchanged', async () => {
+    const pipeline = new SettingsTransitionPipeline();
+    await pipeline.transition(DEFAULT_SETTINGS, 'storage');
+    const snapshotBefore = pipeline.getLastAppliedSettings();
+
+    await expect(pipeline.transition({ schemaVersion: 3, futureFeature: true }, 'storage')).rejects.toThrow(
+      UnsupportedSchemaError
+    );
+
+    // lastAppliedSettings must not be corrupted or overwritten
+    expect(pipeline.getLastAppliedSettings()).toEqual(snapshotBefore);
   });
 });
 

@@ -108,16 +108,14 @@ function toRawHeaders(
   }));
 }
 
-import { isRestrictedUrl } from '../shared/gating';
-import { SettingsService } from '../shared/settings';
+import { CapturePolicy, isCaptureAllowedAtBoundary } from './capture-policy';
 
 /**
  * Checks whether capture is currently active and permitted for this URL.
- * Returns false if mode is off, unhydrated, or URL is a restricted scheme.
+ * Evaluates the synchronous fail-closed CapturePolicySnapshot at the listener boundary.
  */
 export function isCaptureActiveForUrl(url: string): boolean {
-  if (!url || isRestrictedUrl(url)) return false;
-  return SettingsService.getCachedSettings().monitoringMode !== 'off';
+  return isCaptureAllowedAtBoundary(url, CapturePolicy.getSnapshot());
 }
 
 /**

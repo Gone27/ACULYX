@@ -64,12 +64,17 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
   return { name, path, domainAttributePresent, domain, sameSiteNone, secure };
 }
 
+export const MAX_SET_COOKIES = 100;
+export const MAX_COOKIE_RECORDS = 100;
+export const MAX_UNOBSERVED_FINDINGS = 50;
+
 export function findUnobservedCookieFindings(
   setCookieHeaders: string[],
   cookies: Array<{ name: string; path: string; domain: string }>,
   tabUrl: string,
 ): Finding[] {
-  const metadata = setCookieHeaders.map(parseCookieHeaderMetadata);
+  const boundedSetCookies = setCookieHeaders.slice(0, MAX_SET_COOKIES);
+  const metadata = boundedSetCookies.map(parseCookieHeaderMetadata);
   const url = (() => {
     try {
       return new URL(tabUrl);
@@ -80,7 +85,7 @@ export function findUnobservedCookieFindings(
   if (url === null) return [];
 
   const visibleNames = new Set(cookies.map((cookie) => cookie.name));
-  return metadata
+  const findings = metadata
     .filter((cookie) => cookie.name.length > 0 && !visibleNames.has(cookie.name))
     .flatMap((cookie): Finding[] => {
       const reasons: string[] = [];
@@ -126,6 +131,8 @@ export function findUnobservedCookieFindings(
         sourceUrl: url.href,
       }];
     });
+
+  return findings.slice(0, MAX_UNOBSERVED_FINDINGS);
 }
 
 function cookiePathMatches(requestPath: string, cookiePath: string): boolean {
@@ -189,107 +196,156 @@ export function isThirdPartyCookie(pageHostname: string, cookieDomain: string): 
 // Public API
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// In-flight correlation deduplication map
+// ---------------------------------------------------------------------------
+
+const inFlightCorrelations = new Map<
+  string,
+  Promise<{ records: CookieRecord[]; findings: Finding[]; discarded?: boolean }>
+>();
+const MAX_IN_FLIGHT_CORRELATIONS = 50;
+
 /**
  * Fetches all cookies accessible for `tabUrl` from the live cookie store and
  * correlates them with the Set-Cookie headers emitted by the most recent
  * response so we can tell whether each cookie was set by the server (via
  * headers) or by JavaScript.
  *
+ * Generation-aware: discards late arrivals if the tab's navigation generation
+ * has advanced before or during the live store query.
+ *
  * Cookie *values* are intentionally never accessed or stored.
  *
- * @param tabId          - The tab being analysed (unused directly but kept for
- *                         potential future use, e.g. per-tab JS-cookie heuristics).
- * @param tabUrl         - The full URL of the page (used to scope the query).
- * @param setCookieHeaders - Raw `Set-Cookie` header strings from the response.
- * @returns              Array of {@link CookieRecord} metadata objects.
+ * @param tabId               - The tab being analysed.
+ * @param tabUrl              - The full URL of the page (used to scope the query).
+ * @param setCookieHeaders    - Raw `Set-Cookie` header strings from the response.
+ * @param generation          - Optional navigation generation counter.
+ * @param isCurrentGeneration - Optional callback verifying whether generation is still current.
+ * @returns                   Array of {@link CookieRecord} metadata objects and findings.
  */
 export async function correlateCookies(
-  _tabId: number,
+  tabId: number,
   tabUrl: string,
   setCookieHeaders: string[],
-): Promise<{ records: CookieRecord[]; findings: Finding[] }> {
-  // ------------------------------------------------------------------
-  // 1. Build a set of names that appeared in Set-Cookie headers.
-  //    These were definitively set by the server, not by JavaScript.
-  // ------------------------------------------------------------------
-  const headerMetadata = setCookieHeaders.map(parseCookieHeaderMetadata);
-  const headerSetNames = new Set<string>(headerMetadata.map((item) => item.name));
-
-  // ------------------------------------------------------------------
-  // 2. Fetch cookies scoped to this URL from the live store.
-  // ------------------------------------------------------------------
-  let urlScopedCookies: chrome.cookies.Cookie[];
-  try {
-    urlScopedCookies = await chrome.cookies.getAll({ url: tabUrl });
-  } catch {
-    // Permissions not granted or invalid URL — return empty.
-    return { records: [], findings: [] };
+  generation?: number,
+  isCurrentGeneration?: (tabId: number, generation: number) => boolean,
+): Promise<{ records: CookieRecord[]; findings: Finding[]; discarded?: boolean }> {
+  // Pre-query generation check: discard if generation already superseded
+  if (
+    generation !== undefined &&
+    isCurrentGeneration !== undefined &&
+    !isCurrentGeneration(tabId, generation)
+  ) {
+    return { records: [], findings: [], discarded: true };
   }
 
-  // ------------------------------------------------------------------
-  // 3. Derive page hostname for third-party detection.
-  // ------------------------------------------------------------------
-  let pageHostname: string;
-  try {
-    pageHostname = new URL(tabUrl).hostname;
-  } catch {
-    pageHostname = '';
+  const dedupKey = `${tabId}:${tabUrl}:${generation ?? 0}`;
+  const existing = inFlightCorrelations.get(dedupKey);
+  if (existing) {
+    return existing;
   }
 
-  // ------------------------------------------------------------------
-  // 4. Map each chrome.cookies.Cookie to a CookieRecord.
-  //    We deliberately skip cookie.value everywhere.
-  // ------------------------------------------------------------------
-  const records: CookieRecord[] = urlScopedCookies.map(
-    (cookie: chrome.cookies.Cookie): CookieRecord => {
-      // Determine whether this cookie was set via a response header or JS.
-      // Absence from this response does not prove JavaScript created the
-      // cookie; it may have been set by an earlier server response.
-      const setByJs: boolean | null = headerSetNames.has(cookie.name)
-        ? false
-        : null;
-      const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
-      const matchingPath = matchingHeaders.find((item) => item.path === cookie.path);
-      const headerMatch = matchingPath ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : undefined);
+  const correlationPromise = (async () => {
+    // ------------------------------------------------------------------
+    // 1. Build a set of names that appeared in Set-Cookie headers (bounded).
+    // ------------------------------------------------------------------
+    const boundedSetCookieHeaders = setCookieHeaders.slice(0, MAX_SET_COOKIES);
+    const headerMetadata = boundedSetCookieHeaders.map(parseCookieHeaderMetadata);
+    const headerSetNames = new Set<string>(headerMetadata.map((item) => item.name));
 
-      // Third-party check: does the cookie's domain match the page origin?
-      const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
+    // ------------------------------------------------------------------
+    // 2. Fetch cookies scoped to this URL from the live store.
+    // ------------------------------------------------------------------
+    let urlScopedCookies: chrome.cookies.Cookie[];
+    try {
+      urlScopedCookies = await chrome.cookies.getAll({ url: tabUrl });
+    } catch {
+      // Permissions not granted or invalid URL — return empty.
+      return { records: [], findings: [] };
+    }
 
-      // CHIPS (Partitioned cookies) — Chrome exposes an optional partitionKey
-      // property when the cookie was set with the Partitioned attribute.
-      // We check for its existence without importing a full type override.
-      const partitioned =
-        (cookie as chrome.cookies.Cookie & { partitionKey?: unknown })
-          .partitionKey != null;
+    // Post-await generation check: discard if navigation advanced during fetch
+    if (
+      generation !== undefined &&
+      isCurrentGeneration !== undefined &&
+      !isCurrentGeneration(tabId, generation)
+    ) {
+      return { records: [], findings: [], discarded: true };
+    }
 
-      // Expiry: session cookies have no expiry; persistent cookies expose
-      // expirationDate in Unix seconds — we convert to milliseconds.
-      const expiresAt: number | null = cookie.session
-        ? null
-        : Math.round(cookie.expirationDate ?? 0) * 1000;
+    // ------------------------------------------------------------------
+    // 3. Derive page hostname for third-party detection.
+    // ------------------------------------------------------------------
+    let pageHostname: string;
+    try {
+      pageHostname = new URL(tabUrl).hostname;
+    } catch {
+      pageHostname = '';
+    }
 
-      return {
-        name: cookie.name,
-        domain: cookie.domain,
-        domainAttributePresent: setByJs === null
+    // ------------------------------------------------------------------
+    // 4. Map each chrome.cookies.Cookie to a CookieRecord (bounded).
+    //    We deliberately skip cookie.value everywhere.
+    // ------------------------------------------------------------------
+    const boundedLiveCookies = urlScopedCookies.slice(0, MAX_COOKIE_RECORDS);
+    const records: CookieRecord[] = boundedLiveCookies.map(
+      (cookie: chrome.cookies.Cookie): CookieRecord => {
+        const setByJs: boolean | null = headerSetNames.has(cookie.name)
+          ? false
+          : null;
+        const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
+        const matchingPath = matchingHeaders.find((item) => item.path === cookie.path);
+        const headerMatch = matchingPath ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : undefined);
+
+        const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
+
+        const partitioned =
+          (cookie as chrome.cookies.Cookie & { partitionKey?: unknown })
+            .partitionKey != null;
+
+        const expiresAt: number | null = cookie.session
           ? null
-          : headerMatch?.domainAttributePresent ?? false,
-        path: cookie.path,
-        secure: cookie.secure,
-        httpOnly: cookie.httpOnly,
-        sameSite: mapSameSite(cookie.sameSite),
-        session: cookie.session,
-        expiresAt,
-        partitioned,
-        setByJs,
-        isThirdParty: thirdParty,
-        // cookie.value is intentionally NOT accessed here.
-      };
-    },
-  );
+          : Math.round(cookie.expirationDate ?? 0) * 1000;
 
-  return {
-    records,
-    findings: findUnobservedCookieFindings(setCookieHeaders, urlScopedCookies, tabUrl),
-  };
+        return {
+          name: cookie.name,
+          domain: cookie.domain,
+          domainAttributePresent: setByJs === null
+            ? null
+            : headerMatch?.domainAttributePresent ?? false,
+          path: cookie.path,
+          secure: cookie.secure,
+          httpOnly: cookie.httpOnly,
+          sameSite: mapSameSite(cookie.sameSite),
+          session: cookie.session,
+          expiresAt,
+          partitioned,
+          setByJs,
+          isThirdParty: thirdParty,
+          // cookie.value is intentionally NOT accessed here.
+        };
+      },
+    );
+
+    return {
+      records,
+      findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl),
+    };
+  })();
+
+  if (inFlightCorrelations.size < MAX_IN_FLIGHT_CORRELATIONS) {
+    inFlightCorrelations.set(dedupKey, correlationPromise);
+  }
+
+  try {
+    return await correlationPromise;
+  } finally {
+    inFlightCorrelations.delete(dedupKey);
+  }
 }
+
+export function resetInFlightCorrelationsForTesting(): void {
+  inFlightCorrelations.clear();
+}
+

@@ -5,7 +5,8 @@ import {
   captureMap,
   inFlightRequests,
 } from '../../src/background/capture';
-import type { Hop, ApiHop } from '../../src/shared/types';
+import { CapturePolicy } from '../../src/background/capture-policy';
+import type { Hop, ApiHop, SettingsV2 } from '../../src/shared/types';
 import { SettingsService } from '../../src/shared/settings';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
@@ -21,6 +22,13 @@ describe('redirect response capture', () => {
 
   beforeEach(() => {
     for (const key of Object.keys(listeners)) delete listeners[key];
+    CapturePolicy.setSnapshotForTesting({
+      ready: true,
+      revision: 1,
+      mode: 'all-sites',
+      broadGrantActive: true,
+      grantedOrigins: new Set(),
+    });
     const chromeMock = {
       webRequest: {
         onBeforeSendHeaders: event('onBeforeSendHeaders'),
@@ -304,6 +312,13 @@ describe('redirect response capture', () => {
 
   describe('Off mode capture gating and in-flight cleanup', () => {
     it('stops capturing navigation and API hops when mode is off', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 2,
+        mode: 'off',
+        broadGrantActive: false,
+        grantedOrigins: new Set(),
+      });
       const getCachedSpy = vi.spyOn(SettingsService, 'getCachedSettings').mockReturnValue({
         ...DEFAULT_SETTINGS,
         monitoringMode: 'off',
@@ -424,6 +439,287 @@ describe('redirect response capture', () => {
 
       expect(captureMap.has('in-flight-err')).toBe(false);
       expect(inFlightRequests.has('in-flight-err')).toBe(false);
+    });
+  });
+
+  describe('WS1 1A: Central synchronous CapturePolicySnapshot boundary pre-filtering', () => {
+    it('fails closed before hydration: no captureMap or inFlightRequests entry created', () => {
+      CapturePolicy.resetSnapshotForTesting(); // ready: false
+
+      registerCaptureListeners(() => {});
+
+      // Navigation request arrives before hydration
+      listeners['onHeadersReceived']?.({
+        type: 'main_frame',
+        tabId: 10,
+        requestId: 'pre-hydrate-nav',
+        url: 'https://example.com/',
+        statusCode: 200,
+        responseHeaders: [{ name: 'Content-Security-Policy', value: "default-src 'self'" }],
+        timeStamp: 100,
+      });
+
+      expect(captureMap.has('pre-hydrate-nav')).toBe(false);
+
+      // XHR request arrives before hydration
+      listeners['onBeforeSendHeaders']?.({
+        type: 'xmlhttprequest',
+        tabId: 10,
+        requestId: 'pre-hydrate-xhr',
+        method: 'POST',
+        url: 'https://example.com/api',
+        requestHeaders: [],
+        timeStamp: 101,
+      });
+
+      expect(inFlightRequests.has('pre-hydrate-xhr')).toBe(false);
+    });
+
+    it('fails closed on storage or settings error during refresh', async () => {
+      const getSettingsSpy = vi.spyOn(SettingsService, 'getSettings').mockRejectedValue(new Error('Storage failure'));
+
+      try {
+        await CapturePolicy.refreshSnapshot();
+        const snapshot = CapturePolicy.getSnapshot();
+        expect(snapshot.ready).toBe(false);
+        expect(snapshot.mode).toBe('off');
+
+        registerCaptureListeners(() => {});
+
+        listeners['onHeadersReceived']?.({
+          type: 'main_frame',
+          tabId: 11,
+          requestId: 'err-nav',
+          url: 'https://example.com/',
+          statusCode: 200,
+          responseHeaders: [],
+          timeStamp: 200,
+        });
+
+        expect(captureMap.has('err-nav')).toBe(false);
+      } finally {
+        getSettingsSpy.mockRestore();
+      }
+    });
+
+    it('per-site without exact origin grant: drops request at boundary without creating entries', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 10,
+        mode: 'per-site',
+        broadGrantActive: false,
+        grantedOrigins: new Set(['https://allowed.com']),
+      });
+
+      registerCaptureListeners(() => {});
+
+      // Navigation to unpermitted origin
+      listeners['onHeadersReceived']?.({
+        type: 'main_frame',
+        tabId: 12,
+        requestId: 'unpermitted-nav',
+        url: 'https://not-allowed.com/',
+        statusCode: 200,
+        responseHeaders: [],
+        timeStamp: 300,
+      });
+
+      expect(captureMap.has('unpermitted-nav')).toBe(false);
+
+      // XHR to unpermitted origin
+      listeners['onBeforeSendHeaders']?.({
+        type: 'xmlhttprequest',
+        tabId: 12,
+        requestId: 'unpermitted-xhr',
+        method: 'GET',
+        url: 'https://not-allowed.com/data',
+        requestHeaders: [],
+        timeStamp: 301,
+      });
+
+      expect(inFlightRequests.has('unpermitted-xhr')).toBe(false);
+    });
+
+    it('per-site with broad grant conflict: pauses capture and drops entries in both maps', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 11,
+        mode: 'per-site',
+        broadGrantActive: true, // Conflict: broad grant active in per-site mode!
+        grantedOrigins: new Set(['https://example.com']),
+      });
+
+      registerCaptureListeners(() => {});
+
+      listeners['onHeadersReceived']?.({
+        type: 'main_frame',
+        tabId: 13,
+        requestId: 'conflict-nav',
+        url: 'https://example.com/',
+        statusCode: 200,
+        responseHeaders: [],
+        timeStamp: 400,
+      });
+
+      expect(captureMap.has('conflict-nav')).toBe(false);
+
+      listeners['onBeforeSendHeaders']?.({
+        type: 'xmlhttprequest',
+        tabId: 13,
+        requestId: 'conflict-xhr',
+        method: 'GET',
+        url: 'https://example.com/api',
+        requestHeaders: [],
+        timeStamp: 401,
+      });
+
+      expect(inFlightRequests.has('conflict-xhr')).toBe(false);
+    });
+
+    it('allowed narrow per-site capture successfully allocates metadata and captures response', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 12,
+        mode: 'per-site',
+        broadGrantActive: false,
+        grantedOrigins: new Set(['https://permitted.example.com']),
+      });
+
+      const hops: Hop[] = [];
+      const apiHops: ApiHop[] = [];
+      registerCaptureListeners(
+        (_tabId, hop) => hops.push(hop),
+        (apiHop) => apiHops.push(apiHop),
+      );
+
+      // Permitted navigation
+      listeners['onHeadersReceived']?.({
+        type: 'main_frame',
+        tabId: 14,
+        requestId: 'permitted-nav',
+        url: 'https://permitted.example.com/dashboard',
+        statusCode: 200,
+        responseHeaders: [{ name: 'Content-Security-Policy', value: "default-src 'self'" }],
+        timeStamp: 500,
+      });
+
+      expect(captureMap.has('permitted-nav')).toBe(true);
+
+      listeners['onResponseStarted']?.({
+        type: 'main_frame',
+        tabId: 14,
+        requestId: 'permitted-nav',
+        url: 'https://permitted.example.com/dashboard',
+        statusCode: 200,
+        responseHeaders: [{ name: 'Content-Security-Policy', value: "default-src 'self'" }],
+        fromCache: false,
+        timeStamp: 501,
+      });
+
+      expect(hops).toHaveLength(1);
+      expect(hops[0]?.url).toBe('https://permitted.example.com/dashboard');
+
+      // Permitted API call
+      listeners['onBeforeSendHeaders']?.({
+        type: 'xmlhttprequest',
+        tabId: 14,
+        requestId: 'permitted-xhr',
+        method: 'GET',
+        url: 'https://permitted.example.com/api/status',
+        requestHeaders: [],
+        timeStamp: 502,
+      });
+
+      expect(inFlightRequests.has('permitted-xhr')).toBe(true);
+
+      listeners['onResponseStarted']?.({
+        type: 'xmlhttprequest',
+        tabId: 14,
+        requestId: 'permitted-xhr',
+        url: 'https://permitted.example.com/api/status',
+        statusCode: 200,
+        responseHeaders: [],
+        fromCache: false,
+        timeStamp: 503,
+      });
+
+      expect(apiHops).toHaveLength(1);
+    });
+
+    it('allowed narrow per-site capture matches URLs with non-standard ports against host permission', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 13,
+        mode: 'per-site',
+        broadGrantActive: false,
+        grantedOrigins: new Set(['http://127.0.0.1']),
+      });
+
+      const hops: Hop[] = [];
+      registerCaptureListeners((_tabId, hop) => hops.push(hop));
+
+      listeners['onHeadersReceived']?.({
+        type: 'main_frame',
+        tabId: 15,
+        requestId: 'port-nav',
+        url: 'http://127.0.0.1:3464/cookie-test',
+        statusCode: 200,
+        responseHeaders: [{ name: 'set-cookie', value: 'session=123' }],
+        timeStamp: 600,
+      });
+
+      expect(captureMap.has('port-nav')).toBe(true);
+
+      listeners['onResponseStarted']?.({
+        type: 'main_frame',
+        tabId: 15,
+        requestId: 'port-nav',
+        url: 'http://127.0.0.1:3464/cookie-test',
+        statusCode: 200,
+        responseHeaders: [{ name: 'set-cookie', value: 'session=123' }],
+        fromCache: false,
+        timeStamp: 601,
+      });
+
+      expect(hops).toHaveLength(1);
+      expect(hops[0]?.url).toBe('http://127.0.0.1:3464/cookie-test');
+    });
+
+    it('monotonic revisions prevent stale async refresh from overwriting newer snapshot', async () => {
+      CapturePolicy.resetSnapshotForTesting();
+      let resolveFirst!: (value: SettingsV2) => void;
+      const firstPromise = new Promise<SettingsV2>((resolve) => { resolveFirst = resolve; });
+
+      const getSettingsSpy = vi.spyOn(SettingsService, 'getSettings');
+
+      // First refresh is slow
+      getSettingsSpy.mockImplementationOnce(() => firstPromise);
+
+      const p1 = CapturePolicy.refreshSnapshot();
+
+      // Second refresh resolves quickly with newer mode 'off'
+      getSettingsSpy.mockResolvedValueOnce({
+        ...DEFAULT_SETTINGS,
+        monitoringMode: 'off',
+      });
+
+      const p2 = await CapturePolicy.refreshSnapshot();
+      expect(p2.mode).toBe('off');
+      expect(p2.revision).toBe(2);
+
+      // Now first refresh finally completes with old mode 'all-sites'
+      resolveFirst({
+        ...DEFAULT_SETTINGS,
+        monitoringMode: 'all-sites',
+      });
+      await p1;
+
+      // Stale revision must NOT overwrite newer revision!
+      const current = CapturePolicy.getSnapshot();
+      expect(current.mode).toBe('off');
+      expect(current.revision).toBe(2);
+
+      getSettingsSpy.mockRestore();
     });
   });
 });

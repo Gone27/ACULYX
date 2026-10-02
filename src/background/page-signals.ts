@@ -3,13 +3,42 @@ import { reportPageSignals } from '../content/service-worker-detection';
 import { isModeCaptureAllowed, isRestrictedUrl } from '../shared/gating';
 import { SettingsService } from '../shared/settings';
 import { isBroadGrant } from './permissions';
+import type { SettingsV2 } from '../shared/types';
 
-export function injectPageSignals(tabId: number, url: string): void {
+export async function injectPageSignals(tabId: number, url: string): Promise<void> {
   if (isRestrictedUrl(url)) return;
   const origin = originFromUrl(url);
   if (origin === null || origin.length === 0) return;
 
-  const settings = SettingsService.getCachedSettings();
+  // Hydration barrier: await SettingsService readiness if not yet hydrated
+  let settings: SettingsV2;
+  if (!SettingsService.isReady()) {
+    try {
+      settings = await SettingsService.whenReady();
+    } catch {
+      return;
+    }
+  } else {
+    settings = SettingsService.getCachedSettings();
+  }
+
+  // Re-verify current tab URL if tabs API is available
+  if (typeof chrome !== 'undefined' && typeof chrome.tabs !== 'undefined' && typeof chrome.tabs.get === 'function') {
+    try {
+      const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+        chrome.tabs.get(tabId, (t) => {
+          if (chrome.runtime.lastError !== undefined || t === undefined || t === null) resolve(null);
+          else resolve(t);
+        });
+      });
+      if (tab?.url !== undefined && tab.url !== '' && tab.url !== url) {
+        return;
+      }
+    } catch {
+      // Continue if tabs.get fails or not available
+    }
+  }
+
   if (settings.monitoringMode === 'off') return;
 
   if (typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') return;
@@ -66,11 +95,11 @@ export function injectPageSignals(tabId: number, url: string): void {
 export function registerPageSignalInjection(): void {
   chrome.webNavigation.onCommitted.addListener((details): void => {
     if (details.frameId !== 0 || details.tabId < 0) return;
-    injectPageSignals(details.tabId, details.url);
+    void injectPageSignals(details.tabId, details.url);
   });
 
   chrome.webNavigation.onHistoryStateUpdated.addListener((details): void => {
     if (details.frameId !== 0 || details.tabId < 0) return;
-    injectPageSignals(details.tabId, details.url);
+    void injectPageSignals(details.tabId, details.url);
   });
 }

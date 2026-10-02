@@ -321,8 +321,7 @@ function removeOrigin(origin: string): void {
         setStatus(`Failed to revoke access for ${origin}`, true);
       }
     } catch {
-      workingOrigins = workingOrigins.filter((o) => o !== origin);
-      renderAllowlist();
+      setStatus(`Failed to revoke access for ${origin}`, true);
     }
   })();
 }
@@ -338,21 +337,29 @@ function wireModeRadios(): void {
       const targetMode = radio.value as Settings['monitoringMode'];
 
       if (targetMode === 'all-sites' && currentMode !== 'all-sites') {
+        const revertToPriorMode = (): void => {
+          for (const r of modeRadios) {
+            r.checked = r.value === currentMode;
+          }
+          updateAllowlistVisibility(currentMode);
+          void checkAndRenderBroadConflict();
+          setStatus('All-sites monitoring requires permission for all URLs. Kept previous mode.', true);
+        };
+
         if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
-          chrome.permissions.request({ origins: ['<all_urls>'] }, (granted) => {
-            if (!granted) {
-              for (const r of modeRadios) {
-                r.checked = r.value === currentMode;
+          try {
+            chrome.permissions.request({ origins: ['<all_urls>'] }, (granted) => {
+              if (!granted) {
+                revertToPriorMode();
+              } else {
+                currentMode = 'all-sites';
+                updateAllowlistVisibility('all-sites');
+                void checkAndRenderBroadConflict();
               }
-              updateAllowlistVisibility(currentMode);
-              void checkAndRenderBroadConflict();
-              setStatus('All-sites monitoring requires permission for all URLs. Kept previous mode.', true);
-            } else {
-              currentMode = 'all-sites';
-              updateAllowlistVisibility('all-sites');
-              void checkAndRenderBroadConflict();
-            }
-          });
+            });
+          } catch {
+            revertToPriorMode();
+          }
         } else {
           currentMode = 'all-sites';
           updateAllowlistVisibility('all-sites');

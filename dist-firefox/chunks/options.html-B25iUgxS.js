@@ -1,5 +1,5 @@
-import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-cpmoITPm.js";
-import { _ as normalizeCookieList, g as SettingsService, m as LocalStorage, t as PermissionsService, v as resolveCookieOverlaps } from "./permissions-BZvSKL0Y.js";
+import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
+import { _ as LocalStorage, b as normalizeCookieList, o as PermissionsService, x as resolveCookieOverlaps, y as SettingsService } from "./capture-fPtlzvO-.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
@@ -214,8 +214,7 @@ function removeOrigin(origin) {
 				setStatus(`Revoked access for ${origin}`, false);
 			} else setStatus(`Failed to revoke access for ${origin}`, true);
 		} catch {
-			workingOrigins = workingOrigins.filter((o) => o !== origin);
-			renderAllowlist();
+			setStatus(`Failed to revoke access for ${origin}`, true);
 		}
 	})();
 }
@@ -224,18 +223,24 @@ function wireModeRadios() {
 		if (!radio.checked) return;
 		const targetMode = radio.value;
 		if (targetMode === "all-sites" && currentMode !== "all-sites") {
-			if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") chrome.permissions.request({ origins: ["<all_urls>"] }, (granted) => {
-				if (!granted) {
-					for (const r of modeRadios) r.checked = r.value === currentMode;
-					updateAllowlistVisibility(currentMode);
-					checkAndRenderBroadConflict();
-					setStatus("All-sites monitoring requires permission for all URLs. Kept previous mode.", true);
-				} else {
-					currentMode = "all-sites";
-					updateAllowlistVisibility("all-sites");
-					checkAndRenderBroadConflict();
-				}
-			});
+			const revertToPriorMode = () => {
+				for (const r of modeRadios) r.checked = r.value === currentMode;
+				updateAllowlistVisibility(currentMode);
+				checkAndRenderBroadConflict();
+				setStatus("All-sites monitoring requires permission for all URLs. Kept previous mode.", true);
+			};
+			if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") try {
+				chrome.permissions.request({ origins: ["<all_urls>"] }, (granted) => {
+					if (!granted) revertToPriorMode();
+					else {
+						currentMode = "all-sites";
+						updateAllowlistVisibility("all-sites");
+						checkAndRenderBroadConflict();
+					}
+				});
+			} catch {
+				revertToPriorMode();
+			}
 			else {
 				currentMode = "all-sites";
 				updateAllowlistVisibility("all-sites");
@@ -339,4 +344,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-BVn0bjml.js.map
+//# sourceMappingURL=options.html-B25iUgxS.js.map

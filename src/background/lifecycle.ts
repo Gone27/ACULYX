@@ -1,12 +1,11 @@
 /**
  * lifecycle.ts
  *
- * Manages MV3 service-worker keepalive (via chrome.alarms) and restores
+ * Manages periodic maintenance (via chrome.alarms) and restores
  * in-memory tab state from chrome.storage.session after an SW revival.
  *
- * MV3 service workers are terminated after ~30 s of inactivity.  Firing a
- * periodic alarm forces the browser to wake the worker so it can keep
- * processing WebRequest events without dropping state.
+ * MV3 service workers are terminated after inactivity. Correctness relies
+ * entirely on persistent storage and session hydration—never keepalive alarms.
  */
 
 import { MAINTENANCE_ALARM, MAINTENANCE_PERIOD_MINUTES } from '../shared/constants';
@@ -38,6 +37,7 @@ export const originAuthBaselines: Map<string, AuthBaseline> = new Map();
  * Registers the periodic maintenance alarm and its listener.
  *
  * Runs periodic history pruning sweeps and cleans up expired data.
+ * Never uses keepalive alarms.
  */
 export function initLifecycle(): void {
   void chrome.alarms.create(MAINTENANCE_ALARM, {
@@ -45,7 +45,7 @@ export function initLifecycle(): void {
   });
 
   chrome.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm): void => {
-    if (alarm.name === MAINTENANCE_ALARM || alarm.name === 'keepalive') {
+    if (alarm.name === MAINTENANCE_ALARM) {
       void LocalStorage.pruneAllHistory();
     }
   });
@@ -66,12 +66,17 @@ export async function hydrateFromSession(): Promise<void> {
   const all = await SessionStorage.getAllTabStates();
 
   for (const state of all) {
-    tabStates.set(state.tabId, state);
+    const existing = tabStates.get(state.tabId);
+    if (!existing || (state.updatedAt > existing.updatedAt)) {
+      tabStates.set(state.tabId, state);
+    }
   }
 
   const baselines = await SessionStorage.getAllAuthBaselines();
   for (const [origin, baseline] of baselines) {
-    originAuthBaselines.set(origin, baseline);
+    if (!originAuthBaselines.has(origin)) {
+      originAuthBaselines.set(origin, baseline);
+    }
   }
 
   // Initial maintenance sweep on SW startup/hydration

@@ -1,4 +1,4 @@
-import { E as SIDEPANEL_PORT_NAME, a as registrableDomain, r as sendToBackground } from "./messaging-cpmoITPm.js";
+import { E as SIDEPANEL_PORT_NAME, a as registrableDomain, r as sendToBackground } from "./messaging-BtJyJf3R.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 //#region node_modules/d3-force/src/center.js
 function center_default(x, y) {
@@ -1081,4 +1081,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-DwMMD9Nl.js.map
+//# sourceMappingURL=sidepanel.html-CXgz0W4a.js.map

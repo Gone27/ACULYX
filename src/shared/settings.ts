@@ -4,6 +4,9 @@
  * Single settings service and authoritative read/write path for extension settings.
  * Enforces schema v2 validation, idempotent migration from legacy v1 shapes,
  * in-memory caching with storage.onChanged invalidation, and change subscriptions.
+ *
+ * WS1: Implements atomic settings transitions via SettingsTransitionPipeline with
+ * lastAppliedSettings snapshot and delta detection for cookie list changes and mode transitions.
  */
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
@@ -58,6 +61,27 @@ export function resolveCookieOverlaps(
     ignored,
     overlaps,
   };
+}
+
+/**
+ * Detects whether cookie lists (sensitive or ignored) have changed between two settings versions.
+ */
+export function haveCookieListsChanged(prev: SettingsV2, next: SettingsV2): boolean {
+  const prevSens = prev.sensitiveCookieNames ?? prev.alwaysSensitiveCookies ?? [];
+  const nextSens = next.sensitiveCookieNames ?? next.alwaysSensitiveCookies ?? [];
+  const prevIgn = prev.ignoredCookieNames ?? prev.alwaysIgnoreCookies ?? [];
+  const nextIgn = next.ignoredCookieNames ?? next.alwaysIgnoreCookies ?? [];
+
+  if (prevSens.length !== nextSens.length || prevIgn.length !== nextIgn.length) {
+    return true;
+  }
+  const prevSensSet = new Set(prevSens);
+  if (nextSens.some((s) => !prevSensSet.has(s))) return true;
+
+  const prevIgnSet = new Set(prevIgn);
+  if (nextIgn.some((s) => !prevIgnSet.has(s))) return true;
+
+  return false;
 }
 
 /**
@@ -170,6 +194,111 @@ export function migrateSettings(raw: unknown): SettingsV2 {
 }
 
 // ---------------------------------------------------------------------------
+// Transition Pipeline (WS1 1C)
+// ---------------------------------------------------------------------------
+
+export interface SettingsTransitionHooks {
+  onRescoreTabs?: (previous: SettingsV2, next: SettingsV2) => Promise<void> | void;
+  onModeChange?: (previousMode: SettingsV2['monitoringMode'], newMode: SettingsV2['monitoringMode']) => Promise<void> | void;
+  onSettingsApplied?: (settings: SettingsV2) => Promise<void> | void;
+}
+
+export class SettingsTransitionPipeline {
+  private lastAppliedSettings: SettingsV2 | null = null;
+  private hooks: SettingsTransitionHooks = {};
+
+  public registerHooks(hooks: SettingsTransitionHooks): void {
+    this.hooks = { ...this.hooks, ...hooks };
+  }
+
+  public getLastAppliedSettings(): SettingsV2 | null {
+    return this.lastAppliedSettings !== null ? { ...this.lastAppliedSettings } : null;
+  }
+
+  public setLastAppliedSettings(settings: SettingsV2 | null): void {
+    this.lastAppliedSettings = settings !== null ? { ...settings } : null;
+  }
+
+  public areEqual(a: SettingsV2, b: SettingsV2): boolean {
+    if (a.schemaVersion !== b.schemaVersion) return false;
+    if (a.monitoringMode !== b.monitoringMode) return false;
+    if (a.evaluationMode !== b.evaluationMode) return false;
+    if (a.retainHistoryDays !== b.retainHistoryDays) return false;
+    if (a.maxHistoryPerOrigin !== b.maxHistoryPerOrigin) return false;
+
+    if (a.severityFilter.length !== b.severityFilter.length) return false;
+    const aSev = new Set(a.severityFilter);
+    if (b.severityFilter.some((s) => !aSev.has(s))) return false;
+
+    if (a.sensitiveCookieNames.length !== b.sensitiveCookieNames.length) return false;
+    if (a.sensitiveCookieNames.some((v, i) => v !== b.sensitiveCookieNames[i])) return false;
+
+    if (a.ignoredCookieNames.length !== b.ignoredCookieNames.length) return false;
+    if (a.ignoredCookieNames.some((v, i) => v !== b.ignoredCookieNames[i])) return false;
+
+    return true;
+  }
+
+  public async transition(
+    incoming: unknown,
+    _source: 'storage' | 'message' = 'storage'
+  ): Promise<SettingsV2> {
+    // 1. Validation & Version Check:
+    if (
+      typeof incoming === 'object' &&
+      incoming !== null &&
+      typeof (incoming as Record<string, unknown>).schemaVersion === 'number' &&
+      ((incoming as Record<string, unknown>).schemaVersion as number) > 2
+    ) {
+      throw new UnsupportedSchemaError((incoming as Record<string, unknown>).schemaVersion as number);
+    }
+
+    const validated = migrateSettings(incoming);
+
+    // 2. Deduplication against lastAppliedSettings
+    if (this.lastAppliedSettings !== null && this.areEqual(this.lastAppliedSettings, validated)) {
+      return { ...this.lastAppliedSettings };
+    }
+
+    const previous = this.lastAppliedSettings ?? { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
+
+    // 3. Delta Detection
+    const cookieListsChanged = haveCookieListsChanged(previous, validated);
+    const modeChanged = previous.monitoringMode !== validated.monitoringMode;
+
+    // 4. Update state atomically
+    this.lastAppliedSettings = { ...validated };
+    cachedSettings = { ...validated };
+
+    // 5. Execution of Side Effects
+    if (modeChanged && this.hooks.onModeChange) {
+      await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
+    }
+
+    if (cookieListsChanged && this.hooks.onRescoreTabs) {
+      await this.hooks.onRescoreTabs(previous, validated);
+    }
+
+    if (this.hooks.onSettingsApplied) {
+      await this.hooks.onSettingsApplied(validated);
+    }
+
+    // 6. Notify subscribers
+    for (const cb of listeners) {
+      try {
+        cb(validated);
+      } catch {
+        // Ignore listener errors
+      }
+    }
+
+    return { ...validated };
+  }
+}
+
+export const settingsTransitionPipeline = new SettingsTransitionPipeline();
+
+// ---------------------------------------------------------------------------
 // Settings Service
 // ---------------------------------------------------------------------------
 
@@ -191,19 +320,10 @@ function ensureStorageListener(): void {
     const change = changes[STORAGE_KEYS.SETTINGS];
     if (areaName === 'local' && change !== undefined) {
       const newRaw: unknown = change.newValue;
-      try {
-        cachedSettings = migrateSettings(newRaw);
-      } catch {
+      void settingsTransitionPipeline.transition(newRaw, 'storage').catch(() => {
         // If unsupported future schema or invalid data is written, fail closed
         cachedSettings = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
-      }
-      for (const cb of listeners) {
-        try {
-          cb(cachedSettings);
-        } catch {
-          // Ignore listener errors
-        }
-      }
+      });
     }
   });
   storageListenerRegistered = true;
@@ -230,6 +350,7 @@ export const SettingsService = {
       typeof chrome.storage.local === 'undefined'
     ) {
       cachedSettings = { ...DEFAULT_SETTINGS };
+      settingsTransitionPipeline.setLastAppliedSettings(cachedSettings);
       return { ...cachedSettings };
     }
 
@@ -259,6 +380,7 @@ export const SettingsService = {
         }
 
         cachedSettings = migrated;
+        settingsTransitionPipeline.setLastAppliedSettings(migrated);
         return { ...migrated };
       } catch (err) {
         // Fail closed on storage read error or unsupported schema
@@ -284,6 +406,31 @@ export const SettingsService = {
     } catch {
       return this.getCachedSettings();
     }
+  },
+
+  /**
+   * Checks whether settings have finished initial storage hydration.
+   */
+  isReady(): boolean {
+    if (cachedSettings !== null) {
+      return true;
+    }
+    if (
+      typeof chrome === 'undefined' ||
+      typeof chrome.storage === 'undefined' ||
+      typeof chrome.storage.local === 'undefined'
+    ) {
+      return true;
+    }
+    return false;
+  },
+
+  /**
+   * Routes an incoming settings update through the single atomic transition pipeline.
+   */
+  async transition(incoming: unknown, source: 'storage' | 'message' = 'storage'): Promise<SettingsV2> {
+    ensureStorageListener();
+    return settingsTransitionPipeline.transition(incoming, source);
   },
 
   /**
@@ -319,16 +466,7 @@ export const SettingsService = {
       await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: merged });
     }
 
-    cachedSettings = merged;
-    for (const cb of listeners) {
-      try {
-        cb(merged);
-      } catch {
-        // Ignore listener errors
-      }
-    }
-
-    return { ...merged };
+    return await settingsTransitionPipeline.transition(merged, 'storage');
   },
 
   /**
@@ -360,10 +498,11 @@ export const SettingsService = {
   },
 
   /**
-   * Resets the in-memory cache (primarily for unit tests).
+   * Resets the in-memory cache and pipeline (primarily for unit tests).
    */
   clearCache(): void {
     cachedSettings = null;
     hydrationPromise = null;
+    settingsTransitionPipeline.setLastAppliedSettings(null);
   },
 };
