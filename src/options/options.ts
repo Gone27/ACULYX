@@ -68,8 +68,57 @@ document.addEventListener('DOMContentLoaded', () => {
   wireConflictBanner();
   wireSaveButton();
   wireDirtyTracking();
+  wireDataManagement();
   void loadAndPopulate();
 });
+
+/* ================================================================
+   Data Management
+   ================================================================ */
+
+function wireDataManagement(): void {
+  const deleteOriginInput = getEl<HTMLInputElement>('delete-origin-input');
+  const btnDeleteOrigin = getEl<HTMLButtonElement>('btn-delete-origin');
+  const btnClearHistory = getEl<HTMLButtonElement>('btn-clear-history');
+  const btnClearPrivate = getEl<HTMLButtonElement>('btn-clear-private');
+  const btnClearAll = getEl<HTMLButtonElement>('btn-clear-all');
+  const dataMgmtStatus = getEl<HTMLDivElement>('data-mgmt-status');
+
+  function showDataStatus(msg: string, isError = false): void {
+    dataMgmtStatus.textContent = msg;
+    dataMgmtStatus.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
+    setTimeout(() => { dataMgmtStatus.textContent = ''; dataMgmtStatus.className = 'status-message'; }, 4000);
+  }
+
+  btnDeleteOrigin.addEventListener('click', () => {
+    const origin = deleteOriginInput.value.trim();
+    if (!origin) { showDataStatus('Enter an origin first.', true); return; }
+    try { new URL(origin); } catch { showDataStatus('Invalid origin URL.', true); return; }
+    void LocalStorage.deleteOriginData(origin)
+      .then(() => { showDataStatus(`Deleted data for ${origin}.`); deleteOriginInput.value = ''; })
+      .catch((err: unknown) => { showDataStatus(`Failed: ${String(err)}`, true); });
+  });
+
+  btnClearHistory.addEventListener('click', () => {
+    if (!confirm('Clear ALL history? This cannot be undone.')) return;
+    void LocalStorage.deleteAllHistory()
+      .then(() => showDataStatus('All history cleared.'))
+      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
+  });
+
+  btnClearPrivate.addEventListener('click', () => {
+    void LocalStorage.deletePrivateRecords()
+      .then(() => showDataStatus('Private records cleared.'))
+      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
+  });
+
+  btnClearAll.addEventListener('click', () => {
+    if (!confirm('Clear ALL local SecCheck data? This cannot be undone.')) return;
+    void LocalStorage.clearAll()
+      .then(() => showDataStatus('All local data cleared. Extension will reload.'))
+      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
+  });
+}
 
 /* ================================================================
    Load settings and populate the form

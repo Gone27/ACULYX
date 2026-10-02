@@ -207,6 +207,8 @@ export interface TabState {
   updatedAt: number;
   /** Navigation generation counter for this tab's current document lifecycle. */
   navigationGeneration?: number;
+  /** True when this tab is an incognito/private tab. Incognito state is session-only and never persisted to local storage. */
+  isIncognito?: boolean;
 }
 
 export interface SettingsV2 {

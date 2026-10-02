@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Security Checker</title>
+  <link rel="stylesheet" href="../shared/design-tokens.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -59,6 +60,28 @@
   <!-- Coverage indicator -->
   <div class="coverage-bar" id="coverage-bar" hidden role="status"></div>
 
+  <!-- State-specific messages (CSS shows only the active one) -->
+  <div class="state-message state-not-monitored">
+    <p>SecCheck is not monitoring this site.</p>
+  </div>
+  <div class="state-message state-permission-denied">
+    <p>Permission was denied. Click "Monitor this site" to try again.</p>
+  </div>
+  <div class="state-message state-access-granted-reload">
+    <p>Access granted. Reload the page to start capturing headers.</p>
+  </div>
+  <div class="state-message state-capturing">
+    <p>Capturing headers…</p>
+  </div>
+  <div class="state-message state-paused-conflict">
+    <p>⚠ Capture paused — broad and per-site permissions conflict.</p>
+  </div>
+  <div class="state-message state-all-sites-missing">
+    <p>⚠ All-sites permission missing. Monitoring is paused.</p>
+  </div>
+  <div class="state-message state-restricted">
+    <p>This page cannot be inspected.</p>
+  </div>
   <!-- State messages (no permission / restricted / loading) -->
   <div class="state-message" id="state-message" role="status" aria-live="polite"></div>
 

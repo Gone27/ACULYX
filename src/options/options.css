@@ -5,20 +5,81 @@
 
 /* ── CSS variables (mirrors popup.css) ─────────────────────── */
 :root {
-  --color-critical: #c0392b;
-  --color-high:     #e74c3c;
-  --color-medium:   #f39c12;
-  --color-low:      #2980b9;
-  --color-info:     #7f8c8d;
-  --color-pass:     #27ae60;
-  --bg:             #1a1a2e;
-  --bg-card:        #16213e;
-  --bg-hover:       #0f3460;
-  --text:           #e0e0e0;
-  --text-muted:     #7f8c8d;
-  --border:         #2c3e50;
-  --radius:         6px;
+  --color-critical: var(--sc-critical);
+  --color-high:     var(--sc-high);
+  --color-medium:   var(--sc-medium);
+  --color-low:      var(--sc-low);
+  --color-info:     var(--sc-info);
+  --color-pass:     var(--sc-pass);
+  --bg:             var(--sc-bg);
+  --bg-card:        var(--sc-bg-card);
+  --bg-hover:       var(--sc-bg-hover);
+  --text:           var(--sc-text);
+  --text-muted:     var(--sc-text-muted);
+  --border:         var(--sc-border);
+  --radius:         var(--sc-radius);
   --max-width:      680px;
+}
+
+.options-section {
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius-lg);
+  padding: var(--sc-gap);
+  margin-bottom: var(--sc-gap);
+  background: var(--sc-bg-card);
+}
+.section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sc-accent);
+  margin-bottom: var(--sc-gap);
+  padding-bottom: var(--sc-gap-sm);
+  border-bottom: 1px solid var(--sc-border);
+}
+.danger-zone {
+  border-color: rgba(229, 57, 53, 0.3);
+}
+.danger-label {
+  color: var(--sc-critical);
+}
+.btn-danger {
+  background: transparent;
+  border: 1px solid var(--sc-critical);
+  color: var(--sc-critical);
+  border-radius: var(--sc-radius);
+  padding: 5px 14px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.btn-danger:hover {
+  background: rgba(229, 57, 53, 0.12);
+}
+.btn-danger-sm {
+  background: transparent;
+  border: 1px solid var(--sc-critical);
+  color: var(--sc-critical);
+  border-radius: var(--sc-radius);
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.data-actions-row {
+  display: flex;
+  gap: var(--sc-gap-sm);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.danger-actions {
+  display: flex;
+  gap: var(--sc-gap-sm);
+  flex-wrap: wrap;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 2px;
 }
 
 /* ── Reset / base ───────────────────────────────────────────── */

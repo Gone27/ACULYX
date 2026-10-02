@@ -4,12 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Attack Surface Graph</title>
-  <script type="module" crossorigin src="/chunks/sidepanel.html-CXgz0W4a.js"></script>
+  <script type="module" crossorigin src="/chunks/sidepanel.html-kSW7FgZ3.js"></script>
   <link rel="modulepreload" crossorigin href="/chunks/messaging-BtJyJf3R.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
-  <link rel="stylesheet" crossorigin href="/assets/sidepanel-CB-CKrYD.css">
+  <link rel="stylesheet" crossorigin href="/assets/sidepanel-CKrjpBA5.css">
+  <link rel="stylesheet" crossorigin href="/assets/design-tokens-tuiVsPYb.css">
 </head>
-<body>
+<body class="view-graph">
   <!-- Header bar -->
   <header class="sidepanel-header" role="banner">
     <div class="header-main">
@@ -17,6 +18,9 @@
       <span class="tier-badge" id="tier-badge">Free Tier</span>
     </div>
     <div class="header-actions">
+      <button type="button" id="view-toggle-btn" aria-pressed="false" title="Switch between graph and list view">
+        List view
+      </button>
       <button class="icon-btn" id="refresh-btn" title="Refresh Graph" aria-label="Refresh Graph">🔄</button>
       <a href="" id="options-link" class="icon-btn" title="Settings" aria-label="Settings">⚙</a>
     </div>
@@ -64,16 +68,34 @@
     </div>
   </div>
 
-  <!-- SVG Graph Canvas -->
+  <!-- Main visual area -->
   <main class="graph-canvas-container" id="canvas-container">
-    <div class="graph-loading" id="graph-loading">Loading graph…</div>
-    <div class="graph-empty" id="graph-empty" hidden>
-      No attack surface nodes discovered yet for this domain. Browse pages on this origin to accumulate trust vectors.
+    <div class="graph-section">
+      <div class="graph-loading" id="graph-loading">Loading graph…</div>
+      <div class="graph-empty" id="graph-empty" hidden>
+        No attack surface nodes discovered yet for this domain. Browse pages on this origin to accumulate trust vectors.
+      </div>
+      <svg id="graph-svg" class="graph-svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Attack Surface Node Graph">
+        <g id="edges-group"></g>
+        <g id="nodes-group"></g>
+      </svg>
     </div>
-    <svg id="graph-svg" class="graph-svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Attack Surface Node Graph">
-      <g id="edges-group"></g>
-      <g id="nodes-group"></g>
-    </svg>
+
+    <div class="node-list-section" aria-label="Node list">
+      <table class="node-list-table" id="node-list-table" role="grid" aria-label="Attack surface nodes">
+        <thead>
+          <tr>
+            <th scope="col">Hostname</th>
+            <th scope="col">Role</th>
+            <th scope="col">Grade</th>
+            <th scope="col">Last seen</th>
+          </tr>
+        </thead>
+        <tbody id="node-list-body">
+          <!-- rows added by JS -->
+        </tbody>
+      </table>
+    </div>
   </main>
 
   <!-- Selected Node Details Drawer -->

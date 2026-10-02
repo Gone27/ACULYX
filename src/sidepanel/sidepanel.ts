@@ -13,6 +13,7 @@ import {
   forceManyBody,
   forceCenter,
   forceCollide,
+  type Simulation,
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force';
@@ -48,7 +49,18 @@ function getSvgEl<T extends SVGElement>(id: string): T {
   return el as unknown as T;
 }
 
+let activeSimulation: Simulation<SimNode, undefined> | null = null;
+const nodePositions = new Map<string, { x: number; y: number }>();
+let lastGraphKey = '';
+
+function graphTopologyKey(nodes: GraphNode[], edges: GraphEdge[]): string {
+  const nodeIds = nodes.map(n => n.hostname).sort().join(',');
+  const edgeIds = edges.map(e => `${e.source}>${e.target}`).sort().join(',');
+  return `${nodeIds}|${edgeIds}`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  const viewToggleBtn = getEl<HTMLButtonElement>('view-toggle-btn');
   const tierBadge = getEl<HTMLSpanElement>('tier-badge');
   const refreshBtn = getEl<HTMLButtonElement>('refresh-btn');
   const optionsLink = getEl<HTMLAnchorElement>('options-link');
@@ -73,6 +85,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let activeTabId: number | null = null;
   let activeApexDomain: string = '';
+  let isListView = false;
+
+  document.body.classList.add('view-graph');
+
+  viewToggleBtn.addEventListener('click', () => {
+    isListView = !isListView;
+    document.body.classList.toggle('view-graph', !isListView);
+    document.body.classList.toggle('view-list', isListView);
+    viewToggleBtn.textContent = isListView ? 'Graph view' : 'List view';
+    viewToggleBtn.setAttribute('aria-pressed', isListView ? 'true' : 'false');
+  });
 
   optionsLink.addEventListener('click', (e) => {
     e.preventDefault();
@@ -299,39 +322,86 @@ document.addEventListener('DOMContentLoaded', () => {
       return g;
     });
 
-    // Run d3-force layout simulation
-    const simulation = forceSimulation<SimNode>(simNodes)
-      .force('link', forceLink<SimNode, SimLink>(simLinks).id((d) => d.id).distance(85))
-      .force('charge', forceManyBody().strength(-220))
-      .force('center', forceCenter(centerX, centerY))
-      .force('collide', forceCollide().radius(26));
+    const topoKey = graphTopologyKey(graph.nodes, graph.edges);
+    const topologyUnchanged = topoKey === lastGraphKey;
+    lastGraphKey = topoKey;
 
-    simulation.on('tick', () => {
-      // Update links
+    if (activeSimulation !== null) {
+      activeSimulation.stop();
+      activeSimulation = null;
+    }
+
+    const applyPositions = () => {
       for (let i = 0; i < simLinks.length; i++) {
         const link = simLinks[i];
         const line = lineElements[i];
         if (link !== undefined && line !== undefined) {
-          const s = link.source as SimNode;
-          const t = link.target as SimNode;
-          line.setAttribute('x1', clamp(s.x ?? centerX, 15, WIDTH - 15).toString());
-          line.setAttribute('y1', clamp(s.y ?? centerY, 15, HEIGHT - 15).toString());
-          line.setAttribute('x2', clamp(t.x ?? centerX, 15, WIDTH - 15).toString());
-          line.setAttribute('y2', clamp(t.y ?? centerY, 15, HEIGHT - 15).toString());
+          const sId = typeof link.source === 'string' ? link.source : link.source.id;
+          const tId = typeof link.target === 'string' ? link.target : link.target.id;
+          const sPos = nodePositions.get(sId) ?? { x: centerX, y: centerY };
+          const tPos = nodePositions.get(tId) ?? { x: centerX, y: centerY };
+          line.setAttribute('x1', clamp(sPos.x, 15, WIDTH - 15).toString());
+          line.setAttribute('y1', clamp(sPos.y, 15, HEIGHT - 15).toString());
+          line.setAttribute('x2', clamp(tPos.x, 15, WIDTH - 15).toString());
+          line.setAttribute('y2', clamp(tPos.y, 15, HEIGHT - 15).toString());
         }
       }
-
-      // Update nodes
       for (let i = 0; i < simNodes.length; i++) {
         const node = simNodes[i];
         const g = nodeGroups[i];
         if (node !== undefined && g !== undefined) {
-          const cx = clamp(node.x ?? centerX, 20, WIDTH - 20);
-          const cy = clamp(node.y ?? centerY, 20, HEIGHT - 20);
+          const pos = nodePositions.get(node.id) ?? { x: centerX, y: centerY };
+          const cx = clamp(pos.x, 20, WIDTH - 20);
+          const cy = clamp(pos.y, 20, HEIGHT - 20);
           g.setAttribute('transform', `translate(${cx}, ${cy})`);
         }
       }
-    });
+    };
+
+    if (topologyUnchanged) {
+      applyPositions();
+    } else {
+      for (const node of simNodes) {
+        const saved = nodePositions.get(node.id);
+        if (saved) {
+          node.x = saved.x;
+          node.y = saved.y;
+        }
+      }
+
+      activeSimulation = forceSimulation<SimNode>(simNodes)
+        .force('link', forceLink<SimNode, SimLink>(simLinks).id((d) => d.id).distance(85))
+        .force('charge', forceManyBody().strength(-220))
+        .force('center', forceCenter(centerX, centerY))
+        .force('collide', forceCollide().radius(26));
+
+      const sim = activeSimulation;
+
+      sim.on('tick', () => {
+        for (const node of simNodes) {
+          if (node.x !== undefined && node.y !== undefined) {
+            nodePositions.set(node.id, { x: node.x, y: node.y });
+          }
+        }
+        applyPositions();
+      });
+
+      sim.on('end', () => {
+        for (const node of simNodes) {
+          if (node.x !== undefined && node.y !== undefined) {
+            nodePositions.set(node.id, { x: node.x, y: node.y });
+          }
+        }
+      });
+
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (prefersReducedMotion) {
+        sim.tick(50);
+        sim.stop();
+      }
+    }
+
+    renderNodeList(graph.nodes);
 
     // Auto-select apex node initially
     const apexNode = simNodes.find((n) => n.isApex);
@@ -362,5 +432,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function clamp(val: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, val));
+  }
+
+  function renderNodeList(nodes: GraphNode[]): void {
+    const tbody = getEl<HTMLTableSectionElement>('node-list-body');
+    // Clear existing rows
+    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    
+    for (const node of nodes) {
+      const tr = document.createElement('tr');
+      tr.setAttribute('role', 'row');
+      tr.setAttribute('tabindex', '0');
+      tr.setAttribute('aria-selected', 'false');
+      
+      const tdHost = document.createElement('td');
+      tdHost.textContent = node.hostname;
+      
+      const tdRole = document.createElement('td');
+      tdRole.textContent = node.isApex ? 'Apex' : 'Subdomain';
+      
+      const tdGrade = document.createElement('td');
+      tdGrade.className = 'grade-cell';
+      tdGrade.textContent = node.grade !== undefined && node.score !== undefined
+        ? `${node.grade} (${node.score})`
+        : '—';
+      
+      const tdSeen = document.createElement('td');
+      tdSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
+      
+      tr.appendChild(tdHost);
+      tr.appendChild(tdRole);
+      tr.appendChild(tdGrade);
+      tr.appendChild(tdSeen);
+      
+      // Keyboard activation
+      tr.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          showNodeDetails(node);
+          // Mark as selected
+          tbody.querySelectorAll('tr').forEach(r => r.setAttribute('aria-selected', 'false'));
+          tr.setAttribute('aria-selected', 'true');
+        }
+      });
+      tr.addEventListener('click', () => {
+        showNodeDetails(node);
+        tbody.querySelectorAll('tr').forEach(r => r.setAttribute('aria-selected', 'false'));
+        tr.setAttribute('aria-selected', 'true');
+      });
+      
+      tbody.appendChild(tr);
+    }
   }
 });

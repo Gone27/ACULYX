@@ -5,23 +5,60 @@
 
 /* ── CSS variables ─────────────────────────────────────────── */
 :root {
-  --color-critical: #c0392b;
-  --color-high: #e74c3c;
-  --color-medium: #f39c12;
-  --color-low: #4b8f9b;
-  --color-info: #71808f;
-  --color-pass: #33856c;
-  --bg: #0b0e14;
-  --bg-card: #141922;
-  --bg-raised: #1b222d;
-  --bg-hover: #202a36;
-  --text: #e8edf2;
-  --text-muted: #98a5b3;
-  --border: #293341;
-  --accent: #3dd9c7;
-  --accent-ink: #071514;
-  --radius: 6px;
+  /* Map sc- tokens to existing local vars for backward compatibility */
+  --color-critical: var(--sc-critical);
+  --color-high:     var(--sc-high);
+  --color-medium:   var(--sc-medium);
+  --color-low:      var(--sc-low);
+  --color-info:     var(--sc-info);
+  --color-pass:     var(--sc-pass);
+  --bg:             var(--sc-bg);
+  --bg-card:        var(--sc-bg-card);
+  --bg-raised:      var(--sc-bg-raised);
+  --bg-hover:       var(--sc-bg-hover);
+  --text:           var(--sc-text);
+  --text-muted:     var(--sc-text-muted);
+  --border:         var(--sc-border);
+  --accent:         var(--sc-accent);
+  --accent-ink:     var(--sc-accent-ink);
+  --radius:         var(--sc-radius);
 }
+
+/* Popup explicit states — JS sets body data-state attribute */
+[data-state='not-monitored'] .state-not-monitored { display: block; }
+[data-state='permission-needed'] .state-permission-needed { display: block; }
+[data-state='permission-denied'] .state-permission-denied { display: block; }
+[data-state='access-granted-reload'] .state-access-granted-reload { display: block; }
+[data-state='capturing'] .state-capturing { display: block; }
+[data-state='results'] .state-results { display: block; }
+[data-state='paused-conflict'] .state-paused-conflict { display: block; }
+[data-state='all-sites-missing'] .state-all-sites-missing { display: block; }
+[data-state='restricted'] .state-restricted { display: block; }
+/* default: show nothing until state is set */
+.state-not-monitored, .state-permission-needed, .state-permission-denied,
+.state-access-granted-reload, .state-capturing, .state-results,
+.state-paused-conflict, .state-all-sites-missing, .state-restricted {
+  display: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 2px;
+}
+
+.grade-a { background-color: var(--sc-grade-a); color: #fff; }
+.grade-b { background-color: var(--sc-grade-b); color: #fff; }
+.grade-c { background-color: var(--sc-grade-c); color: #000; }
+.grade-d { background-color: var(--sc-grade-d); color: #fff; }
+.grade-f { background-color: var(--sc-grade-f); color: #fff; }
+.grade-unknown { background-color: var(--sc-grade-unknown); color: #fff; }
+
+.finding-item[data-severity='critical'] { border-left-color: var(--sc-critical); }
+.finding-item[data-severity='high']     { border-left-color: var(--sc-high); }
+.finding-item[data-severity='medium']   { border-left-color: var(--sc-medium); }
+.finding-item[data-severity='low']      { border-left-color: var(--sc-low); }
+.finding-item[data-severity='info']     { border-left-color: var(--sc-info); }
+.finding-item[data-severity='pass']     { border-left-color: var(--sc-pass); }
 
 /* ── Reset / base ───────────────────────────────────────────── */
 *,

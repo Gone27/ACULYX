@@ -4,11 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Security Checker</title>
-  <script type="module" crossorigin src="/chunks/popup.html-GWyiPyGT.js"></script>
+  <script type="module" crossorigin src="/chunks/popup.html-CTh9Ta_U.js"></script>
   <link rel="modulepreload" crossorigin href="/chunks/messaging-BtJyJf3R.js">
-  <link rel="modulepreload" crossorigin href="/chunks/capture-fPtlzvO-.js">
+  <link rel="modulepreload" crossorigin href="/chunks/capture-kosxRNgw.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
-  <link rel="stylesheet" crossorigin href="/assets/popup-Dhhfq7Q7.css">
+  <link rel="stylesheet" crossorigin href="/assets/popup-BbjybeCw.css">
+  <link rel="stylesheet" crossorigin href="/assets/design-tokens-tuiVsPYb.css">
 </head>
 <body>
   <!-- Header bar -->
@@ -63,6 +64,28 @@
   <!-- Coverage indicator -->
   <div class="coverage-bar" id="coverage-bar" hidden role="status"></div>
 
+  <!-- State-specific messages (CSS shows only the active one) -->
+  <div class="state-message state-not-monitored">
+    <p>SecCheck is not monitoring this site.</p>
+  </div>
+  <div class="state-message state-permission-denied">
+    <p>Permission was denied. Click "Monitor this site" to try again.</p>
+  </div>
+  <div class="state-message state-access-granted-reload">
+    <p>Access granted. Reload the page to start capturing headers.</p>
+  </div>
+  <div class="state-message state-capturing">
+    <p>Capturing headers…</p>
+  </div>
+  <div class="state-message state-paused-conflict">
+    <p>⚠ Capture paused — broad and per-site permissions conflict.</p>
+  </div>
+  <div class="state-message state-all-sites-missing">
+    <p>⚠ All-sites permission missing. Monitoring is paused.</p>
+  </div>
+  <div class="state-message state-restricted">
+    <p>This page cannot be inspected.</p>
+  </div>
   <!-- State messages (no permission / restricted / loading) -->
   <div class="state-message" id="state-message" role="status" aria-live="polite"></div>
 

@@ -1,6 +1,7 @@
 import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { _ as LocalStorage, b as normalizeCookieList, o as PermissionsService, x as resolveCookieOverlaps, y as SettingsService } from "./capture-fPtlzvO-.js";
+import { S as resolveCookieOverlaps, b as SettingsService, s as PermissionsService, v as LocalStorage, x as normalizeCookieList } from "./capture-kosxRNgw.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
+/* empty css                       */
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
 var modeRadios;
@@ -45,8 +46,55 @@ document.addEventListener("DOMContentLoaded", () => {
 	wireConflictBanner();
 	wireSaveButton();
 	wireDirtyTracking();
+	wireDataManagement();
 	loadAndPopulate();
 });
+function wireDataManagement() {
+	const deleteOriginInput = getEl("delete-origin-input");
+	const btnDeleteOrigin = getEl("btn-delete-origin");
+	const btnClearHistory = getEl("btn-clear-history");
+	const btnClearPrivate = getEl("btn-clear-private");
+	const btnClearAll = getEl("btn-clear-all");
+	const dataMgmtStatus = getEl("data-mgmt-status");
+	function showDataStatus(msg, isError = false) {
+		dataMgmtStatus.textContent = msg;
+		dataMgmtStatus.className = "status-message " + (isError ? "status-error" : "status-success");
+		setTimeout(() => {
+			dataMgmtStatus.textContent = "";
+			dataMgmtStatus.className = "status-message";
+		}, 4e3);
+	}
+	btnDeleteOrigin.addEventListener("click", () => {
+		const origin = deleteOriginInput.value.trim();
+		if (!origin) {
+			showDataStatus("Enter an origin first.", true);
+			return;
+		}
+		try {
+			new URL(origin);
+		} catch {
+			showDataStatus("Invalid origin URL.", true);
+			return;
+		}
+		LocalStorage.deleteOriginData(origin).then(() => {
+			showDataStatus(`Deleted data for ${origin}.`);
+			deleteOriginInput.value = "";
+		}).catch((err) => {
+			showDataStatus(`Failed: ${String(err)}`, true);
+		});
+	});
+	btnClearHistory.addEventListener("click", () => {
+		if (!confirm("Clear ALL history? This cannot be undone.")) return;
+		LocalStorage.deleteAllHistory().then(() => showDataStatus("All history cleared.")).catch((err) => showDataStatus(`Failed: ${String(err)}`, true));
+	});
+	btnClearPrivate.addEventListener("click", () => {
+		LocalStorage.deletePrivateRecords().then(() => showDataStatus("Private records cleared.")).catch((err) => showDataStatus(`Failed: ${String(err)}`, true));
+	});
+	btnClearAll.addEventListener("click", () => {
+		if (!confirm("Clear ALL local SecCheck data? This cannot be undone.")) return;
+		LocalStorage.clearAll().then(() => showDataStatus("All local data cleared. Extension will reload.")).catch((err) => showDataStatus(`Failed: ${String(err)}`, true));
+	});
+}
 async function loadAndPopulate() {
 	let settings;
 	try {
@@ -344,4 +392,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-B25iUgxS.js.map
+//# sourceMappingURL=options.html-lrr_ZnUs.js.map

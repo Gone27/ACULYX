@@ -1,6 +1,7 @@
 import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { _ as LocalStorage, c as patternFromOrigin, d as isModeCaptureAllowed, o as PermissionsService, y as SettingsService } from "./capture-fPtlzvO-.js";
+import { b as SettingsService, f as isModeCaptureAllowed, l as patternFromOrigin, s as PermissionsService, v as LocalStorage } from "./capture-kosxRNgw.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
+/* empty css                       */
 //#region src/shared/filters.ts
 /**
 * Pure presentation selector to filter findings by allowed severity levels.
@@ -76,6 +77,11 @@ var currentSettings = null;
 var currentFindings = [];
 /** Temporary override to show all findings regardless of filter. */
 var showAllFindingsOverride = false;
+var currentBreakdown = [];
+var breakdownRendered = false;
+function setPopupState(s) {
+	document.body.dataset["state"] = s;
+}
 document.addEventListener("DOMContentLoaded", () => {
 	gradeBadge = getEl("grade-badge");
 	badgeGrade = getEl("badge-grade");
@@ -118,6 +124,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	showAllFindingsBtn.addEventListener("click", () => {
 		showAllFindingsOverride = !showAllFindingsOverride;
 		renderFindings(currentFindings);
+	});
+	breakdownSection.addEventListener("toggle", () => {
+		if (breakdownSection.open && !breakdownRendered) renderBreakdown(currentBreakdown);
 	});
 	SettingsService.onSettingsChanged((newSettings) => {
 		currentSettings = newSettings;
@@ -168,16 +177,19 @@ async function initPopup() {
 		if (gate.reason === "off") {
 			originText.textContent = tab.url;
 			showStateMessage("Monitoring is turned off in Settings.", "restricted");
+			setPopupState("restricted");
 			return;
 		}
 		if (gate.reason === "broad-access-conflict") {
 			originText.textContent = tab.url;
 			showBroadAccessConflictNotice();
+			setPopupState("paused-conflict");
 			return;
 		}
 		if (gate.reason === "restricted-url") {
 			originText.textContent = tab.url;
 			showStateMessage("Restricted page — browser pages cannot be inspected.", "restricted");
+			setPopupState("restricted");
 			return;
 		}
 	}
@@ -191,6 +203,7 @@ async function initPopup() {
 		origin = new URL(tab.url).origin;
 	} catch {
 		showStateMessage("Unsupported URL scheme.", "restricted");
+		setPopupState("restricted");
 		return;
 	}
 	currentOrigin = origin;
@@ -198,6 +211,7 @@ async function initPopup() {
 	if (!(broadActive || await checkPermission(origin))) {
 		showMonitorSection();
 		showStateMessage("Permission required before this site can be analysed.", "permission");
+		setPopupState("permission-needed");
 		return;
 	}
 	showStateMessage("Analysing…", "loading");
@@ -208,7 +222,10 @@ async function initPopup() {
 		});
 		if (response.type === "STATE_RESPONSE") {
 			if (response.state) renderState(response.state);
-			else showStateMessage("Waiting for the first response on this page…", "waiting");
+			else {
+				showStateMessage("Waiting for the first response on this page…", "waiting");
+				setPopupState("capturing");
+			}
 		}
 	} catch {
 		showStateMessage("Could not reach the service worker. Try reloading.", "error");
@@ -233,9 +250,14 @@ function openLivePort() {
 	port.onDisconnect.addListener(() => {});
 }
 function renderState(state) {
+	const savedScrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+	const savedFocusId = document.activeElement?.id;
 	currentState = state;
 	clearStateMessage();
+	if (state.hops.length === 0) setPopupState("capturing");
+	else setPopupState("results");
 	setBadgeState("graded", state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
+	gradeBadge.className = "grade-badge grade-" + (state.grade?.toLowerCase() ?? "unknown");
 	scoreText.textContent = `Score: ${state.score}/100`;
 	qualityScoreText.textContent = `Configuration quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? "A"})`;
 	originText.textContent = state.origin;
@@ -247,13 +269,30 @@ function renderState(state) {
 		renderFindings(state.findings);
 		findingsSection.hidden = false;
 	} else findingsSection.hidden = true;
-	renderBreakdown(state.scoreBreakdown);
+	currentBreakdown = state.scoreBreakdown;
+	if (currentBreakdown.filter((b) => b.penalty > 0).length === 0) breakdownSection.hidden = true;
+	else {
+		breakdownSection.hidden = false;
+		if (breakdownSection.open) renderBreakdown(currentBreakdown);
+		else {
+			breakdownRendered = false;
+			while (breakdownBody.firstChild) breakdownBody.removeChild(breakdownBody.firstChild);
+		}
+	}
 	renderAuthDiff(state.origin);
 	renderSubdomainTrust(state.subdomainTrust);
 	renderApiEndpoints(state);
 	exportBtn.hidden = false;
 	copyReportBtn.hidden = false;
 	monitorSection.hidden = true;
+	if (savedScrollTop > 0) {
+		document.documentElement.scrollTop = savedScrollTop;
+		document.body.scrollTop = savedScrollTop;
+	}
+	if (savedFocusId !== void 0 && savedFocusId !== "") {
+		const el = document.getElementById(savedFocusId);
+		if (el) el.focus();
+	}
 }
 function renderCoverage(coverage, hops) {
 	const warnings = [`Coverage: ${coverage.hopsCaptured}/${coverage.hopsExpected} response${coverage.hopsExpected === 1 ? "" : "s"}`, `Service worker: ${formatServiceWorkerStatus(coverage)}`];
@@ -297,6 +336,7 @@ function renderFindings(findings) {
 function buildFindingItem(finding) {
 	const li = document.createElement("li");
 	li.className = `finding-item severity-${finding.severity}`;
+	li.dataset["severity"] = finding.severity;
 	const severitySpan = document.createElement("span");
 	severitySpan.className = "finding-severity";
 	severitySpan.textContent = finding.severity;
@@ -392,6 +432,7 @@ function renderBreakdown(breakdown) {
 		breakdownBody.appendChild(tr);
 	}
 	breakdownSection.hidden = false;
+	breakdownRendered = true;
 }
 async function renderAuthDiff(origin) {
 	try {
@@ -953,6 +994,7 @@ function wireMonitorButton() {
 			if (granted) {
 				monitorSection.hidden = true;
 				showStateMessage("Permission granted. Refreshing this page to begin monitoring…", "waiting");
+				setPopupState("access-granted-reload");
 				if (currentTabId !== null) {
 					sendToBackground({
 						type: "PERMISSIONS_CHANGED",
@@ -964,7 +1006,7 @@ function wireMonitorButton() {
 						if (chrome.runtime.lastError != null) showStateMessage("Permission was granted, but this page could not be refreshed. Reload it to begin monitoring.", "error");
 					});
 				}
-			}
+			} else setPopupState("permission-denied");
 		});
 	});
 }
@@ -1037,4 +1079,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-GWyiPyGT.js.map
+//# sourceMappingURL=popup.html-CTh9Ta_U.js.map

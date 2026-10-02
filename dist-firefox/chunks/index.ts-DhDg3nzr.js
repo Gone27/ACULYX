@@ -1,5 +1,5 @@
 import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BtJyJf3R.js";
-import { S as settingsTransitionPipeline, _ as LocalStorage, a as CapturePolicy, d as isModeCaptureAllowed, f as isRestrictedUrl$1, g as tabStates, h as originAuthBaselines, i as registerCaptureListeners, l as reconcilePermissionsOnRemoved, m as initLifecycle, n as clearInFlightCaptures, p as hydrateFromSession, r as inFlightRequests, s as isBroadGrant, t as captureMap, u as reconcilePermissionsOnStartup, v as SessionStorage, y as SettingsService } from "./capture-fPtlzvO-.js";
+import { C as settingsTransitionPipeline, _ as tabStates, a as registerCaptureListeners, b as SettingsService, c as isBroadGrant, d as reconcilePermissionsOnStartup, f as isModeCaptureAllowed, g as originAuthBaselines, h as initLifecycle, i as incognitoTabIds, m as hydrateFromSession, n as clearInFlightCaptures, o as CapturePolicy, p as isRestrictedUrl$1, r as inFlightRequests, t as captureMap, u as reconcilePermissionsOnRemoved, v as LocalStorage, y as SessionStorage } from "./capture-kosxRNgw.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -304,6 +304,7 @@ function reportPageSignals() {
 //#endregion
 //#region src/background/page-signals.ts
 async function injectPageSignals(tabId, url) {
+	if (incognitoTabIds.has(tabId)) return;
 	if (isRestrictedUrl$1(url)) return;
 	const origin = originFromUrl(url);
 	if (origin === null || origin.length === 0) return;
@@ -3326,6 +3327,108 @@ function mergeIntoGraph(existingGraph, currentHostname, score, grade, discovered
 	};
 }
 //#endregion
+//#region src/shared/coalescer.ts
+/**
+* BroadcastCoalescer
+* Coalesces rapid tab-state broadcasts to at most one per `intervalMs` (default 100ms).
+* The LAST value received in the window is always flushed (never drops final state).
+* A trailing flush always fires after the last call even if the interval has not elapsed.
+*/
+var BroadcastCoalescer = class {
+	flush;
+	intervalMs;
+	pending = /* @__PURE__ */ new Map();
+	timers = /* @__PURE__ */ new Map();
+	constructor(flush, intervalMs = 100) {
+		this.flush = flush;
+		this.intervalMs = intervalMs;
+	}
+	push(tabId, value) {
+		this.pending.set(tabId, value);
+		if (!this.timers.has(tabId)) {
+			const timer = setTimeout(() => {
+				this.timers.delete(tabId);
+				const v = this.pending.get(tabId);
+				if (v !== void 0) {
+					this.pending.delete(tabId);
+					this.flush(tabId, v);
+				}
+			}, this.intervalMs);
+			this.timers.set(tabId, timer);
+		}
+	}
+	/** Immediately flush a specific tab (e.g. on tab close). */
+	flushNow(tabId) {
+		const timer = this.timers.get(tabId);
+		if (timer !== void 0) {
+			clearTimeout(timer);
+			this.timers.delete(tabId);
+		}
+		const v = this.pending.get(tabId);
+		if (v !== void 0) {
+			this.pending.delete(tabId);
+			this.flush(tabId, v);
+		}
+	}
+	/** Clear all pending state for a tab (e.g. navigation reset). */
+	clear(tabId) {
+		const timer = this.timers.get(tabId);
+		if (timer !== void 0) {
+			clearTimeout(timer);
+			this.timers.delete(tabId);
+		}
+		this.pending.delete(tabId);
+	}
+};
+/**
+* WriteBatcher
+* Batches chrome.storage.session writes to at most `maxPerSec` writes per tab per second.
+* The LAST value is always committed (trailing write always fires).
+* Writes are serialized per tab to prevent lost updates.
+*/
+var WriteBatcher = class {
+	timers = /* @__PURE__ */ new Map();
+	pending = /* @__PURE__ */ new Map();
+	minIntervalMs;
+	constructor(maxPerSec = 2) {
+		this.minIntervalMs = Math.ceil(1e3 / maxPerSec);
+	}
+	schedule(tabId, writeFn) {
+		this.pending.set(tabId, writeFn);
+		if (!this.timers.has(tabId)) {
+			const timer = setTimeout(() => {
+				this.timers.delete(tabId);
+				const fn = this.pending.get(tabId);
+				if (fn !== void 0) {
+					this.pending.delete(tabId);
+					fn();
+				}
+			}, this.minIntervalMs);
+			this.timers.set(tabId, timer);
+		}
+	}
+	flushNow(tabId) {
+		const timer = this.timers.get(tabId);
+		if (timer !== void 0) {
+			clearTimeout(timer);
+			this.timers.delete(tabId);
+		}
+		const fn = this.pending.get(tabId);
+		if (fn !== void 0) {
+			this.pending.delete(tabId);
+			fn();
+		}
+	}
+	clear(tabId) {
+		const timer = this.timers.get(tabId);
+		if (timer !== void 0) {
+			clearTimeout(timer);
+			this.timers.delete(tabId);
+		}
+		this.pending.delete(tabId);
+	}
+};
+//#endregion
 //#region src/background/index.ts
 /**
 * index.ts
@@ -3419,6 +3522,11 @@ function pruneTransientStructures(now = Date.now()) {
 	}
 }
 var portRegistry = new PortRegistry();
+var broadcastCoalescer = new BroadcastCoalescer((tabId, state) => portRegistry.broadcast(tabId, {
+	type: "TAB_STATE_UPDATE",
+	state
+}), 100);
+var writeBatcher = new WriteBatcher(2);
 var badgeTrackedTabs = /* @__PURE__ */ new Set();
 var pendingServiceWorkerReports = /* @__PURE__ */ new Map();
 var pendingMetaCspReports = /* @__PURE__ */ new Set();
@@ -3464,8 +3572,8 @@ function recomputeTabState(tabId, state) {
 	state.navigationGeneration = getTabGeneration(tabId);
 	state.updatedAt = Date.now();
 	tabStates.set(tabId, state);
-	SessionStorage.setTabState(state);
-	if (state.monitoredByUser && state.origin) {
+	writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state));
+	if (state.monitoredByUser && state.origin !== "" && state.isIncognito !== true) {
 		LocalStorage.recordOriginHistory(state.origin, {
 			timestamp: state.updatedAt,
 			score: state.score,
@@ -3486,10 +3594,7 @@ function recomputeTabState(tabId, state) {
 		})();
 	}
 	setBadgeForTab(tabId, state.grade);
-	portRegistry.broadcast(tabId, {
-		type: "TAB_STATE_UPDATE",
-		state
-	});
+	broadcastCoalescer.push(tabId, state);
 }
 /**
 * Returns true when the URL belongs to a restricted scheme (chrome://, etc.)
@@ -3547,11 +3652,8 @@ settingsTransitionPipeline.registerHooks({
 	onRescoreTabs: (_prev, _next) => {
 		for (const [tabId, state] of Array.from(tabStates.entries())) {
 			recomputeTabState(tabId, state);
-			SessionStorage.setTabState(state).catch(() => void 0);
-			portRegistry.broadcast(tabId, {
-				type: "TAB_STATE_UPDATE",
-				state
-			});
+			writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state).catch(() => void 0));
+			broadcastCoalescer.push(tabId, state);
 		}
 	},
 	onModeChange: async (_prevMode, newMode) => {
@@ -3629,7 +3731,7 @@ function createDefaultTabState(tabId, url) {
 * given request.  Runs the full analysis pipeline through the per-tab ordered
 * reducer queue and pushes updates to all connected ports.
 */
-async function onHopComplete(tabId, hop) {
+async function onHopComplete(tabId, hop, isIncognito) {
 	if (!Number.isInteger(tabId) || tabId < 0) return;
 	const currentGen = getTabGeneration(tabId);
 	if (hop.generation !== void 0 && hop.generation !== currentGen) return;
@@ -3640,6 +3742,7 @@ async function onHopComplete(tabId, hop) {
 		await startupReady;
 		if (getTabGeneration(tabId) !== gen) return;
 		const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
+		state.isIncognito = isIncognito;
 		state.navigationGeneration = gen;
 		state.url = hop.url;
 		state.origin = originFromUrl(hop.url) ?? hop.url;
@@ -3697,8 +3800,14 @@ async function onHopComplete(tabId, hop) {
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 	if (details.frameId !== 0) return;
 	const { tabId } = details;
+	chrome.tabs.get(tabId).then((tab) => {
+		if (tab.incognito) incognitoTabIds.add(tabId);
+		else incognitoTabIds.delete(tabId);
+	}).catch(() => void 0);
 	incrementTabGeneration(tabId);
 	tabActionQueue.clearTab(tabId);
+	broadcastCoalescer.clear(tabId);
+	writeBatcher.clear(tabId);
 	pendingServiceWorkerReports.delete(tabId);
 	pendingMetaCspReports.delete(tabId);
 	tabStates.delete(tabId);
@@ -3736,6 +3845,8 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
 	}
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
+	broadcastCoalescer.flushNow(tabId);
+	writeBatcher.flushNow(tabId);
 	tabGenerations.delete(tabId);
 	tabActionQueue.clearTab(tabId);
 	tabStates.delete(tabId);
@@ -3745,7 +3856,21 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 	badgeTrackedTabs.delete(tabId);
 	for (const [requestId, partial] of captureMap.entries()) if (partial.tabId === tabId) captureMap.delete(requestId);
 	SessionStorage.removeTabState(tabId).catch(() => void 0);
+	broadcastCoalescer.clear(tabId);
+	writeBatcher.clear(tabId);
+	const wasIncognito = incognitoTabIds.has(tabId);
+	incognitoTabIds.delete(tabId);
+	if (wasIncognito) chrome.tabs.query({}).then((tabs) => {
+		if (tabs.filter((t) => t.incognito).length === 0) clearIncognitoSessionRecords();
+	}).catch(() => void 0);
 });
+async function clearIncognitoSessionRecords() {
+	try {
+		const all = await chrome.storage.session.get(null);
+		const toRemove = Object.entries(all).filter(([k, v]) => k.startsWith("tab:") && typeof v === "object" && v !== null && v.isIncognito === true).map(([k]) => k);
+		if (toRemove.length > 0) await chrome.storage.session.remove(toRemove);
+	} catch {}
+}
 chrome.runtime.onConnect.addListener((port) => {
 	const isPopup = port.name === POPUP_PORT_NAME;
 	const isSidePanel = port.name === SIDEPANEL_PORT_NAME;
@@ -4020,9 +4145,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	return false;
 });
 initLifecycle();
-registerCaptureListeners((tabId, hop) => {
-	onHopComplete(tabId, hop);
-}, (apiHop) => {
+registerCaptureListeners((tabId, hop, isIncognito) => {
+	onHopComplete(tabId, hop, isIncognito);
+}, (apiHop, isIncognito) => {
 	const tabId = apiHop.tabId;
 	if (!Number.isInteger(tabId) || tabId < 0) return;
 	const currentGen = getTabGeneration(tabId);
@@ -4035,6 +4160,7 @@ registerCaptureListeners((tabId, hop) => {
 		if (getTabGeneration(tabId) !== gen) return;
 		const state = tabStates.get(tabId);
 		if (!state) return;
+		state.isIncognito = isIncognito;
 		if (!await CapturePolicy.isAllowed(apiHop.url)) return;
 		if (getTabGeneration(tabId) !== gen) return;
 		const targetOrigin = originFromUrl(apiHop.url);
@@ -4067,7 +4193,7 @@ registerCaptureListeners((tabId, hop) => {
 		state.updatedAt = Date.now();
 		state.navigationGeneration = gen;
 		SessionStorage.setTabState(state);
-		(async () => {
+		if (!state.isIncognito) (async () => {
 			try {
 				const hostname = new URL(state.origin).hostname;
 				const apex = registrableDomain(hostname) ?? hostname;
@@ -4117,4 +4243,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-1P3gT2Ez.js.map
+//# sourceMappingURL=index.ts-DhDg3nzr.js.map

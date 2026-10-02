@@ -354,7 +354,10 @@ function serializeTabState(state) {
 	return rest;
 }
 function deserializeTabState(raw) {
-	const { apiEndpoints, ...rest } = raw;
+	if (typeof raw !== "object" || raw === null) throw new Error("Invalid serialized TabState: not an object");
+	const candidate = raw;
+	if (typeof candidate.tabId !== "number" || typeof candidate.origin !== "string") throw new Error("Invalid serialized TabState: missing required tabId or origin");
+	const { apiEndpoints, ...rest } = candidate;
 	if (Array.isArray(apiEndpoints)) return {
 		...rest,
 		apiEndpoints: new Map(apiEndpoints)
@@ -460,7 +463,11 @@ var SessionStorage = {
 	},
 	async getAllTabStates() {
 		const all = await chrome.storage.session.get(null);
-		return Object.entries(all).filter(([k]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX)).map(([, v]) => deserializeTabState(v));
+		const results = [];
+		for (const [k, v] of Object.entries(all)) if (k.startsWith(STORAGE_KEYS.TAB_PREFIX)) try {
+			results.push(deserializeTabState(v));
+		} catch {}
+		return results;
 	},
 	async getAuthBaseline(origin) {
 		if (!origin) return null;
@@ -694,8 +701,33 @@ var LocalStorage = {
 	async setOnboardingDismissed(dismissed) {
 		await chrome.storage.local.set({ [STORAGE_KEYS.ONBOARDING_DISMISSED]: dismissed });
 	},
+	async deleteOriginData(origin) {
+		await this.purgeOriginData(origin);
+	},
+	async deleteAllHistory() {
+		try {
+			const all = await chrome.storage.local.get(null);
+			const histKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX));
+			if (histKeys.length > 0) await chrome.storage.local.remove(histKeys);
+		} catch (err) {
+			recordStorageFailure(err);
+			throw err;
+		}
+	},
+	async deletePrivateRecords() {
+		try {
+			const all = await chrome.storage.session.get(null);
+			const toRemove = Object.entries(all).filter(([k, v]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX) && typeof v === "object" && v !== null && v.isIncognito === true).map(([k]) => k);
+			if (toRemove.length > 0) await chrome.storage.session.remove(toRemove);
+		} catch {}
+	},
 	async clearAll() {
-		await chrome.storage.local.clear();
+		try {
+			await chrome.storage.local.clear();
+		} catch (err) {
+			recordStorageFailure(err);
+			throw err;
+		}
 	}
 };
 //#endregion
@@ -1267,6 +1299,7 @@ var CapturePolicy = {
 * API responses. Passive sub-resources (images, stylesheets, fonts, iframes) are excluded
 * to avoid noise. All captures are strictly origin-gated and require user permission.
 */
+var incognitoTabIds = /* @__PURE__ */ new Set();
 /**
 * Keyed by Chrome's `requestId`.  Entries are created on onHeadersReceived
 * and deleted after onResponseStarted finishes processing.
@@ -1345,6 +1378,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 		if (details.type !== "main_frame" || details.tabId < 0) return;
 		if (!isCaptureActiveForUrl(details.url)) return;
 		const raw = details.responseHeaders ?? [];
+		const isIncog = incognitoTabIds.has(details.tabId);
 		const partial = {
 			tabId: details.tabId,
 			url: details.url,
@@ -1356,7 +1390,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			fromCache: false,
 			wasRedirected: false,
 			timestamp: details.timeStamp,
-			redirectCount: 0
+			redirectCount: 0,
+			isIncognito: isIncog
 		};
 		captureMap.set(details.requestId, partial);
 	}, filter, extraInfoSpec);
@@ -1389,7 +1424,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 				rawHeaders: apiRawHeaders,
 				timestamp: reqMeta?.timestamp ?? details.timeStamp,
 				fromCache: details.fromCache ?? false
-			});
+			}, incognitoTabIds.has(details.tabId));
 			return;
 		}
 		if (details.type !== "main_frame" || details.tabId < 0) return;
@@ -1401,19 +1436,23 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 		const normalised = normalizeHeaders(raw);
 		const rawHeaders = toRawHeaders(raw);
 		let partial = captureMap.get(details.requestId);
-		if (!partial) partial = {
-			tabId: details.tabId,
-			url: redactUrlQueryParams(details.url),
-			status: details.statusCode,
-			headersReceived: null,
-			rawHeadersReceived: [],
-			headersStarted: null,
-			rawHeadersStarted: [],
-			fromCache: details.fromCache ?? false,
-			wasRedirected: false,
-			timestamp: details.timeStamp,
-			redirectCount: 0
-		};
+		if (!partial) {
+			const isIncog = incognitoTabIds.has(details.tabId);
+			partial = {
+				tabId: details.tabId,
+				url: redactUrlQueryParams(details.url),
+				status: details.statusCode,
+				headersReceived: null,
+				rawHeadersReceived: [],
+				headersStarted: null,
+				rawHeadersStarted: [],
+				fromCache: details.fromCache ?? false,
+				wasRedirected: false,
+				timestamp: details.timeStamp,
+				redirectCount: 0,
+				isIncognito: isIncog
+			};
+		}
 		const sanitizedUrl = redactUrlQueryParams(details.url);
 		partial.headersStarted = normalised;
 		partial.rawHeadersStarted = rawHeaders;
@@ -1437,7 +1476,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			redirectCount: partial.redirectCount
 		};
 		captureMap.delete(details.requestId);
-		onHopComplete(details.tabId, hop);
+		onHopComplete(details.tabId, hop, partial.isIncognito ?? false);
 	}, filter, extraInfoSpec);
 	chrome.webRequest.onBeforeRedirect.addListener((details) => {
 		if (details.type !== "main_frame" || details.tabId < 0) return;
@@ -1463,11 +1502,12 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			timestamp: existing?.timestamp ?? details.timeStamp,
 			redirectCount: 0
 		};
+		const isIncog = existing?.isIncognito ?? incognitoTabIds.has(details.tabId);
 		captureMap.delete(details.requestId);
-		onHopComplete(details.tabId, hop);
+		onHopComplete(details.tabId, hop, isIncog);
 	}, filter, extraInfoSpec);
 }
 //#endregion
-export { settingsTransitionPipeline as S, LocalStorage as _, CapturePolicy as a, normalizeCookieList as b, patternFromOrigin as c, isModeCaptureAllowed as d, isRestrictedUrl as f, tabStates as g, originAuthBaselines as h, registerCaptureListeners as i, reconcilePermissionsOnRemoved as l, initLifecycle as m, clearInFlightCaptures as n, PermissionsService as o, hydrateFromSession as p, inFlightRequests as r, isBroadGrant as s, captureMap as t, reconcilePermissionsOnStartup as u, SessionStorage as v, resolveCookieOverlaps as x, SettingsService as y };
+export { settingsTransitionPipeline as C, resolveCookieOverlaps as S, tabStates as _, registerCaptureListeners as a, SettingsService as b, isBroadGrant as c, reconcilePermissionsOnStartup as d, isModeCaptureAllowed as f, originAuthBaselines as g, initLifecycle as h, incognitoTabIds as i, patternFromOrigin as l, hydrateFromSession as m, clearInFlightCaptures as n, CapturePolicy as o, isRestrictedUrl as p, inFlightRequests as r, PermissionsService as s, captureMap as t, reconcilePermissionsOnRemoved as u, LocalStorage as v, normalizeCookieList as x, SessionStorage as y };
 
-//# sourceMappingURL=capture-fPtlzvO-.js.map
+//# sourceMappingURL=capture-kosxRNgw.js.map

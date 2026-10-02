@@ -92,8 +92,15 @@ function serializeTabState(state: TabState): SerializedTabState {
   return rest;
 }
 
-function deserializeTabState(raw: SerializedTabState): TabState {
-  const { apiEndpoints, ...rest } = raw;
+function deserializeTabState(raw: unknown): TabState {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('Invalid serialized TabState: not an object');
+  }
+  const candidate = raw as Record<string, unknown>;
+  if (typeof candidate.tabId !== 'number' || typeof candidate.origin !== 'string') {
+    throw new Error('Invalid serialized TabState: missing required tabId or origin');
+  }
+  const { apiEndpoints, ...rest } = candidate as unknown as SerializedTabState;
   if (Array.isArray(apiEndpoints)) {
     return { ...rest, apiEndpoints: new Map(apiEndpoints) };
   }
@@ -256,9 +263,17 @@ export const SessionStorage = {
 
   async getAllTabStates(): Promise<TabState[]> {
     const all = await chrome.storage.session.get(null);
-    return Object.entries(all)
-      .filter(([k]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX))
-      .map(([, v]) => deserializeTabState(v as SerializedTabState));
+    const results: TabState[] = [];
+    for (const [k, v] of Object.entries(all)) {
+      if (k.startsWith(STORAGE_KEYS.TAB_PREFIX)) {
+        try {
+          results.push(deserializeTabState(v as SerializedTabState));
+        } catch {
+          // Corrupt record — skip to avoid crashing hydration
+        }
+      }
+    }
+    return results;
   },
 
   async getAuthBaseline(origin: string): Promise<import('./types').AuthBaseline | null> {
@@ -596,7 +611,43 @@ export const LocalStorage = {
     await chrome.storage.local.set({ [STORAGE_KEYS.ONBOARDING_DISMISSED]: dismissed });
   },
 
+  async deleteOriginData(origin: string): Promise<void> {
+    await this.purgeOriginData(origin);
+  },
+
+  async deleteAllHistory(): Promise<void> {
+    try {
+      const all = await chrome.storage.local.get(null);
+      const histKeys = Object.keys(all).filter(k => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX));
+      if (histKeys.length > 0) {
+        await chrome.storage.local.remove(histKeys);
+      }
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
+    }
+  },
+
+  async deletePrivateRecords(): Promise<void> {
+    try {
+      const all = await chrome.storage.session.get(null);
+      const toRemove = Object.entries(all)
+        .filter(([k, v]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX) && typeof v === 'object' && v !== null && (v as { isIncognito?: boolean }).isIncognito === true)
+        .map(([k]) => k);
+      if (toRemove.length > 0) {
+        await chrome.storage.session.remove(toRemove);
+      }
+    } catch {
+      // Ignore session storage errors
+    }
+  },
+
   async clearAll(): Promise<void> {
-    await chrome.storage.local.clear();
+    try {
+      await chrome.storage.local.clear();
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
+    }
   },
 };

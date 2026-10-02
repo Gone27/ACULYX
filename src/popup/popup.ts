@@ -83,6 +83,23 @@ let currentSettings: SettingsV2 | null = null;
 let currentFindings: Finding[] = [];
 /** Temporary override to show all findings regardless of filter. */
 let showAllFindingsOverride: boolean = false;
+let currentBreakdown: ScoreBreakdown[] = [];
+let breakdownRendered = false;
+
+type PopupDisplayState =
+  | 'not-monitored'
+  | 'permission-needed'
+  | 'permission-denied'
+  | 'access-granted-reload'
+  | 'capturing'
+  | 'results'
+  | 'paused-conflict'
+  | 'all-sites-missing'
+  | 'restricted';
+
+function setPopupState(s: PopupDisplayState): void {
+  document.body.dataset['state'] = s;
+}
 
 /* ================================================================
    Boot
@@ -131,6 +148,12 @@ document.addEventListener('DOMContentLoaded', () => {
   showAllFindingsBtn.addEventListener('click', () => {
     showAllFindingsOverride = !showAllFindingsOverride;
     renderFindings(currentFindings);
+  });
+
+  breakdownSection.addEventListener('toggle', () => {
+    if (breakdownSection.open && !breakdownRendered) {
+      renderBreakdown(currentBreakdown);
+    }
   });
 
   SettingsService.onSettingsChanged((newSettings) => {
@@ -198,16 +221,19 @@ async function initPopup(): Promise<void> {
     if (gate.reason === 'off') {
       originText.textContent = tab.url;
       showStateMessage('Monitoring is turned off in Settings.', 'restricted');
+      setPopupState('restricted');
       return;
     }
     if (gate.reason === 'broad-access-conflict') {
       originText.textContent = tab.url;
       showBroadAccessConflictNotice();
+      setPopupState('paused-conflict');
       return;
     }
     if (gate.reason === 'restricted-url') {
       originText.textContent = tab.url;
       showStateMessage('Restricted page — browser pages cannot be inspected.', 'restricted');
+      setPopupState('restricted');
       return;
     }
   }
@@ -223,6 +249,7 @@ async function initPopup(): Promise<void> {
     origin = new URL(tab.url).origin;
   } catch {
     showStateMessage('Unsupported URL scheme.', 'restricted');
+    setPopupState('restricted');
     return;
   }
 
@@ -234,6 +261,7 @@ async function initPopup(): Promise<void> {
   if (!hasPermission) {
     showMonitorSection();
     showStateMessage('Permission required before this site can be analysed.', 'permission');
+    setPopupState('permission-needed');
     return;
   }
 
@@ -245,6 +273,7 @@ async function initPopup(): Promise<void> {
         renderState(response.state);
       } else {
         showStateMessage('Waiting for the first response on this page…', 'waiting');
+        setPopupState('capturing');
       }
     }
   } catch {
@@ -286,11 +315,21 @@ function openLivePort(): void {
    ================================================================ */
 
 function renderState(state: TabState): void {
+  const savedScrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+  const savedFocusId = document.activeElement?.id;
+
   currentState = state; // store for export
   clearStateMessage();
 
+  if (state.hops.length === 0) {
+    setPopupState('capturing');
+  } else {
+    setPopupState('results');
+  }
+
   // Grade badge & accessibility
   setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
+  gradeBadge.className = 'grade-badge grade-' + (state.grade?.toLowerCase() ?? 'unknown');
 
   // Score + origin
   scoreText.textContent = `Score: ${state.score}/100`;
@@ -318,7 +357,21 @@ function renderState(state: TabState): void {
   }
 
   // B: Score breakdown
-  renderBreakdown(state.scoreBreakdown);
+  currentBreakdown = state.scoreBreakdown;
+  const scoring = currentBreakdown.filter((b) => b.penalty > 0);
+  if (scoring.length === 0) {
+    breakdownSection.hidden = true;
+  } else {
+    breakdownSection.hidden = false;
+    if (breakdownSection.open) {
+      renderBreakdown(currentBreakdown);
+    } else {
+      breakdownRendered = false;
+      while (breakdownBody.firstChild) {
+        breakdownBody.removeChild(breakdownBody.firstChild);
+      }
+    }
+  }
 
   // Auth Posture Diff
   void renderAuthDiff(state.origin);
@@ -334,6 +387,15 @@ function renderState(state: TabState): void {
   copyReportBtn.hidden = false;
 
   monitorSection.hidden = true;
+
+  if (savedScrollTop > 0) {
+    document.documentElement.scrollTop = savedScrollTop;
+    document.body.scrollTop = savedScrollTop;
+  }
+  if (savedFocusId !== undefined && savedFocusId !== '') {
+    const el = document.getElementById(savedFocusId);
+    if (el) el.focus();
+  }
 }
 
 /* ── Coverage bar ─────────────────────────────────────────────── */
@@ -416,6 +478,7 @@ function renderFindings(findings: Finding[]): void {
 function buildFindingItem(finding: Finding): HTMLLIElement {
   const li = document.createElement('li');
   li.className = `finding-item severity-${finding.severity}`;
+  li.dataset['severity'] = finding.severity;
 
   const severitySpan = document.createElement('span');
   severitySpan.className = 'finding-severity';
@@ -543,6 +606,7 @@ function renderBreakdown(breakdown: ScoreBreakdown[]): void {
   }
 
   breakdownSection.hidden = false;
+  breakdownRendered = true;
 }
 
 /* ── Auth Posture Diff ────────────────────────────────────────── */
@@ -1299,6 +1363,7 @@ function wireMonitorButton(): void {
         if (granted) {
           monitorSection.hidden = true;
           showStateMessage('Permission granted. Refreshing this page to begin monitoring…', 'waiting');
+          setPopupState('access-granted-reload');
 
           if (currentTabId !== null) {
             void sendToBackground({
@@ -1314,6 +1379,8 @@ function wireMonitorButton(): void {
               }
             });
           }
+        } else {
+          setPopupState('permission-denied');
         }
       },
     );

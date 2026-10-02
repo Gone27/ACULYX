@@ -3,9 +3,11 @@ import { reportPageSignals } from '../content/service-worker-detection';
 import { isModeCaptureAllowed, isRestrictedUrl } from '../shared/gating';
 import { SettingsService } from '../shared/settings';
 import { isBroadGrant } from './permissions';
+import { incognitoTabIds } from './capture';
 import type { SettingsV2 } from '../shared/types';
 
 export async function injectPageSignals(tabId: number, url: string): Promise<void> {
+  if (incognitoTabIds.has(tabId)) return;
   if (isRestrictedUrl(url)) return;
   const origin = originFromUrl(url);
   if (origin === null || origin.length === 0) return;

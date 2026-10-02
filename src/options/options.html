@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Settings</title>
+  <link rel="stylesheet" href="../shared/design-tokens.css">
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
@@ -149,6 +150,32 @@
           entries &nbsp;<span class="field-hint">(1–50, default: 10)</span>
         </label>
       </div>
+    </section>
+
+    <!-- ── Data Management ─────────────────────────────────────── -->
+    <section id="section-data-management" class="options-section">
+      <h2 class="section-heading">Data Management</h2>
+
+      <div class="field-row">
+        <label class="field-label-block">Per-origin data</label>
+        <div class="data-actions-row">
+          <input type="text" id="delete-origin-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" class="text-input" />
+          <button type="button" id="btn-delete-origin" class="btn-danger-sm">Delete this site</button>
+        </div>
+        <p class="field-hint">Removes history and graph data for one origin. Does not revoke monitoring permission.</p>
+      </div>
+
+      <div class="field-row danger-zone" style="margin-top: 16px;">
+        <label class="field-label-block danger-label">Danger zone</label>
+        <div class="danger-actions" style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="button" id="btn-clear-history" class="btn-danger">Clear all history</button>
+          <button type="button" id="btn-clear-private" class="btn-danger">Clear private records</button>
+          <button type="button" id="btn-clear-all" class="btn-danger">Clear ALL local data</button>
+        </div>
+        <p class="field-hint" style="margin-top: 4px;">These actions are permanent and cannot be undone.</p>
+      </div>
+
+      <div id="data-mgmt-status" class="status-message" aria-live="polite" style="margin-top: 8px;"></div>
     </section>
 
     <!-- ── Custom cookie classification ───────────────────────── -->

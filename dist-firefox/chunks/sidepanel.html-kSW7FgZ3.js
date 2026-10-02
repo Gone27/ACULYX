@@ -1,5 +1,6 @@
 import { E as SIDEPANEL_PORT_NAME, a as registrableDomain, r as sendToBackground } from "./messaging-BtJyJf3R.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
+/* empty css                       */
 //#region node_modules/d3-force/src/center.js
 function center_default(x, y) {
 	var nodes, strength = 1;
@@ -842,7 +843,14 @@ function getSvgEl(id) {
 	if (!el) throw new Error(`Missing SVG element #${id}`);
 	return el;
 }
+var activeSimulation = null;
+var nodePositions = /* @__PURE__ */ new Map();
+var lastGraphKey = "";
+function graphTopologyKey(nodes, edges) {
+	return `${nodes.map((n) => n.hostname).sort().join(",")}|${edges.map((e) => `${e.source}>${e.target}`).sort().join(",")}`;
+}
 document.addEventListener("DOMContentLoaded", () => {
+	const viewToggleBtn = getEl("view-toggle-btn");
 	const tierBadge = getEl("tier-badge");
 	const refreshBtn = getEl("refresh-btn");
 	const optionsLink = getEl("options-link");
@@ -863,6 +871,15 @@ document.addEventListener("DOMContentLoaded", () => {
 	const nodeLastSeen = getEl("node-last-seen");
 	let activeTabId = null;
 	let activeApexDomain = "";
+	let isListView = false;
+	document.body.classList.add("view-graph");
+	viewToggleBtn.addEventListener("click", () => {
+		isListView = !isListView;
+		document.body.classList.toggle("view-graph", !isListView);
+		document.body.classList.toggle("view-list", isListView);
+		viewToggleBtn.textContent = isListView ? "Graph view" : "List view";
+		viewToggleBtn.setAttribute("aria-pressed", isListView ? "true" : "false");
+	});
 	optionsLink.addEventListener("click", (e) => {
 		e.preventDefault();
 		if (chrome.runtime.openOptionsPage !== void 0) chrome.runtime.openOptionsPage();
@@ -1035,29 +1052,78 @@ document.addEventListener("DOMContentLoaded", () => {
 			nodesGroup.appendChild(g);
 			return g;
 		});
-		simulation_default(simNodes).force("link", link_default(simLinks).id((d) => d.id).distance(85)).force("charge", manyBody_default().strength(-220)).force("center", center_default(centerX, centerY)).force("collide", collide_default().radius(26)).on("tick", () => {
+		const topoKey = graphTopologyKey(graph.nodes, graph.edges);
+		const topologyUnchanged = topoKey === lastGraphKey;
+		lastGraphKey = topoKey;
+		if (activeSimulation !== null) {
+			activeSimulation.stop();
+			activeSimulation = null;
+		}
+		const applyPositions = () => {
 			for (let i = 0; i < simLinks.length; i++) {
 				const link = simLinks[i];
 				const line = lineElements[i];
 				if (link !== void 0 && line !== void 0) {
-					const s = link.source;
-					const t = link.target;
-					line.setAttribute("x1", clamp(s.x ?? centerX, 15, 585).toString());
-					line.setAttribute("y1", clamp(s.y ?? centerY, 15, 435).toString());
-					line.setAttribute("x2", clamp(t.x ?? centerX, 15, 585).toString());
-					line.setAttribute("y2", clamp(t.y ?? centerY, 15, 435).toString());
+					const sId = typeof link.source === "string" ? link.source : link.source.id;
+					const tId = typeof link.target === "string" ? link.target : link.target.id;
+					const sPos = nodePositions.get(sId) ?? {
+						x: centerX,
+						y: centerY
+					};
+					const tPos = nodePositions.get(tId) ?? {
+						x: centerX,
+						y: centerY
+					};
+					line.setAttribute("x1", clamp(sPos.x, 15, 585).toString());
+					line.setAttribute("y1", clamp(sPos.y, 15, 435).toString());
+					line.setAttribute("x2", clamp(tPos.x, 15, 585).toString());
+					line.setAttribute("y2", clamp(tPos.y, 15, 435).toString());
 				}
 			}
 			for (let i = 0; i < simNodes.length; i++) {
 				const node = simNodes[i];
 				const g = nodeGroups[i];
 				if (node !== void 0 && g !== void 0) {
-					const cx = clamp(node.x ?? centerX, 20, 580);
-					const cy = clamp(node.y ?? centerY, 20, 430);
+					const pos = nodePositions.get(node.id) ?? {
+						x: centerX,
+						y: centerY
+					};
+					const cx = clamp(pos.x, 20, 580);
+					const cy = clamp(pos.y, 20, 430);
 					g.setAttribute("transform", `translate(${cx}, ${cy})`);
 				}
 			}
-		});
+		};
+		if (topologyUnchanged) applyPositions();
+		else {
+			for (const node of simNodes) {
+				const saved = nodePositions.get(node.id);
+				if (saved) {
+					node.x = saved.x;
+					node.y = saved.y;
+				}
+			}
+			activeSimulation = simulation_default(simNodes).force("link", link_default(simLinks).id((d) => d.id).distance(85)).force("charge", manyBody_default().strength(-220)).force("center", center_default(centerX, centerY)).force("collide", collide_default().radius(26));
+			const sim = activeSimulation;
+			sim.on("tick", () => {
+				for (const node of simNodes) if (node.x !== void 0 && node.y !== void 0) nodePositions.set(node.id, {
+					x: node.x,
+					y: node.y
+				});
+				applyPositions();
+			});
+			sim.on("end", () => {
+				for (const node of simNodes) if (node.x !== void 0 && node.y !== void 0) nodePositions.set(node.id, {
+					x: node.x,
+					y: node.y
+				});
+			});
+			if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+				sim.tick(50);
+				sim.stop();
+			}
+		}
+		renderNodeList(graph.nodes);
 		const apexNode = simNodes.find((n) => n.isApex);
 		if (apexNode !== void 0) showNodeDetails(apexNode);
 	}
@@ -1078,7 +1144,44 @@ document.addEventListener("DOMContentLoaded", () => {
 	function clamp(val, min, max) {
 		return Math.max(min, Math.min(max, val));
 	}
+	function renderNodeList(nodes) {
+		const tbody = getEl("node-list-body");
+		while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+		for (const node of nodes) {
+			const tr = document.createElement("tr");
+			tr.setAttribute("role", "row");
+			tr.setAttribute("tabindex", "0");
+			tr.setAttribute("aria-selected", "false");
+			const tdHost = document.createElement("td");
+			tdHost.textContent = node.hostname;
+			const tdRole = document.createElement("td");
+			tdRole.textContent = node.isApex ? "Apex" : "Subdomain";
+			const tdGrade = document.createElement("td");
+			tdGrade.className = "grade-cell";
+			tdGrade.textContent = node.grade !== void 0 && node.score !== void 0 ? `${node.grade} (${node.score})` : "—";
+			const tdSeen = document.createElement("td");
+			tdSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
+			tr.appendChild(tdHost);
+			tr.appendChild(tdRole);
+			tr.appendChild(tdGrade);
+			tr.appendChild(tdSeen);
+			tr.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					showNodeDetails(node);
+					tbody.querySelectorAll("tr").forEach((r) => r.setAttribute("aria-selected", "false"));
+					tr.setAttribute("aria-selected", "true");
+				}
+			});
+			tr.addEventListener("click", () => {
+				showNodeDetails(node);
+				tbody.querySelectorAll("tr").forEach((r) => r.setAttribute("aria-selected", "false"));
+				tr.setAttribute("aria-selected", "true");
+			});
+			tbody.appendChild(tr);
+		}
+	}
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-CXgz0W4a.js.map
+//# sourceMappingURL=sidepanel.html-kSW7FgZ3.js.map

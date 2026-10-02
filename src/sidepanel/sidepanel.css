@@ -1,17 +1,55 @@
 :root {
-  --bg: #1a1a2e;
-  --bg-card: #16213e;
-  --bg-hover: #0f3460;
-  --text: #e0e0e0;
-  --text-muted: #7f8c8d;
-  --border: #2c3e50;
-  --radius: 6px;
-  --color-apex: #f59e0b;
-  --color-pass: #27ae60;
-  --color-high: #e74c3c;
-  --color-low: #2980b9;
-  --color-pro: #8b5cf6;
+  --bg:             var(--sc-bg);
+  --bg-card:        var(--sc-bg-card);
+  --bg-hover:       var(--sc-bg-hover);
+  --text:           var(--sc-text);
+  --text-muted:     var(--sc-text-muted);
+  --border:         var(--sc-border);
+  --radius:         var(--sc-radius);
+  --color-apex:     var(--sc-medium);
+  --color-pass:     var(--sc-pass);
+  --color-high:     var(--sc-high);
+  --color-low:      var(--sc-low);
+  --color-pro:      var(--sc-violet);
 }
+
+/* Node-list table (keyboard-navigable alternative to graph) */
+.node-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: var(--sc-gap);
+}
+.node-list-table th {
+  text-align: left;
+  padding: 5px var(--sc-gap-sm);
+  border-bottom: 1px solid var(--sc-border);
+  color: var(--sc-text-muted);
+  font-weight: 500;
+}
+.node-list-table td {
+  padding: 5px var(--sc-gap-sm);
+  border-bottom: 1px solid var(--sc-border);
+  color: var(--sc-text);
+}
+.node-list-table tr[aria-selected='true'] td,
+.node-list-table tr:focus td {
+  background: var(--sc-bg-hover);
+  outline: none;
+}
+.node-list-table tr:focus-visible {
+  outline: 2px solid var(--sc-accent);
+}
+.node-list-table .grade-cell {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Show table or graph based on toggle */
+.view-graph .node-list-section { display: none; }
+.view-list  .graph-section      { display: none; }
+.view-graph .graph-section      { display: block; }
+.view-list  .node-list-section  { display: block; }
 
 * {
   box-sizing: border-box;

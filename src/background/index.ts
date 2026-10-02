@@ -16,7 +16,7 @@
  */
 
 import { tabStates, initLifecycle, hydrateFromSession, originAuthBaselines } from './lifecycle';
-import { registerCaptureListeners, captureMap, clearInFlightCaptures, inFlightRequests } from './capture';
+import { registerCaptureListeners, captureMap, clearInFlightCaptures, inFlightRequests, incognitoTabIds } from './capture';
 import { CapturePolicy } from './capture-policy';
 import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
@@ -27,6 +27,7 @@ import { discoverNodes, mergeIntoGraph } from '../rules/graph-discovery';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { SessionStorage, LocalStorage } from '../shared/storage';
 import { PortRegistry, portSend } from '../shared/messaging';
+import { BroadcastCoalescer, WriteBatcher } from '../shared/coalescer';
 import {
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
@@ -194,6 +195,11 @@ export function pruneTransientStructures(now: number = Date.now()): void {
 // ---------------------------------------------------------------------------
 
 const portRegistry = new PortRegistry();
+const broadcastCoalescer = new BroadcastCoalescer<TabState>(
+  (tabId, state) => portRegistry.broadcast(tabId, { type: 'TAB_STATE_UPDATE', state }),
+  100,
+);
+const writeBatcher = new WriteBatcher(2);
 export const badgeTrackedTabs = new Set<number>();
 
 const pendingServiceWorkerReports = new Map<number, {
@@ -251,10 +257,10 @@ function recomputeTabState(tabId: number, state: TabState): void {
   state.updatedAt = Date.now();
 
   tabStates.set(tabId, state);
-  void SessionStorage.setTabState(state);
+  writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state));
 
   // Record historical score trend for this domain
-  if (state.monitoredByUser && state.origin) {
+  if (state.monitoredByUser && state.origin !== '' && state.isIncognito !== true) {
     void LocalStorage.recordOriginHistory(state.origin, {
       timestamp: state.updatedAt,
       score: state.score,
@@ -304,7 +310,7 @@ function recomputeTabState(tabId: number, state: TabState): void {
   }
 
   setBadgeForTab(tabId, state.grade);
-  portRegistry.broadcast(tabId, { type: 'TAB_STATE_UPDATE', state });
+  broadcastCoalescer.push(tabId, state);
 }
 
 // ---------------------------------------------------------------------------
@@ -377,8 +383,8 @@ settingsTransitionPipeline.registerHooks({
   onRescoreTabs: (_prev, _next) => {
     for (const [tabId, state] of Array.from(tabStates.entries())) {
       recomputeTabState(tabId, state);
-      void SessionStorage.setTabState(state).catch(() => undefined);
-      portRegistry.broadcast(tabId, { type: 'TAB_STATE_UPDATE', state });
+      writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state).catch(() => undefined));
+      broadcastCoalescer.push(tabId, state);
     }
   },
   onModeChange: async (_prevMode, newMode) => {
@@ -489,6 +495,7 @@ function createDefaultTabState(tabId: number, url: string): TabState {
 async function onHopComplete(
   tabId: number,
   hop: Hop,
+  isIncognito: boolean,
 ): Promise<void> {
   if (!Number.isInteger(tabId) || tabId < 0) return;
 
@@ -509,6 +516,7 @@ async function onHopComplete(
 
     // 1. Retrieve or initialise tab state.
     const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
+    state.isIncognito = isIncognito;
     state.navigationGeneration = gen;
     state.url = hop.url;
     state.origin = originFromUrl(hop.url) ?? hop.url;
@@ -602,8 +610,21 @@ chrome.webNavigation.onBeforeNavigate.addListener(
     if (details.frameId !== 0) return;
 
     const { tabId } = details;
+    
+    // Check tab incognito status
+    void chrome.tabs.get(tabId).then((tab) => {
+      if (tab.incognito) {
+        incognitoTabIds.add(tabId);
+      } else {
+        incognitoTabIds.delete(tabId);
+      }
+    }).catch(() => undefined);
+
     incrementTabGeneration(tabId);
     tabActionQueue.clearTab(tabId);
+    
+    broadcastCoalescer.clear(tabId);
+    writeBatcher.clear(tabId);
 
     pendingServiceWorkerReports.delete(tabId);
     pendingMetaCspReports.delete(tabId);
@@ -684,6 +705,8 @@ chrome.cookies.onChanged.addListener(
 // ---------------------------------------------------------------------------
 
 chrome.tabs.onRemoved.addListener((tabId: number): void => {
+  broadcastCoalescer.flushNow(tabId);
+  writeBatcher.flushNow(tabId);
   tabGenerations.delete(tabId);
   tabActionQueue.clearTab(tabId);
   tabStates.delete(tabId);
@@ -699,7 +722,35 @@ chrome.tabs.onRemoved.addListener((tabId: number): void => {
   }
 
   SessionStorage.removeTabState(tabId).catch(() => undefined);
+  broadcastCoalescer.clear(tabId);
+  writeBatcher.clear(tabId);
+
+  const wasIncognito = incognitoTabIds.has(tabId);
+  incognitoTabIds.delete(tabId);
+
+  if (wasIncognito) {
+    void chrome.tabs.query({}).then((tabs) => {
+      const incognitoTabs = tabs.filter(t => t.incognito);
+      if (incognitoTabs.length === 0) {
+        void clearIncognitoSessionRecords();
+      }
+    }).catch(() => undefined);
+  }
 });
+
+async function clearIncognitoSessionRecords(): Promise<void> {
+  try {
+    const all = await chrome.storage.session.get(null);
+    const toRemove = Object.entries(all)
+      .filter(([k, v]) => k.startsWith('tab:') && typeof v === 'object' && v !== null && (v as { isIncognito?: boolean }).isIncognito === true)
+      .map(([k]) => k);
+    if (toRemove.length > 0) {
+      await chrome.storage.session.remove(toRemove);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Port connections (popup / sidepanel)
@@ -1078,10 +1129,10 @@ initLifecycle();
 
 // 2. Begin capturing WebRequest events synchronously to avoid missing early navigations.
 registerCaptureListeners(
-  (tabId: number, hop: Hop): void => {
-    void onHopComplete(tabId, hop);
+  (tabId: number, hop: Hop, isIncognito: boolean): void => {
+    void onHopComplete(tabId, hop, isIncognito);
   },
-  (apiHop: ApiHop): void => {
+  (apiHop: ApiHop, isIncognito: boolean): void => {
     const tabId = apiHop.tabId;
     if (!Number.isInteger(tabId) || tabId < 0) return;
 
@@ -1102,6 +1153,7 @@ registerCaptureListeners(
 
       const state = tabStates.get(tabId);
       if (!state) return;
+      state.isIncognito = isIncognito;
 
       const allowed = await CapturePolicy.isAllowed(apiHop.url);
       if (!allowed) return;
@@ -1150,26 +1202,28 @@ registerCaptureListeners(
       void SessionStorage.setTabState(state);
 
       // Accumulate attack surface graph for API host and CORS endpoints atomically
-      void (async () => {
-        try {
-          const u = new URL(state.origin);
-          const hostname = u.hostname;
-          const apex = registrableDomain(hostname) ?? hostname;
-          const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-          await LocalStorage.mutateGraph(apex, (existingGraph) =>
-            mergeIntoGraph(
-              existingGraph,
-              hostname,
-              state.score,
-              state.grade,
-              discovered,
-              Boolean(currentSettings.isPro),
-            ),
-          );
-        } catch {
-          // Silently ignore graph merge errors
-        }
-      })();
+      if (!state.isIncognito) {
+        void (async () => {
+          try {
+            const u = new URL(state.origin);
+            const hostname = u.hostname;
+            const apex = registrableDomain(hostname) ?? hostname;
+            const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+            await LocalStorage.mutateGraph(apex, (existingGraph) =>
+              mergeIntoGraph(
+                existingGraph,
+                hostname,
+                state.score,
+                state.grade,
+                discovered,
+                Boolean(currentSettings.isPro),
+              ),
+            );
+          } catch {
+            // Silently ignore graph merge errors
+          }
+        })();
+      }
 
       portRegistry.broadcast(apiHop.tabId, {
         type: 'TAB_STATE_UPDATE',
