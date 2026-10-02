@@ -18,6 +18,7 @@
 
 import { normalizeHeaders, headersDiffer, redactUrlQueryParams, redactUrlPath, redactHeaderValue } from '../rules/utils';
 import type { Hop, ApiHop } from '../shared/types';
+import { getTabGeneration } from './generations';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,6 +53,8 @@ export interface PartialCapture {
   redirectCount: number;
   /** True if the tab is incognito. Defaults to false for non-incognito or unknown tabs. */
   isIncognito?: boolean;
+  /** Navigation generation */
+  generation?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +75,7 @@ export const captureMap: Map<string, PartialCapture> = new Map();
  */
 export const inFlightRequests: Map<
   string,
-  { method: string; origin?: string | undefined; timestamp: number }
+  { method: string; origin?: string | undefined; timestamp: number; generation?: number }
 > = new Map();
 
 /**
@@ -155,6 +158,7 @@ export function registerCaptureListeners(
           method: details.method,
           origin: originHeader,
           timestamp: details.timeStamp,
+          generation: getTabGeneration(details.tabId),
         });
       },
       filter,
@@ -198,6 +202,7 @@ export function registerCaptureListeners(
         timestamp: details.timeStamp,
         redirectCount: 0,
         isIncognito: isIncog,
+        generation: getTabGeneration(details.tabId),
       };
 
       captureMap.set(details.requestId, partial);
@@ -242,6 +247,7 @@ export function registerCaptureListeners(
           rawHeaders: apiRawHeaders,
           timestamp: reqMeta?.timestamp ?? details.timeStamp,
           fromCache: details.fromCache ?? false,
+          generation: reqMeta?.generation ?? getTabGeneration(details.tabId),
         };
         const isIncog = incognitoTabIds.has(details.tabId);
         try {
@@ -285,6 +291,7 @@ export function registerCaptureListeners(
           timestamp: details.timeStamp,
           redirectCount: 0,
           isIncognito: isIncog,
+          generation: getTabGeneration(details.tabId),
         };
       }
 
@@ -321,6 +328,7 @@ export function registerCaptureListeners(
         headersDiffer: differ,
         timestamp: partial.timestamp,
         redirectCount: partial.redirectCount,
+        generation: partial.generation ?? getTabGeneration(details.tabId),
       };
 
       // Clean up in-flight state.
@@ -373,6 +381,7 @@ export function registerCaptureListeners(
           : false,
         timestamp: existing?.timestamp ?? details.timeStamp,
         redirectCount: 0,
+        generation: existing?.generation ?? getTabGeneration(details.tabId),
       };
 
       const isIncog = existing?.isIncognito ?? incognitoTabIds.has(details.tabId);

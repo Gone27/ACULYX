@@ -2,7 +2,7 @@ import { originFromUrl } from '../rules/utils';
 import { reportPageSignals } from '../content/service-worker-detection';
 import { isModeCaptureAllowed, isRestrictedUrl } from '../shared/gating';
 import { SettingsService } from '../shared/settings';
-import { isBroadGrant } from './permissions';
+import { isBroadGrant, hasAllSitesCoverage } from './permissions';
 import { incognitoTabIds } from './capture';
 import type { SettingsV2 } from '../shared/types';
 
@@ -43,19 +43,23 @@ export async function injectPageSignals(tabId: number, url: string): Promise<voi
 
   if (settings.monitoringMode === 'off') return;
 
-  if (typeof chrome === 'undefined' || typeof chrome.permissions === 'undefined') return;
-
-  const performInjection = (broadGrantPresent: boolean): void => {
-    const gate = isModeCaptureAllowed(url, settings, broadGrantPresent);
+  const performInjection = (broadGrantPresent: boolean, hasCompleteCoverage: boolean): void => {
+    const gate = isModeCaptureAllowed(url, settings, broadGrantPresent, undefined, hasCompleteCoverage);
     if (!gate.allowed) return;
 
-    if (broadGrantPresent) {
-      if (typeof chrome.scripting !== 'undefined') {
-        void chrome.scripting.executeScript({
-          target: { tabId, frameIds: [0] },
-          func: reportPageSignals,
-        }).catch(() => undefined);
+    if (settings.monitoringMode === 'all-sites') {
+      if (hasCompleteCoverage) {
+        if (typeof chrome.scripting !== 'undefined') {
+          void chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] },
+            func: reportPageSignals,
+          }).catch(() => undefined);
+        }
       }
+      return;
+    }
+
+    if (broadGrantPresent) {
       return;
     }
 
@@ -73,8 +77,10 @@ export async function injectPageSignals(tabId: number, url: string): Promise<voi
 
   if (typeof chrome.permissions.getAll === 'function') {
     const handlePerms = (perms?: chrome.permissions.Permissions): void => {
-      const broad = (perms?.origins ?? []).some(isBroadGrant);
-      performInjection(broad);
+      const origins = perms?.origins ?? [];
+      const broad = origins.some(isBroadGrant);
+      const complete = hasAllSitesCoverage(origins);
+      performInjection(broad, complete);
     };
     try {
       const res: unknown = chrome.permissions.getAll(handlePerms);
@@ -82,15 +88,15 @@ export async function injectPageSignals(tabId: number, url: string): Promise<voi
         typeof res === 'object' &&
         res !== null &&
         'then' in res &&
-        typeof res.then === 'function'
+        typeof (res as Promise<chrome.permissions.Permissions>).then === 'function'
       ) {
         void (res as Promise<chrome.permissions.Permissions>).then(handlePerms);
       }
     } catch {
-      performInjection(false);
+      performInjection(false, false);
     }
   } else {
-    performInjection(false);
+    performInjection(false, false);
   }
 }
 

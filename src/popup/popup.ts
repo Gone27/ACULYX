@@ -213,7 +213,8 @@ async function initPopup(): Promise<void> {
   const settings = await SettingsService.getSettings();
   currentSettings = settings;
   const broadActive = await PermissionsService.isBroadGrantPresent();
-  const gate = isModeCaptureAllowed(tab.url, settings, broadActive);
+  const completeBroad = await PermissionsService.hasCompleteBroadGrant();
+  const gate = isModeCaptureAllowed(tab.url, settings, broadActive, undefined, completeBroad);
   if (!gate.allowed) {
     if (gate.reason === 'off') {
       originText.textContent = tab.url;
@@ -225,6 +226,12 @@ async function initPopup(): Promise<void> {
       originText.textContent = tab.url;
       showBroadAccessConflictNotice();
       setPopupState('paused-conflict');
+      return;
+    }
+    if (gate.reason === 'all-sites-missing-grant') {
+      originText.textContent = tab.url;
+      showAllSitesMissingNotice();
+      setPopupState('all-sites-missing');
       return;
     }
     if (gate.reason === 'restricted-url') {
@@ -483,6 +490,27 @@ function buildFindingItem(finding: Finding): HTMLLIElement {
 
   const body = document.createElement('div');
   body.className = 'finding-body';
+
+  const tagsContainer = document.createElement('div');
+  tagsContainer.className = 'finding-meta-tags';
+
+  if (finding.provenance) {
+    const provSpan = document.createElement('span');
+    provSpan.className = 'finding-tag-provenance';
+    provSpan.textContent = finding.provenance;
+    tagsContainer.appendChild(provSpan);
+  }
+
+  if (finding.confidence) {
+    const confSpan = document.createElement('span');
+    confSpan.className = 'finding-tag-confidence';
+    confSpan.textContent = finding.confidence;
+    tagsContainer.appendChild(confSpan);
+  }
+
+  if (finding.provenance || finding.confidence) {
+    body.appendChild(tagsContainer);
+  }
 
   const titleSpan = document.createElement('span');
   titleSpan.className = 'finding-title';
@@ -1035,7 +1063,12 @@ function wireExportButton(): void {
       findings: currentState.findings,
       scoreBreakdown: currentState.scoreBreakdown,
       cookies: currentState.cookies, // metadata only — no values
-      coverage: currentState.coverage,
+      coverage: {
+        ...currentState.coverage,
+        serviceWorkerUrl: (currentState.coverage.serviceWorkerUrl !== null && currentState.coverage.serviceWorkerUrl !== undefined && currentState.coverage.serviceWorkerUrl !== '')
+          ? ((currentState.coverage.serviceWorkerUrl.split('?')[0] ?? '').split('#')[0] ?? null)
+          : null
+      },
       subdomainTrust: currentState.subdomainTrust, // E: include escalation analysis
       apiEndpoints: getApiEndpointsList(currentState),
     };
@@ -1435,6 +1468,45 @@ function showBroadAccessConflictNotice(): void {
   specialNotice.className = 'special-notice conflict-notice';
   specialNotice.hidden = false;
   showStateMessage('Capture paused due to broad access conflict.', 'waiting');
+}
+
+function showAllSitesMissingNotice(): void {
+  specialNotice.textContent = '';
+  const p = document.createElement('p');
+  p.textContent = 'All-sites monitoring is enabled, but the required broad permissions are missing. Capture is paused until resolved:';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  actions.style.marginTop = '8px';
+
+  const restoreBtn = document.createElement('button');
+  restoreBtn.className = 'btn-primary';
+  restoreBtn.textContent = 'Restore All-sites access';
+  restoreBtn.addEventListener('click', () => {
+    chrome.permissions.request({ origins: ['<all_urls>'] }, (granted) => {
+      if (granted) {
+        void initPopup();
+      }
+    });
+  });
+
+  const switchBtn = document.createElement('button');
+  switchBtn.className = 'btn-secondary';
+  switchBtn.textContent = 'Switch to per-site';
+  switchBtn.addEventListener('click', () => {
+    void SettingsService.updateSettings({ monitoringMode: 'per-site' }).then(() => {
+      void initPopup();
+    });
+  });
+
+  actions.appendChild(restoreBtn);
+  actions.appendChild(switchBtn);
+  specialNotice.appendChild(p);
+  specialNotice.appendChild(actions);
+  specialNotice.className = 'special-notice conflict-notice';
+  specialNotice.hidden = false;
+  showStateMessage('Capture paused due to missing broad permissions.', 'waiting');
 }
 
 function checkPermission(origin: string): Promise<boolean> {

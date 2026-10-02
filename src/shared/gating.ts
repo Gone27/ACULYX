@@ -12,7 +12,7 @@ import type { SettingsV2 } from './types';
 
 export interface CaptureGateResult {
   allowed: boolean;
-  reason: 'ok' | 'off' | 'broad-access-conflict' | 'restricted-url';
+  reason: 'ok' | 'off' | 'broad-access-conflict' | 'restricted-url' | 'all-sites-missing-grant';
 }
 
 const RESTRICTED_SCHEME_PREFIXES = [
@@ -70,6 +70,7 @@ export function isModeCaptureAllowed(
   settings: SettingsV2,
   broadGrantPresent: boolean,
   options?: { fileAccessAllowed?: boolean },
+  completeBroadGrant?: boolean,
 ): CaptureGateResult {
   // 1. URL validity and restricted scheme check
   if (isRestrictedUrl(url, options)) {
@@ -86,6 +87,11 @@ export function isModeCaptureAllowed(
     return { allowed: false, reason: 'broad-access-conflict' };
   }
 
-  // 4. Allowed for capture
+  // 4. All-sites mode requires complete broad grant coverage
+  if (settings.monitoringMode === 'all-sites' && completeBroadGrant === false) {
+    return { allowed: false, reason: 'all-sites-missing-grant' };
+  }
+
+  // 5. Allowed for capture
   return { allowed: true, reason: 'ok' };
 }

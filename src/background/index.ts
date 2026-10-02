@@ -63,17 +63,8 @@ import type {
 // Late arrivals for older generations are discarded immediately.
 // ---------------------------------------------------------------------------
 
-export const tabGenerations = new Map<number, number>();
-
-export function getTabGeneration(tabId: number): number {
-  return tabGenerations.get(tabId) ?? 0;
-}
-
-export function incrementTabGeneration(tabId: number): number {
-  const next = (tabGenerations.get(tabId) ?? 0) + 1;
-  tabGenerations.set(tabId, next);
-  return next;
-}
+export { tabGenerations, getTabGeneration, incrementTabGeneration } from './generations';
+import { tabGenerations, getTabGeneration, incrementTabGeneration } from './generations';
 
 // ---------------------------------------------------------------------------
 // Per-tab ordered reducer action queue
@@ -229,7 +220,26 @@ export const sessionHydrationReady = new Promise<void>((resolve) => {
 
 // Shared startup barrier: both settings and session hydration must resolve.
 // Fail-closed while pending. Never uses keepalive alarms.
-export const startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(() => undefined);
+export const startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(async () => {
+  try {
+    const tabs = await new Promise<chrome.tabs.Tab[]>((resolve) => {
+      chrome.tabs.query({}, (res) => resolve(res ?? []));
+    });
+    for (const tab of tabs) {
+      if (tab.id !== undefined && tab.incognito) {
+        incognitoTabIds.add(tab.id);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  for (const [tabId, state] of tabStates.entries()) {
+    if (state.isIncognito === true) {
+      incognitoTabIds.add(tabId);
+    }
+  }
+  return undefined;
+});
 
 function recomputeTabState(tabId: number, state: TabState): void {
   const result = runRules({
@@ -516,7 +526,9 @@ async function onHopComplete(
 
     // 1. Retrieve or initialise tab state.
     const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
-    state.isIncognito = isIncognito;
+    const resolvedIncognito = isIncognito === true || state.isIncognito === true || incognitoTabIds.has(tabId) || isIncognito === undefined;
+    state.isIncognito = resolvedIncognito;
+    if (resolvedIncognito) incognitoTabIds.add(tabId);
     state.navigationGeneration = gen;
     state.url = hop.url;
     state.origin = originFromUrl(hop.url) ?? hop.url;
@@ -729,7 +741,9 @@ chrome.tabs.onRemoved.addListener((tabId: number): void => {
   incognitoTabIds.delete(tabId);
 
   if (wasIncognito) {
-    void chrome.tabs.query({}).then((tabs) => {
+    void new Promise<chrome.tabs.Tab[]>((resolve) => {
+      chrome.tabs.query({}, (res) => resolve(res ?? []));
+    }).then((tabs) => {
       const incognitoTabs = tabs.filter(t => t.incognito);
       if (incognitoTabs.length === 0) {
         void clearIncognitoSessionRecords();
@@ -890,14 +904,18 @@ chrome.runtime.onMessage.addListener(
           return false;
         }
         const gen = message.generation ?? currentGen;
-        const eventId = message.eventId ?? `sw:${senderTabId}:${gen}:${message.status}:${message.serviceWorkerUrl ?? ''}`;
+        const rawSwUrl = message.serviceWorkerUrl;
+        const swUrl = (rawSwUrl !== null && rawSwUrl !== undefined && rawSwUrl !== '')
+          ? ((rawSwUrl.split('?')[0] ?? '').split('#')[0] ?? null)
+          : null;
+        const eventId = message.eventId ?? `sw:${senderTabId}:${gen}:${message.status}:${swUrl ?? ''}`;
         if (isDuplicateEvent(eventId)) {
           return false;
         }
 
         const report = {
           status: message.status,
-          serviceWorkerUrl: message.serviceWorkerUrl,
+          serviceWorkerUrl: swUrl,
           generation: gen,
         };
         pendingServiceWorkerReports.set(senderTabId, report);
@@ -935,7 +953,13 @@ chrome.runtime.onMessage.addListener(
           return false;
         }
         const gen = message.generation ?? currentGen;
-        const policiesStr = (message.policies ?? []).join(';');
+        const sanitizedPolicies = (message.policies ?? []).map((p: string) =>
+          p.replace(/(report-uri|report-to)\s+([^;\s]+)/gi, (_match: string, dir: string, uri: string) => {
+            const cleanUri = (uri.split('?')[0] ?? '').split('#')[0] ?? '';
+            return `${dir} ${cleanUri}`;
+          })
+        );
+        const policiesStr = sanitizedPolicies.join(';');
         const eventId = message.eventId ?? `meta-csp:${senderTabId}:${gen}:${policiesStr}`;
         if (isDuplicateEvent(eventId)) {
           return false;
@@ -950,16 +974,14 @@ chrome.runtime.onMessage.addListener(
           const state = tabStates.get(senderTabId);
           if (state) {
             state.coverage.metaCspFound = true;
-            // Store the policy strings so the popup can display them and
-            // so we can run csp_evaluator on them separately from the header CSP.
-            if (message.policies !== undefined && message.policies.length > 0) {
-              state.coverage.metaCspPolicies = message.policies.slice(0, 5).map((p) => p.slice(0, 2048));
+            if (sanitizedPolicies.length > 0) {
+              state.coverage.metaCspPolicies = sanitizedPolicies.slice(0, 5).map((p: string) => p.slice(0, 2048));
               pushLedgerEntry(state, {
                 type: 'subresource',
                 url: state.url,
                 source: 'dom',
                 timestamp: Date.now(),
-                notes: `${message.policies.length} <meta> CSP tag(s) detected in DOM`,
+                notes: `${sanitizedPolicies.length} <meta> CSP tag(s) detected in DOM`,
               });
               // Generate meta-CSP findings if the page has no header CSP
               // (meta-CSP cannot restrict navigation or workers, unlike header CSP).
@@ -974,7 +996,7 @@ chrome.runtime.onMessage.addListener(
                     severity: 'info',
                     title: 'CSP delivered via <meta> tag, not HTTP header',
                     impact: 'Meta-tag CSP cannot restrict navigation, workers, or plugin content. HTTP header CSP provides broader enforcement.',
-                    evidence: `${message.policies.length} meta-CSP policy/policies found`,
+                    evidence: `${sanitizedPolicies.length} meta-CSP policy/policies found`,
                     recommendation: 'Prefer Content-Security-Policy HTTP response header; keep the meta tag as a fallback only.',
                     reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#meta',
                   });
@@ -1116,6 +1138,37 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (message.type === 'RESET_ALL_DATA') {
+      void (async () => {
+        try {
+          writeBatcher.clearAll();
+          broadcastCoalescer.clearAll();
+          
+          tabStates.clear();
+          originAuthBaselines.clear();
+          captureMap.clear();
+          inFlightRequests.clear();
+          incognitoTabIds.clear();
+
+          await clearBadgesOnAllTabs();
+
+          await LocalStorage.resetAllData();
+          
+          currentSettings = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
+          await SettingsService.updateSettings(currentSettings);
+          
+          portRegistry.broadcastAll({
+            type: 'SETTINGS_CHANGED',
+            settings: currentSettings,
+          });
+          sendResponse({ type: 'RESET_ALL_DATA_RESPONSE', success: true });
+        } catch (e) {
+          sendResponse({ type: 'RESET_ALL_DATA_RESPONSE', success: false, error: String(e) });
+        }
+      })();
+      return true;
+    }
+
     return false;
   },
 );
@@ -1153,7 +1206,9 @@ registerCaptureListeners(
 
       const state = tabStates.get(tabId);
       if (!state) return;
-      state.isIncognito = isIncognito;
+      const resolvedIncognito = isIncognito === true || state.isIncognito === true || incognitoTabIds.has(tabId) || isIncognito === undefined;
+      state.isIncognito = resolvedIncognito;
+      if (resolvedIncognito) incognitoTabIds.add(tabId);
 
       const allowed = await CapturePolicy.isAllowed(apiHop.url);
       if (!allowed) return;

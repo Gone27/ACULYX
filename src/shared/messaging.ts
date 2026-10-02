@@ -81,6 +81,16 @@ export interface GeneratePocResponse {
   url?: string;
 }
 
+export interface ResetAllDataMessage {
+  type: 'RESET_ALL_DATA';
+}
+
+export interface ResetAllDataResponse {
+  type: 'RESET_ALL_DATA_RESPONSE';
+  success: boolean;
+  error?: string;
+}
+
 /** All messages that cross the service worker ↔ UI boundary. */
 export type ExtensionMessage =
   | TabStateUpdateMessage
@@ -94,7 +104,9 @@ export type ExtensionMessage =
   | RequestGraphMessage
   | GraphResponseMessage
   | GeneratePocMessage
-  | GeneratePocResponse;
+  | GeneratePocResponse
+  | ResetAllDataMessage
+  | ResetAllDataResponse;
 
 // ─── Port registry ────────────────────────────────────────────────────────────
 

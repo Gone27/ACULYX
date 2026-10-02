@@ -1,5 +1,5 @@
 import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { S as resolveCookieOverlaps, b as SettingsService, s as PermissionsService, v as LocalStorage, x as normalizeCookieList } from "./capture-CCR6EOFJ.js";
+import { E as resolveCookieOverlaps, S as LocalStorage, T as normalizeCookieList, s as PermissionsService, w as SettingsService } from "./capture-DOfvRG7K.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/options/options.ts
@@ -92,7 +92,10 @@ function wireDataManagement() {
 	});
 	btnClearAll.addEventListener("click", () => {
 		if (!confirm("Clear ALL local SecCheck data? This cannot be undone.")) return;
-		LocalStorage.clearAll().then(() => showDataStatus("All local data cleared. Extension will reload.")).catch((err) => showDataStatus(`Failed: ${String(err)}`, true));
+		sendToBackground({ type: "RESET_ALL_DATA" }).then(() => {
+			showDataStatus("All data cleared. Reloading...");
+			setTimeout(() => window.location.reload(), 1500);
+		}).catch((err) => showDataStatus(`Failed: ${String(err)}`, true));
 	});
 }
 async function loadAndPopulate() {
@@ -303,8 +306,12 @@ function wireModeRadios() {
 }
 async function checkAndRenderBroadConflict() {
 	const broadActive = await PermissionsService.isBroadGrantPresent();
+	const hasComplete = await PermissionsService.hasCompleteBroadGrant();
 	if (currentMode === "per-site" && broadActive) modeConflictBanner.removeAttribute("hidden");
-	else modeConflictBanner.setAttribute("hidden", "");
+	else if (currentMode === "all-sites" && !hasComplete) {
+		modeConflictBanner.setAttribute("hidden", "");
+		setStatus("All-sites mode requires complete broad permissions. Capture is currently paused.", true);
+	} else modeConflictBanner.setAttribute("hidden", "");
 }
 function wireConflictBanner() {
 	btnRemoveBroadAccess.addEventListener("click", () => {
@@ -392,4 +399,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-DwFcivgH.js.map
+//# sourceMappingURL=options.html-eeGBvLO2.js.map

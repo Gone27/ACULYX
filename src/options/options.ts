@@ -114,8 +114,11 @@ function wireDataManagement(): void {
 
   btnClearAll.addEventListener('click', () => {
     if (!confirm('Clear ALL local SecCheck data? This cannot be undone.')) return;
-    void LocalStorage.clearAll()
-      .then(() => showDataStatus('All local data cleared. Extension will reload.'))
+    void sendToBackground({ type: 'RESET_ALL_DATA' })
+      .then(() => {
+        showDataStatus('All data cleared. Reloading...');
+        setTimeout(() => window.location.reload(), 1500);
+      })
       .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
   });
 }
@@ -425,8 +428,13 @@ function wireModeRadios(): void {
 
 async function checkAndRenderBroadConflict(): Promise<void> {
   const broadActive = await PermissionsService.isBroadGrantPresent();
+  const hasComplete = await PermissionsService.hasCompleteBroadGrant();
+
   if (currentMode === 'per-site' && broadActive) {
     modeConflictBanner.removeAttribute('hidden');
+  } else if (currentMode === 'all-sites' && !hasComplete) {
+    modeConflictBanner.setAttribute('hidden', '');
+    setStatus('All-sites mode requires complete broad permissions. Capture is currently paused.', true);
   } else {
     modeConflictBanner.setAttribute('hidden', '');
   }

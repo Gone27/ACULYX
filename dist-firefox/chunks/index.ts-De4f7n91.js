@@ -1,5 +1,5 @@
 import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BtJyJf3R.js";
-import { C as settingsTransitionPipeline, _ as tabStates, a as registerCaptureListeners, b as SettingsService, c as isBroadGrant, d as reconcilePermissionsOnStartup, f as isModeCaptureAllowed, g as originAuthBaselines, h as initLifecycle, i as incognitoTabIds, m as hydrateFromSession, n as clearInFlightCaptures, o as CapturePolicy, p as isRestrictedUrl$1, r as inFlightRequests, t as captureMap, u as reconcilePermissionsOnRemoved, v as LocalStorage, y as SessionStorage } from "./capture-CCR6EOFJ.js";
+import { C as SessionStorage, D as settingsTransitionPipeline, S as LocalStorage, _ as tabGenerations, a as registerCaptureListeners, b as originAuthBaselines, c as hasAllSitesCoverage, d as reconcilePermissionsOnRemoved, f as reconcilePermissionsOnStartup, g as incrementTabGeneration, h as getTabGeneration, i as incognitoTabIds, l as isBroadGrant, m as isRestrictedUrl$1, n as clearInFlightCaptures, o as CapturePolicy, p as isModeCaptureAllowed, r as inFlightRequests, t as captureMap, v as hydrateFromSession, w as SettingsService, x as tabStates, y as initLifecycle } from "./capture-DOfvRG7K.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -240,21 +240,30 @@ function reportPageSignals() {
 		}
 		return policies;
 	}
+	let metaCspFound = false;
 	function reportMetaCsp() {
+		if (metaCspFound) return;
 		const policies = getMetaCspPolicies();
 		if (policies.length === 0) return;
+		metaCspFound = true;
 		chrome.runtime.sendMessage({
 			type: "META_CSP_FOUND",
 			policies
 		}).catch(() => void 0);
 	}
+	let metaCspRaf = null;
 	if (getMetaCspPolicies().length > 0) reportMetaCsp();
 	else {
 		const observer = new MutationObserver(() => {
-			if (getMetaCspPolicies().length > 0) {
-				reportMetaCsp();
+			if (metaCspFound) {
 				observer.disconnect();
+				return;
 			}
+			if (metaCspRaf !== null) return;
+			metaCspRaf = requestAnimationFrame(() => {
+				metaCspRaf = null;
+				reportMetaCsp();
+			});
 		});
 		observer.observe(document, {
 			childList: true,
@@ -262,9 +271,17 @@ function reportPageSignals() {
 			attributes: true,
 			attributeFilter: ["http-equiv", "content"]
 		});
+		if (typeof window !== "undefined") {
+			window.addEventListener("pagehide", () => observer.disconnect(), { once: true });
+			window.addEventListener("unload", () => observer.disconnect(), { once: true });
+		}
 	}
-	function reportSri() {
+	const scannedUrls = /* @__PURE__ */ new Set();
+	let initialSriDone = false;
+	function doReportSri() {
 		const externalScripts = Array.from(document.querySelectorAll("script[src]")).filter((script) => {
+			if (scannedUrls.has(script.src)) return false;
+			scannedUrls.add(script.src);
 			try {
 				return new URL(script.src, location.href).origin !== location.origin;
 			} catch {
@@ -272,12 +289,16 @@ function reportPageSignals() {
 			}
 		});
 		const externalStylesheets = Array.from(document.querySelectorAll("link[rel~=\"stylesheet\"][href]")).filter((link) => {
+			if (scannedUrls.has(link.href)) return false;
+			scannedUrls.add(link.href);
 			try {
 				return new URL(link.href, location.href).origin !== location.origin;
 			} catch {
 				return false;
 			}
 		});
+		if (initialSriDone && externalScripts.length === 0 && externalStylesheets.length === 0) return;
+		initialSriDone = true;
 		const missingScriptIntegrity = externalScripts.filter((s) => !s.integrity.trim()).length;
 		const missingStyleIntegrity = externalStylesheets.filter((l) => !l.integrity.trim()).length;
 		chrome.runtime.sendMessage({
@@ -288,8 +309,33 @@ function reportPageSignals() {
 			missingStyleIntegrity
 		}).catch(() => void 0);
 	}
-	reportSri();
-	new MutationObserver(reportSri).observe(document.documentElement, {
+	doReportSri();
+	let sriRaf = null;
+	const sriObserver = new MutationObserver((mutations) => {
+		let hasRelevantMutation = false;
+		for (const mutation of mutations) {
+			if (mutation.type === "attributes") {
+				hasRelevantMutation = true;
+				break;
+			}
+			for (const node of mutation.addedNodes) if (node.nodeType === 1) {
+				const el = node;
+				if (el.tagName === "SCRIPT" || el.tagName === "LINK" || el.querySelector("script[src], link[rel~=\"stylesheet\"]")) {
+					hasRelevantMutation = true;
+					break;
+				}
+			}
+			if (hasRelevantMutation) break;
+		}
+		if (hasRelevantMutation && sriRaf === null) {
+			if (typeof requestAnimationFrame === "function") sriRaf = requestAnimationFrame(() => {
+				sriRaf = null;
+				doReportSri();
+			});
+			else doReportSri();
+		}
+	});
+	sriObserver.observe(document.documentElement, {
 		childList: true,
 		subtree: true,
 		attributes: true,
@@ -300,6 +346,10 @@ function reportPageSignals() {
 			"rel"
 		]
 	});
+	if (typeof window !== "undefined") {
+		window.addEventListener("pagehide", () => sriObserver.disconnect(), { once: true });
+		window.addEventListener("unload", () => sriObserver.disconnect(), { once: true });
+	}
 }
 //#endregion
 //#region src/background/page-signals.ts
@@ -325,19 +375,21 @@ async function injectPageSignals(tabId, url) {
 		if (tab?.url !== void 0 && tab.url !== "" && tab.url !== url) return;
 	} catch {}
 	if (settings.monitoringMode === "off") return;
-	if (typeof chrome === "undefined" || typeof chrome.permissions === "undefined") return;
-	const performInjection = (broadGrantPresent) => {
-		if (!isModeCaptureAllowed(url, settings, broadGrantPresent).allowed) return;
-		if (broadGrantPresent) {
-			if (typeof chrome.scripting !== "undefined") chrome.scripting.executeScript({
-				target: {
-					tabId,
-					frameIds: [0]
-				},
-				func: reportPageSignals
-			}).catch(() => void 0);
+	const performInjection = (broadGrantPresent, hasCompleteCoverage) => {
+		if (!isModeCaptureAllowed(url, settings, broadGrantPresent, void 0, hasCompleteCoverage).allowed) return;
+		if (settings.monitoringMode === "all-sites") {
+			if (hasCompleteCoverage) {
+				if (typeof chrome.scripting !== "undefined") chrome.scripting.executeScript({
+					target: {
+						tabId,
+						frameIds: [0]
+					},
+					func: reportPageSignals
+				}).catch(() => void 0);
+			}
 			return;
 		}
+		if (broadGrantPresent) return;
 		chrome.permissions.contains({ origins: [`${origin}/*`] }, (permitted) => {
 			if (!permitted) return;
 			if (typeof chrome.scripting !== "undefined") chrome.scripting.executeScript({
@@ -351,16 +403,18 @@ async function injectPageSignals(tabId, url) {
 	};
 	if (typeof chrome.permissions.getAll === "function") {
 		const handlePerms = (perms) => {
-			const broad = (perms?.origins ?? []).some(isBroadGrant);
-			performInjection(broad);
+			const origins = perms?.origins ?? [];
+			const broad = origins.some(isBroadGrant);
+			const complete = hasAllSitesCoverage(origins);
+			performInjection(broad, complete);
 		};
 		try {
 			const res = chrome.permissions.getAll(handlePerms);
 			if (typeof res === "object" && res !== null && "then" in res && typeof res.then === "function") res.then(handlePerms);
 		} catch {
-			performInjection(false);
+			performInjection(false, false);
 		}
-	} else performInjection(false);
+	} else performInjection(false, false);
 }
 function registerPageSignalInjection() {
 	chrome.webNavigation.onCommitted.addListener((details) => {
@@ -3396,6 +3450,11 @@ var BroadcastCoalescer = class {
 		}
 		this.pending.delete(tabId);
 	}
+	clearAll() {
+		for (const timer of this.timers.values()) clearTimeout(timer);
+		this.timers.clear();
+		this.pending.clear();
+	}
 };
 /**
 * WriteBatcher
@@ -3444,6 +3503,11 @@ var WriteBatcher = class {
 		}
 		this.pending.delete(tabId);
 	}
+	clearAll() {
+		for (const timer of this.timers.values()) clearTimeout(timer);
+		this.timers.clear();
+		this.pending.clear();
+	}
 };
 //#endregion
 //#region src/background/index.ts
@@ -3463,15 +3527,6 @@ var WriteBatcher = class {
 * All side-effects are confined to listener callbacks; no top-level async
 * work is performed so the module is safe to import during SW startup.
 */
-var tabGenerations = /* @__PURE__ */ new Map();
-function getTabGeneration(tabId) {
-	return tabGenerations.get(tabId) ?? 0;
-}
-function incrementTabGeneration(tabId) {
-	const next = (tabGenerations.get(tabId) ?? 0) + 1;
-	tabGenerations.set(tabId, next);
-	return next;
-}
 var TabActionQueue = class {
 	queues = /* @__PURE__ */ new Map();
 	enqueue(tabId, generation, action) {
@@ -3564,7 +3619,15 @@ var resolveSessionHydration;
 var sessionHydrationReady = new Promise((resolve) => {
 	resolveSessionHydration = resolve;
 });
-var startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(() => void 0);
+var startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(async () => {
+	try {
+		const tabs = await new Promise((resolve) => {
+			chrome.tabs.query({}, (res) => resolve(res ?? []));
+		});
+		for (const tab of tabs) if (tab.id !== void 0 && tab.incognito) incognitoTabIds.add(tab.id);
+	} catch {}
+	for (const [tabId, state] of tabStates.entries()) if (state.isIncognito === true) incognitoTabIds.add(tabId);
+});
 function recomputeTabState(tabId, state) {
 	const result = runRules({
 		hops: state.hops,
@@ -3759,7 +3822,9 @@ async function onHopComplete(tabId, hop, isIncognito) {
 		await startupReady;
 		if (getTabGeneration(tabId) !== gen) return;
 		const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
-		state.isIncognito = isIncognito;
+		const resolvedIncognito = isIncognito === true || state.isIncognito === true || incognitoTabIds.has(tabId) || isIncognito === void 0;
+		state.isIncognito = resolvedIncognito;
+		if (resolvedIncognito) incognitoTabIds.add(tabId);
 		state.navigationGeneration = gen;
 		state.url = hop.url;
 		state.origin = originFromUrl(hop.url) ?? hop.url;
@@ -3877,7 +3942,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 	writeBatcher.clear(tabId);
 	const wasIncognito = incognitoTabIds.has(tabId);
 	incognitoTabIds.delete(tabId);
-	if (wasIncognito) chrome.tabs.query({}).then((tabs) => {
+	if (wasIncognito) new Promise((resolve) => {
+		chrome.tabs.query({}, (res) => resolve(res ?? []));
+	}).then((tabs) => {
 		if (tabs.filter((t) => t.incognito).length === 0) clearIncognitoSessionRecords();
 	}).catch(() => void 0);
 });
@@ -3970,10 +4037,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 			const currentGen = getTabGeneration(senderTabId);
 			if (message.generation !== void 0 && message.generation !== currentGen) return false;
 			const gen = message.generation ?? currentGen;
-			if (isDuplicateEvent(message.eventId ?? `sw:${senderTabId}:${gen}:${message.status}:${message.serviceWorkerUrl ?? ""}`)) return false;
+			const rawSwUrl = message.serviceWorkerUrl;
+			const swUrl = rawSwUrl !== null && rawSwUrl !== void 0 && rawSwUrl !== "" ? (rawSwUrl.split("?")[0] ?? "").split("#")[0] ?? null : null;
+			if (isDuplicateEvent(message.eventId ?? `sw:${senderTabId}:${gen}:${message.status}:${swUrl ?? ""}`)) return false;
 			const report = {
 				status: message.status,
-				serviceWorkerUrl: message.serviceWorkerUrl,
+				serviceWorkerUrl: swUrl,
 				generation: gen
 			};
 			pendingServiceWorkerReports.set(senderTabId, report);
@@ -4004,7 +4073,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 			const currentGen = getTabGeneration(senderTabId);
 			if (message.generation !== void 0 && message.generation !== currentGen) return false;
 			const gen = message.generation ?? currentGen;
-			const policiesStr = (message.policies ?? []).join(";");
+			const sanitizedPolicies = (message.policies ?? []).map((p) => p.replace(/(report-uri|report-to)\s+([^;\s]+)/gi, (_match, dir, uri) => {
+				return `${dir} ${(uri.split("?")[0] ?? "").split("#")[0] ?? ""}`;
+			}));
+			const policiesStr = sanitizedPolicies.join(";");
 			if (isDuplicateEvent(message.eventId ?? `meta-csp:${senderTabId}:${gen}:${policiesStr}`)) return false;
 			pendingMetaCspReports.add(senderTabId);
 			tabActionQueue.enqueue(senderTabId, gen, async () => {
@@ -4013,14 +4085,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				const state = tabStates.get(senderTabId);
 				if (state) {
 					state.coverage.metaCspFound = true;
-					if (message.policies !== void 0 && message.policies.length > 0) {
-						state.coverage.metaCspPolicies = message.policies.slice(0, 5).map((p) => p.slice(0, 2048));
+					if (sanitizedPolicies.length > 0) {
+						state.coverage.metaCspPolicies = sanitizedPolicies.slice(0, 5).map((p) => p.slice(0, 2048));
 						pushLedgerEntry(state, {
 							type: "subresource",
 							url: state.url,
 							source: "dom",
 							timestamp: Date.now(),
-							notes: `${message.policies.length} <meta> CSP tag(s) detected in DOM`
+							notes: `${sanitizedPolicies.length} <meta> CSP tag(s) detected in DOM`
 						});
 						if (!(state.hops.at(-1)?.headers["content-security-policy"] !== void 0)) {
 							if (!(state.captureFindings ?? []).some((f) => f.ruleId === "CSP-META-001")) (state.captureFindings ?? (state.captureFindings = [])).push({
@@ -4029,7 +4101,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 								severity: "info",
 								title: "CSP delivered via <meta> tag, not HTTP header",
 								impact: "Meta-tag CSP cannot restrict navigation, workers, or plugin content. HTTP header CSP provides broader enforcement.",
-								evidence: `${message.policies.length} meta-CSP policy/policies found`,
+								evidence: `${sanitizedPolicies.length} meta-CSP policy/policies found`,
 								recommendation: "Prefer Content-Security-Policy HTTP response header; keep the meta tag as a fallback only.",
 								reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy#meta"
 							});
@@ -4159,6 +4231,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		});
 		return true;
 	}
+	if (message.type === "RESET_ALL_DATA") {
+		(async () => {
+			try {
+				writeBatcher.clearAll();
+				broadcastCoalescer.clearAll();
+				tabStates.clear();
+				originAuthBaselines.clear();
+				captureMap.clear();
+				inFlightRequests.clear();
+				incognitoTabIds.clear();
+				await clearBadgesOnAllTabs();
+				await LocalStorage.resetAllData();
+				currentSettings = {
+					...DEFAULT_SETTINGS,
+					monitoringMode: "off"
+				};
+				await SettingsService.updateSettings(currentSettings);
+				portRegistry.broadcastAll({
+					type: "SETTINGS_CHANGED",
+					settings: currentSettings
+				});
+				sendResponse({
+					type: "RESET_ALL_DATA_RESPONSE",
+					success: true
+				});
+			} catch (e) {
+				sendResponse({
+					type: "RESET_ALL_DATA_RESPONSE",
+					success: false,
+					error: String(e)
+				});
+			}
+		})();
+		return true;
+	}
 	return false;
 });
 initLifecycle();
@@ -4177,7 +4284,9 @@ registerCaptureListeners((tabId, hop, isIncognito) => {
 		if (getTabGeneration(tabId) !== gen) return;
 		const state = tabStates.get(tabId);
 		if (!state) return;
-		state.isIncognito = isIncognito;
+		const resolvedIncognito = isIncognito === true || state.isIncognito === true || incognitoTabIds.has(tabId) || isIncognito === void 0;
+		state.isIncognito = resolvedIncognito;
+		if (resolvedIncognito) incognitoTabIds.add(tabId);
 		if (!await CapturePolicy.isAllowed(apiHop.url)) return;
 		if (getTabGeneration(tabId) !== gen) return;
 		const targetOrigin = originFromUrl(apiHop.url);
@@ -4260,4 +4369,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-Cx71SbGm.js.map
+//# sourceMappingURL=index.ts-De4f7n91.js.map

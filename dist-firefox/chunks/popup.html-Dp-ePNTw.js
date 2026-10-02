@@ -1,5 +1,5 @@
 import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { b as SettingsService, f as isModeCaptureAllowed, l as patternFromOrigin, s as PermissionsService, v as LocalStorage } from "./capture-CCR6EOFJ.js";
+import { S as LocalStorage, p as isModeCaptureAllowed, s as PermissionsService, u as patternFromOrigin, w as SettingsService } from "./capture-DOfvRG7K.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/shared/filters.ts
@@ -171,7 +171,8 @@ async function initPopup() {
 	const settings = await SettingsService.getSettings();
 	currentSettings = settings;
 	const broadActive = await PermissionsService.isBroadGrantPresent();
-	const gate = isModeCaptureAllowed(tab.url, settings, broadActive);
+	const completeBroad = await PermissionsService.hasCompleteBroadGrant();
+	const gate = isModeCaptureAllowed(tab.url, settings, broadActive, void 0, completeBroad);
 	if (!gate.allowed) {
 		if (gate.reason === "off") {
 			originText.textContent = tab.url;
@@ -183,6 +184,12 @@ async function initPopup() {
 			originText.textContent = tab.url;
 			showBroadAccessConflictNotice();
 			setPopupState("paused-conflict");
+			return;
+		}
+		if (gate.reason === "all-sites-missing-grant") {
+			originText.textContent = tab.url;
+			showAllSitesMissingNotice();
+			setPopupState("all-sites-missing");
 			return;
 		}
 		if (gate.reason === "restricted-url") {
@@ -341,6 +348,21 @@ function buildFindingItem(finding) {
 	severitySpan.textContent = finding.severity;
 	const body = document.createElement("div");
 	body.className = "finding-body";
+	const tagsContainer = document.createElement("div");
+	tagsContainer.className = "finding-meta-tags";
+	if (finding.provenance) {
+		const provSpan = document.createElement("span");
+		provSpan.className = "finding-tag-provenance";
+		provSpan.textContent = finding.provenance;
+		tagsContainer.appendChild(provSpan);
+	}
+	if (finding.confidence) {
+		const confSpan = document.createElement("span");
+		confSpan.className = "finding-tag-confidence";
+		confSpan.textContent = finding.confidence;
+		tagsContainer.appendChild(confSpan);
+	}
+	if (finding.provenance || finding.confidence) body.appendChild(tagsContainer);
 	const titleSpan = document.createElement("span");
 	titleSpan.className = "finding-title";
 	titleSpan.textContent = finding.title;
@@ -768,7 +790,10 @@ function wireExportButton() {
 			findings: currentState.findings,
 			scoreBreakdown: currentState.scoreBreakdown,
 			cookies: currentState.cookies,
-			coverage: currentState.coverage,
+			coverage: {
+				...currentState.coverage,
+				serviceWorkerUrl: currentState.coverage.serviceWorkerUrl !== null && currentState.coverage.serviceWorkerUrl !== void 0 && currentState.coverage.serviceWorkerUrl !== "" ? (currentState.coverage.serviceWorkerUrl.split("?")[0] ?? "").split("#")[0] ?? null : null
+			},
 			subdomainTrust: currentState.subdomainTrust,
 			apiEndpoints: getApiEndpointsList(currentState)
 		};
@@ -1049,6 +1074,38 @@ function showBroadAccessConflictNotice() {
 	specialNotice.hidden = false;
 	showStateMessage("Capture paused due to broad access conflict.", "waiting");
 }
+function showAllSitesMissingNotice() {
+	specialNotice.textContent = "";
+	const p = document.createElement("p");
+	p.textContent = "All-sites monitoring is enabled, but the required broad permissions are missing. Capture is paused until resolved:";
+	const actions = document.createElement("div");
+	actions.style.display = "flex";
+	actions.style.gap = "8px";
+	actions.style.marginTop = "8px";
+	const restoreBtn = document.createElement("button");
+	restoreBtn.className = "btn-primary";
+	restoreBtn.textContent = "Restore All-sites access";
+	restoreBtn.addEventListener("click", () => {
+		chrome.permissions.request({ origins: ["<all_urls>"] }, (granted) => {
+			if (granted) initPopup();
+		});
+	});
+	const switchBtn = document.createElement("button");
+	switchBtn.className = "btn-secondary";
+	switchBtn.textContent = "Switch to per-site";
+	switchBtn.addEventListener("click", () => {
+		SettingsService.updateSettings({ monitoringMode: "per-site" }).then(() => {
+			initPopup();
+		});
+	});
+	actions.appendChild(restoreBtn);
+	actions.appendChild(switchBtn);
+	specialNotice.appendChild(p);
+	specialNotice.appendChild(actions);
+	specialNotice.className = "special-notice conflict-notice";
+	specialNotice.hidden = false;
+	showStateMessage("Capture paused due to missing broad permissions.", "waiting");
+}
 function checkPermission(origin) {
 	const pattern = patternFromOrigin(origin);
 	return new Promise((resolve) => {
@@ -1078,4 +1135,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-BQlDzh8t.js.map
+//# sourceMappingURL=popup.html-Dp-ePNTw.js.map

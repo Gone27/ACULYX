@@ -397,6 +397,15 @@ function assertNoSensitiveSecrets(state) {
 	if (Array.isArray(state.cookies)) {
 		for (const cookie of state.cookies) if ("value" in cookie) throw new Error(`[SecCheck] Cookie value detected on ${cookie.name} — storage aborted.`);
 	}
+	const checkUrlStr = (urlStr, context) => {
+		if (urlStr === null || urlStr === void 0 || urlStr === "") return;
+		if (urlStr.includes("?")) throw new Error(`[SecCheck] Unredacted query string detected in ${context} — storage aborted.`);
+		if (urlStr.match(/:\/\/[^@/]+@/) !== null) throw new Error(`[SecCheck] Unredacted credentials detected in ${context} — storage aborted.`);
+	};
+	if (state.coverage !== void 0 && state.coverage !== null) {
+		checkUrlStr(state.coverage.serviceWorkerUrl, "serviceWorkerUrl");
+		if (Array.isArray(state.coverage.metaCspPolicies)) for (const policy of state.coverage.metaCspPolicies) checkUrlStr(policy, "metaCspPolicies");
+	}
 	const checkHeaders = (headers, rawHeaders, context) => {
 		if (headers) for (const [k, v] of Object.entries(headers)) {
 			const lower = k.toLowerCase();
@@ -709,7 +718,7 @@ var LocalStorage = {
 	async deleteAllHistory() {
 		try {
 			const all = await chrome.storage.local.get(null);
-			const histKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX));
+			const histKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || k.startsWith("history:"));
 			if (histKeys.length > 0) await chrome.storage.local.remove(histKeys);
 		} catch (err) {
 			recordStorageFailure(err);
@@ -721,7 +730,19 @@ var LocalStorage = {
 			const all = await chrome.storage.session.get(null);
 			const toRemove = Object.entries(all).filter(([k, v]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX) && typeof v === "object" && v !== null && v.isIncognito === true).map(([k]) => k);
 			if (toRemove.length > 0) await chrome.storage.session.remove(toRemove);
-		} catch {}
+		} catch (err) {
+			recordStorageFailure(err);
+			throw err;
+		}
+	},
+	async resetAllData() {
+		try {
+			await chrome.storage.local.clear();
+			if (typeof chrome.storage.session !== "undefined") await chrome.storage.session.clear();
+		} catch (err) {
+			recordStorageFailure(err);
+			throw err;
+		}
 	},
 	async clearAll() {
 		try {
@@ -784,6 +805,25 @@ async function hydrateFromSession() {
 	LocalStorage.pruneAllHistory();
 }
 //#endregion
+//#region src/background/generations.ts
+/**
+* generations.ts
+*
+* Per-tab navigation generation counter.
+* Incremented on onBeforeNavigate (top-level frameId === 0).
+* Tags hops, API hops, cookie changes, and page signals.
+* Late arrivals for older generations are discarded immediately.
+*/
+var tabGenerations = /* @__PURE__ */ new Map();
+function getTabGeneration(tabId) {
+	return tabGenerations.get(tabId) ?? 0;
+}
+function incrementTabGeneration(tabId) {
+	const next = (tabGenerations.get(tabId) ?? 0) + 1;
+	tabGenerations.set(tabId, next);
+	return next;
+}
+//#endregion
 //#region src/shared/gating.ts
 var RESTRICTED_SCHEME_PREFIXES = [
 	"chrome://",
@@ -818,7 +858,7 @@ function isRestrictedUrl(url, options) {
 *
 * Invariant: Evaluation mode or presentation settings NEVER affect this decision.
 */
-function isModeCaptureAllowed(url, settings, broadGrantPresent, options) {
+function isModeCaptureAllowed(url, settings, broadGrantPresent, options, completeBroadGrant) {
 	if (isRestrictedUrl(url, options)) return {
 		allowed: false,
 		reason: "restricted-url"
@@ -830,6 +870,10 @@ function isModeCaptureAllowed(url, settings, broadGrantPresent, options) {
 	if (settings.monitoringMode === "per-site" && broadGrantPresent) return {
 		allowed: false,
 		reason: "broad-access-conflict"
+	};
+	if (settings.monitoringMode === "all-sites" && completeBroadGrant === false) return {
+		allowed: false,
+		reason: "all-sites-missing-grant"
 	};
 	return {
 		allowed: true,
@@ -1364,7 +1408,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			inFlightRequests.set(details.requestId, {
 				method: details.method,
 				origin: originHeader,
-				timestamp: details.timeStamp
+				timestamp: details.timeStamp,
+				generation: getTabGeneration(details.tabId)
 			});
 		}, filter, ["requestHeaders", "extraHeaders"]);
 		chrome.webRequest.onErrorOccurred.addListener((details) => {
@@ -1393,7 +1438,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			wasRedirected: false,
 			timestamp: details.timeStamp,
 			redirectCount: 0,
-			isIncognito: isIncog
+			isIncognito: isIncog,
+			generation: getTabGeneration(details.tabId)
 		};
 		captureMap.set(details.requestId, partial);
 	}, filter, extraInfoSpec);
@@ -1425,7 +1471,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 				headers: apiHeaders,
 				rawHeaders: apiRawHeaders,
 				timestamp: reqMeta?.timestamp ?? details.timeStamp,
-				fromCache: details.fromCache ?? false
+				fromCache: details.fromCache ?? false,
+				generation: reqMeta?.generation ?? getTabGeneration(details.tabId)
 			};
 			const isIncog = incognitoTabIds.has(details.tabId);
 			try {
@@ -1457,7 +1504,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 				wasRedirected: false,
 				timestamp: details.timeStamp,
 				redirectCount: 0,
-				isIncognito: isIncog
+				isIncognito: isIncog,
+				generation: getTabGeneration(details.tabId)
 			};
 		}
 		const sanitizedUrl = redactUrlQueryParams(details.url);
@@ -1480,7 +1528,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			capturedAt: "onResponseStarted",
 			headersDiffer: differ,
 			timestamp: partial.timestamp,
-			redirectCount: partial.redirectCount
+			redirectCount: partial.redirectCount,
+			generation: partial.generation ?? getTabGeneration(details.tabId)
 		};
 		captureMap.delete(details.requestId);
 		try {
@@ -1510,7 +1559,8 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			capturedAt: "onResponseStarted",
 			headersDiffer: beforeHeaders !== null && beforeHeaders !== void 0 ? headersDiffer(beforeHeaders, headers) : false,
 			timestamp: existing?.timestamp ?? details.timeStamp,
-			redirectCount: 0
+			redirectCount: 0,
+			generation: existing?.generation ?? getTabGeneration(details.tabId)
 		};
 		const isIncog = existing?.isIncognito ?? incognitoTabIds.has(details.tabId);
 		captureMap.delete(details.requestId);
@@ -1518,6 +1568,6 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 	}, filter, extraInfoSpec);
 }
 //#endregion
-export { settingsTransitionPipeline as C, resolveCookieOverlaps as S, tabStates as _, registerCaptureListeners as a, SettingsService as b, isBroadGrant as c, reconcilePermissionsOnStartup as d, isModeCaptureAllowed as f, originAuthBaselines as g, initLifecycle as h, incognitoTabIds as i, patternFromOrigin as l, hydrateFromSession as m, clearInFlightCaptures as n, CapturePolicy as o, isRestrictedUrl as p, inFlightRequests as r, PermissionsService as s, captureMap as t, reconcilePermissionsOnRemoved as u, LocalStorage as v, normalizeCookieList as x, SessionStorage as y };
+export { SessionStorage as C, settingsTransitionPipeline as D, resolveCookieOverlaps as E, LocalStorage as S, normalizeCookieList as T, tabGenerations as _, registerCaptureListeners as a, originAuthBaselines as b, hasAllSitesCoverage as c, reconcilePermissionsOnRemoved as d, reconcilePermissionsOnStartup as f, incrementTabGeneration as g, getTabGeneration as h, incognitoTabIds as i, isBroadGrant as l, isRestrictedUrl as m, clearInFlightCaptures as n, CapturePolicy as o, isModeCaptureAllowed as p, inFlightRequests as r, PermissionsService as s, captureMap as t, patternFromOrigin as u, hydrateFromSession as v, SettingsService as w, tabStates as x, initLifecycle as y };
 
-//# sourceMappingURL=capture-CCR6EOFJ.js.map
+//# sourceMappingURL=capture-DOfvRG7K.js.map

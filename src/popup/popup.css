@@ -518,6 +518,25 @@ body {
   word-break: break-all;
 }
 
+.finding-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.finding-tag-provenance,
+.finding-tag-confidence {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
 .finding-impact {
   font-size: 11px;
   line-height: 1.35;

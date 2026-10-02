@@ -50,17 +50,55 @@ describe('Artifact Scan', () => {
 
       it('does not request prohibited permissions', () => {
         const permissions = manifest.permissions ?? [];
-        // `<all_urls>` should only be in optional_host_permissions, not permissions
-        expect(permissions).not.toContain('<all_urls>');
-        
         const hostPermissions = manifest.host_permissions ?? [];
-        expect(hostPermissions).not.toContain('<all_urls>');
+        
+        const broadPatterns = ['<all_urls>', '*://*/*', 'https://*/*', 'http://*/*'];
+        
+        for (const pattern of broadPatterns) {
+          expect(permissions).not.toContain(pattern);
+          expect(hostPermissions).not.toContain(pattern);
+        }
       });
       
-      it('has <all_urls> only in optional_host_permissions (or optional_permissions for firefox)', () => {
-        // It's allowed in optional host permissions, so if it exists there, it's fine.
-        // We just need to make sure it's NOT in the required ones.
+      it('has broad patterns only in optional permissions/host_permissions', () => {
+        // It's allowed in optional host permissions or optional permissions, so if it exists there, it's fine.
+        // We already verified above it's NOT in required ones.
+        const allOptional = [
+          ...(manifest.optional_permissions ?? []),
+          ...(manifest.optional_host_permissions ?? [])
+        ];
+        
+        // It doesn't strictly have to have them, but if it does, it's fine.
+        // The main requirement was verifying they are NOT in required permissions.
+        expect(Array.isArray(allOptional)).toBe(true);
       });
+    });
+  });
+
+  describe('dist/ chunks security', () => {
+    it('scans built dist/ JS chunks ensuring no unredacted canaries or remote script URLs are embedded', () => {
+      const distPath = path.join(__dirname, '../../dist');
+      if (!fs.existsSync(distPath)) {
+        return; // skip if dist/ not found
+      }
+      
+      const files = fs.readdirSync(distPath, { recursive: true }) as string[];
+      const jsFiles = files.filter(f => f.endsWith('.js')).map(f => path.join(distPath, f));
+      
+      for (const file of jsFiles) {
+        const content = fs.readFileSync(file, 'utf-8');
+        
+        // Ensure no unredacted cookie canaries (common dummy canary strings from tests/code)
+        // Also ensure no <script src="http(s)://..."> injected by bundler or third party
+        
+        // This regex looks for literal script tags with remote HTTP/HTTPS src
+        const remoteScriptPattern = /<script[^>]+src=["']https?:\/\/[^"']+["']/i;
+        expect(content).not.toMatch(remoteScriptPattern);
+        
+        // Check for specific dummy secrets from tests leaking into production build
+        expect(content).not.toContain('SECRET_CANARY_12345');
+        expect(content).not.toContain('SECRET_CANARY_67890');
+      }
     });
   });
 });

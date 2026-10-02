@@ -141,13 +141,32 @@ export function hasUnredactedCookieValue(headerStr: string, isSetCookie: boolean
 }
 
 export function assertNoSensitiveSecrets(state: TabState): void {
-  // 1. Guard against cookie records having a 'value' property
   if (Array.isArray(state.cookies)) {
     for (const cookie of state.cookies) {
       if ('value' in cookie) {
         throw new Error(
           `[SecCheck] Cookie value detected on ${cookie.name} — storage aborted.`
         );
+      }
+    }
+  }
+
+  const checkUrlStr = (urlStr: string | null | undefined, context: string): void => {
+    if (urlStr === null || urlStr === undefined || urlStr === '') return;
+    if (urlStr.includes('?')) {
+      throw new Error(`[SecCheck] Unredacted query string detected in ${context} — storage aborted.`);
+    }
+    const match = urlStr.match(/:\/\/[^@/]+@/);
+    if (match !== null) {
+      throw new Error(`[SecCheck] Unredacted credentials detected in ${context} — storage aborted.`);
+    }
+  };
+
+  if (state.coverage !== undefined && state.coverage !== null) {
+    checkUrlStr(state.coverage.serviceWorkerUrl, 'serviceWorkerUrl');
+    if (Array.isArray(state.coverage.metaCspPolicies)) {
+      for (const policy of state.coverage.metaCspPolicies) {
+        checkUrlStr(policy, 'metaCspPolicies');
       }
     }
   }
@@ -618,7 +637,7 @@ export const LocalStorage = {
   async deleteAllHistory(): Promise<void> {
     try {
       const all = await chrome.storage.local.get(null);
-      const histKeys = Object.keys(all).filter(k => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX));
+      const histKeys = Object.keys(all).filter(k => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || k.startsWith('history:'));
       if (histKeys.length > 0) {
         await chrome.storage.local.remove(histKeys);
       }
@@ -637,8 +656,21 @@ export const LocalStorage = {
       if (toRemove.length > 0) {
         await chrome.storage.session.remove(toRemove);
       }
-    } catch {
-      // Ignore session storage errors
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
+    }
+  },
+
+  async resetAllData(): Promise<void> {
+    try {
+      await chrome.storage.local.clear();
+      if (typeof chrome.storage.session !== 'undefined') {
+        await chrome.storage.session.clear();
+      }
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
     }
   },
 

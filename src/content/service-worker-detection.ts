@@ -30,44 +30,63 @@ export function reportPageSignals(): void {
     return policies;
   }
 
+  let metaCspFound = false;
   function reportMetaCsp(): void {
+    if (metaCspFound) return;
     const policies = getMetaCspPolicies();
     if (policies.length === 0) return;
+    metaCspFound = true;
     void chrome.runtime.sendMessage({
       type: 'META_CSP_FOUND',
       policies, // full policy strings — NOT injected into DOM, sent over runtime message
     }).catch(() => undefined);
   }
 
+  let metaCspRaf: number | null = null;
   if (getMetaCspPolicies().length > 0) {
     reportMetaCsp();
   } else {
     const observer = new MutationObserver(() => {
-      if (getMetaCspPolicies().length > 0) {
-        reportMetaCsp();
+      if (metaCspFound) {
         observer.disconnect();
+        return;
       }
+      if (metaCspRaf !== null) return;
+      metaCspRaf = requestAnimationFrame(() => {
+        metaCspRaf = null;
+        reportMetaCsp();
+      });
     });
     observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['http-equiv', 'content'] });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+      window.addEventListener('unload', () => observer.disconnect(), { once: true });
+    }
   }
 
   // ── SRI scan ──────────────────────────────────────────────────────────────
-  // Scans current DOM for external <script src> and <link stylesheet href>
-  // that lack integrity= attributes. NOTE: this audits only elements present
-  // at scan time; dynamically injected subresources after this point may not
-  // be captured. The observer below re-runs on DOM mutations to catch SPAs.
-  function reportSri(): void {
+  const scannedUrls = new Set<string>();
+  let initialSriDone = false;
+
+  function doReportSri(): void {
     const externalScripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'))
       .filter((script) => {
+        if (scannedUrls.has(script.src)) return false;
+        scannedUrls.add(script.src);
         try { return new URL(script.src, location.href).origin !== location.origin; }
         catch { return false; }
       });
 
     const externalStylesheets = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))
       .filter((link) => {
+        if (scannedUrls.has(link.href)) return false;
+        scannedUrls.add(link.href);
         try { return new URL(link.href, location.href).origin !== location.origin; }
         catch { return false; }
       });
+
+    if (initialSriDone && externalScripts.length === 0 && externalStylesheets.length === 0) return;
+    initialSriDone = true;
 
     const missingScriptIntegrity = externalScripts.filter((s) => !s.integrity.trim()).length;
     const missingStyleIntegrity = externalStylesheets.filter((l) => !l.integrity.trim()).length;
@@ -81,12 +100,47 @@ export function reportPageSignals(): void {
     }).catch(() => undefined);
   }
 
-  reportSri();
-  const sriObserver = new MutationObserver(reportSri);
+  doReportSri();
+
+  let sriRaf: number | null = null;
+  const sriObserver = new MutationObserver((mutations) => {
+    let hasRelevantMutation = false;
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes') {
+        hasRelevantMutation = true;
+        break;
+      }
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === 1) {
+          const el = node as Element;
+          if (el.tagName === 'SCRIPT' || el.tagName === 'LINK' || el.querySelector('script[src], link[rel~="stylesheet"]')) {
+            hasRelevantMutation = true;
+            break;
+          }
+        }
+      }
+      if (hasRelevantMutation) break;
+    }
+
+    if (hasRelevantMutation && sriRaf === null) {
+      if (typeof requestAnimationFrame === 'function') {
+        sriRaf = requestAnimationFrame(() => {
+          sriRaf = null;
+          doReportSri();
+        });
+      } else {
+        doReportSri();
+      }
+    }
+  });
   sriObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ['src', 'integrity', 'href', 'rel'],
   });
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', () => sriObserver.disconnect(), { once: true });
+    window.addEventListener('unload', () => sriObserver.disconnect(), { once: true });
+  }
 }

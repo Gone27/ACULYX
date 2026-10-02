@@ -53,6 +53,14 @@ export class BroadcastCoalescer<T> {
     }
     this.pending.delete(tabId);
   }
+
+  clearAll(): void {
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+    this.pending.clear();
+  }
 }
 
 /**
@@ -105,5 +113,13 @@ export class WriteBatcher {
       this.timers.delete(tabId);
     }
     this.pending.delete(tabId);
+  }
+
+  clearAll(): void {
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+    this.pending.clear();
   }
 }
