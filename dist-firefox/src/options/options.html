@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Settings</title>
-  <script type="module" crossorigin src="/chunks/options.html-eeGBvLO2.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-BtJyJf3R.js">
-  <link rel="modulepreload" crossorigin href="/chunks/capture-DOfvRG7K.js">
+  <script type="module" crossorigin src="/chunks/options.html-By5KZX8L.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-BQwzB0xT.js">
+  <link rel="modulepreload" crossorigin href="/chunks/capture-DnbUjg5i.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
   <link rel="stylesheet" crossorigin href="/assets/options-9uTrxrb9.css">
-  <link rel="stylesheet" crossorigin href="/assets/design-tokens-5_sJXYzH.css">
+  <link rel="stylesheet" crossorigin href="/assets/design-tokens-BFCLBpnh.css">
 </head>
 <body>
 
@@ -135,8 +135,9 @@
             max="365"
             step="1"
             class="number-input"
+            aria-describedby="retain-history-days-hint"
           >
-          days &nbsp;<span class="field-hint">(0 = keep forever)</span>
+          days &nbsp;<span class="field-hint" id="retain-history-days-hint">(0 = keep forever)</span>
         </label>
       </div>
       <div class="field-row" style="margin-top: 10px;">
@@ -150,8 +151,9 @@
             max="50"
             step="1"
             class="number-input"
+            aria-describedby="max-history-per-origin-hint"
           >
-          entries &nbsp;<span class="field-hint">(1–50, default: 10)</span>
+          entries &nbsp;<span class="field-hint" id="max-history-per-origin-hint">(1–50, default: 10)</span>
         </label>
       </div>
     </section>
@@ -161,12 +163,12 @@
       <h2 class="section-heading">Data Management</h2>
 
       <div class="field-row">
-        <label class="field-label-block">Per-origin data</label>
+        <label class="field-label-block" for="delete-origin-input">Per-origin data</label>
         <div class="data-actions-row">
-          <input type="text" id="delete-origin-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" class="text-input" />
+          <input type="text" id="delete-origin-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" class="text-input" aria-describedby="delete-origin-hint" />
           <button type="button" id="btn-delete-origin" class="btn-danger-sm">Delete this site</button>
         </div>
-        <p class="field-hint">Removes history and graph data for one origin. Does not revoke monitoring permission.</p>
+        <p class="field-hint" id="delete-origin-hint">Removes history and graph data for one origin. Does not revoke monitoring permission.</p>
       </div>
 
       <div class="field-row danger-zone" style="margin-top: 16px;">
@@ -185,7 +187,7 @@
     <!-- ── Custom cookie classification ───────────────────────── -->
     <section class="options-section" id="section-cookies">
       <h2 class="section-heading">Custom cookie classification</h2>
-      <p class="section-desc">
+      <p class="section-desc" id="custom-cookies-desc">
         Customize cookie sensitivity rules. Enter comma-separated cookie names.
       </p>
       <div class="field-row">
@@ -197,6 +199,7 @@
             rows="2"
             class="textarea-input"
             placeholder="e.g. session_id, auth_token, jwt"
+            aria-describedby="custom-cookies-desc"
           ></textarea>
         </label>
       </div>
@@ -209,6 +212,7 @@
             rows="2"
             class="textarea-input"
             placeholder="e.g. _ga, theme, lang_pref"
+            aria-describedby="custom-cookies-desc"
           ></textarea>
         </label>
       </div>
@@ -218,11 +222,11 @@
     <details class="options-section developer-section" id="section-pro">
       <summary class="section-heading cursor-pointer">Developer Settings (Evaluation Mode)</summary>
       <div class="developer-content">
-        <p class="section-desc">
+        <p class="section-desc" id="evaluation-mode-desc">
           Evaluation only: no billing or entitlement, no effect on security checks. Enables multi-host Attack Surface Graph accumulation and diagnostic inspection.
         </p>
         <label class="checkbox-label" for="pro-mode-toggle">
-          <input type="checkbox" id="pro-mode-toggle" name="evaluationMode">
+          <input type="checkbox" id="pro-mode-toggle" name="evaluationMode" aria-describedby="evaluation-mode-desc">
           <span>Enable evaluation mode (Attack Surface Graph accumulation)</span>
         </label>
       </div>

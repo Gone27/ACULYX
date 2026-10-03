@@ -40,6 +40,7 @@ vi.hoisted(() => {
       setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
     },
     alarms: {
+      get: vi.fn((_name: string, cb?: (a: unknown) => void) => { if (cb) cb(null); }),
       create: vi.fn(),
       onAlarm: dummyEvent(),
     },

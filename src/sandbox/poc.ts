@@ -69,33 +69,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   targetUrlDisplay.textContent = targetUrl;
 
-  // Authorization gate check
-  let isAuthorized = false;
-  try {
-    isAuthorized = localStorage.getItem('seccheck_poc_authorized') === 'true';
-  } catch {
-    isAuthorized = false;
-  }
+  // Per-load authorization confirmation (zero localStorage dependency in sandboxed context)
+  gateOverlay.hidden = false;
+  gateCheckbox.addEventListener('change', () => {
+    gateProceedBtn.disabled = !gateCheckbox.checked;
+  });
 
-  if (!isAuthorized) {
-    gateOverlay.hidden = false;
-    gateCheckbox.addEventListener('change', () => {
-      gateProceedBtn.disabled = !gateCheckbox.checked;
-    });
-
-    gateProceedBtn.addEventListener('click', () => {
-      try {
-        localStorage.setItem('seccheck_poc_authorized', 'true');
-      } catch {
-        // localStorage might be restricted in some sandboxes
-      }
-      gateOverlay.hidden = true;
-      initializePoc();
-    });
-  } else {
+  gateProceedBtn.addEventListener('click', () => {
     gateOverlay.hidden = true;
     initializePoc();
-  }
+  });
 
   function initializePoc(): void {
     // Select initial tab

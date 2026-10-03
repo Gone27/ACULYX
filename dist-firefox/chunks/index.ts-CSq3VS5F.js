@@ -1,5 +1,5 @@
-import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BtJyJf3R.js";
-import { C as SessionStorage, D as settingsTransitionPipeline, S as LocalStorage, _ as tabGenerations, a as registerCaptureListeners, b as originAuthBaselines, c as hasAllSitesCoverage, d as reconcilePermissionsOnRemoved, f as reconcilePermissionsOnStartup, g as incrementTabGeneration, h as getTabGeneration, i as incognitoTabIds, l as isBroadGrant, m as isRestrictedUrl$1, n as clearInFlightCaptures, o as CapturePolicy, p as isModeCaptureAllowed, r as inFlightRequests, t as captureMap, v as hydrateFromSession, w as SettingsService, x as tabStates, y as initLifecycle } from "./capture-DOfvRG7K.js";
+import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BQwzB0xT.js";
+import { C as SessionStorage, D as settingsTransitionPipeline, S as LocalStorage, _ as tabGenerations, a as registerCaptureListeners, b as originAuthBaselines, c as hasAllSitesCoverage, d as reconcilePermissionsOnRemoved, f as reconcilePermissionsOnStartup, g as incrementTabGeneration, h as getTabGeneration, i as incognitoTabIds, l as isBroadGrant, m as isRestrictedUrl$1, n as clearInFlightCaptures, o as CapturePolicy, p as isModeCaptureAllowed, r as inFlightRequests, t as captureMap, v as hydrateFromSession, w as SettingsService, x as tabStates, y as initLifecycle } from "./capture-DnbUjg5i.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -22,6 +22,7 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 	let domain = null;
 	let sameSiteNone = false;
 	let secure = false;
+	let isDeletion = false;
 	for (const attribute of parts.slice(1)) {
 		const separator = attribute.indexOf("=");
 		const attributeName = (separator === -1 ? attribute : attribute.slice(0, separator)).trim().toLowerCase();
@@ -32,6 +33,14 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 		}
 		if (attributeName === "samesite" && separator !== -1) sameSiteNone = attribute.slice(separator + 1).trim().toLowerCase() === "none";
 		if (attributeName === "secure" && separator === -1) secure = true;
+		if (attributeName === "max-age" && separator !== -1) {
+			const maxAge = parseInt(attribute.slice(separator + 1).trim(), 10);
+			if (!isNaN(maxAge) && maxAge <= 0) isDeletion = true;
+		}
+		if (attributeName === "expires" && separator !== -1) {
+			const expTime = Date.parse(attribute.slice(separator + 1).trim());
+			if (!isNaN(expTime) && expTime <= Date.now()) isDeletion = true;
+		}
 	}
 	return {
 		name,
@@ -39,7 +48,8 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 		domainAttributePresent,
 		domain,
 		sameSiteNone,
-		secure
+		secure,
+		isDeletion
 	};
 }
 function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
@@ -53,7 +63,7 @@ function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
 	})();
 	if (url === null) return [];
 	const visibleNames = new Set(cookies.map((cookie) => cookie.name));
-	return metadata.filter((cookie) => cookie.name.length > 0 && !visibleNames.has(cookie.name)).flatMap((cookie) => {
+	return metadata.filter((cookie) => cookie.name.length > 0 && !cookie.isDeletion && !visibleNames.has(cookie.name)).flatMap((cookie) => {
 		const reasons = [];
 		let likelyRejected = false;
 		if (cookie.sameSiteNone && !cookie.secure) {
@@ -149,13 +159,13 @@ var MAX_IN_FLIGHT_CORRELATIONS = 50;
 * @param isCurrentGeneration - Optional callback verifying whether generation is still current.
 * @returns                   Array of {@link CookieRecord} metadata objects and findings.
 */
-async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isCurrentGeneration) {
+async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isCurrentGeneration, hopId) {
 	if (generation !== void 0 && isCurrentGeneration !== void 0 && !isCurrentGeneration(tabId, generation)) return {
 		records: [],
 		findings: [],
 		discarded: true
 	};
-	const dedupKey = `${tabId}:${tabUrl}:${generation ?? 0}`;
+	const dedupKey = hopId !== void 0 && hopId.length > 0 ? `${tabId}:${tabUrl}:${generation ?? 0}:${hopId}` : `${tabId}:${tabUrl}:${generation ?? 0}`;
 	const existing = inFlightCorrelations.get(dedupKey);
 	if (existing) return existing;
 	const correlationPromise = (async () => {
@@ -190,7 +200,7 @@ async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isC
 				const headerMatch = matchingHeaders.find((item) => item.path === cookie.path) ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : void 0);
 				const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
 				const partitioned = cookie.partitionKey != null;
-				const expiresAt = cookie.session ? null : Math.round(cookie.expirationDate ?? 0) * 1e3;
+				const expiresAt = cookie.session || cookie.expirationDate == null || cookie.expirationDate <= 0 ? null : Math.round(cookie.expirationDate) * 1e3;
 				return {
 					name: cookie.name,
 					domain: cookie.domain,
@@ -219,15 +229,18 @@ async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isC
 //#endregion
 //#region src/content/service-worker-detection.ts
 /** Runs in the page's isolated world only after host permission is granted. */
-function reportPageSignals() {
+function reportPageSignals(generation) {
 	const isolatedWorld = globalThis;
 	if (isolatedWorld.__seccheckPageSignalsInstalled === true) return;
 	isolatedWorld.__seccheckPageSignalsInstalled = true;
 	const controller = navigator.serviceWorker?.controller;
+	const swUrl = controller?.scriptURL ?? null;
 	chrome.runtime.sendMessage({
 		type: "SERVICE_WORKER_STATUS",
 		status: controller == null ? "not-controlled" : "controlled",
-		serviceWorkerUrl: controller?.scriptURL ?? null
+		serviceWorkerUrl: swUrl,
+		generation,
+		eventId: `sw:${generation ?? 0}:${controller == null ? "not-controlled" : "controlled"}:${swUrl ?? ""}`
 	}).catch(() => void 0);
 	function getMetaCspPolicies() {
 		const policies = [];
@@ -248,7 +261,9 @@ function reportPageSignals() {
 		metaCspFound = true;
 		chrome.runtime.sendMessage({
 			type: "META_CSP_FOUND",
-			policies
+			policies,
+			generation,
+			eventId: `meta-csp:${generation ?? 0}:${policies.length}:${policies.join(";").slice(0, 100)}`
 		}).catch(() => void 0);
 	}
 	let metaCspRaf = null;
@@ -276,37 +291,37 @@ function reportPageSignals() {
 			window.addEventListener("unload", () => observer.disconnect(), { once: true });
 		}
 	}
-	const scannedUrls = /* @__PURE__ */ new Set();
-	let initialSriDone = false;
+	const externalScriptMap = /* @__PURE__ */ new Map();
+	const externalStylesheetMap = /* @__PURE__ */ new Map();
 	function doReportSri() {
-		const externalScripts = Array.from(document.querySelectorAll("script[src]")).filter((script) => {
-			if (scannedUrls.has(script.src)) return false;
-			scannedUrls.add(script.src);
-			try {
-				return new URL(script.src, location.href).origin !== location.origin;
-			} catch {
-				return false;
+		const scripts = Array.from(document.querySelectorAll("script[src]"));
+		for (const script of scripts) try {
+			if (new URL(script.src, location.href).origin !== location.origin) {
+				const hasIntegrity = script.integrity.trim().length > 0;
+				externalScriptMap.set(script.src, hasIntegrity);
 			}
-		});
-		const externalStylesheets = Array.from(document.querySelectorAll("link[rel~=\"stylesheet\"][href]")).filter((link) => {
-			if (scannedUrls.has(link.href)) return false;
-			scannedUrls.add(link.href);
-			try {
-				return new URL(link.href, location.href).origin !== location.origin;
-			} catch {
-				return false;
+		} catch {}
+		const links = Array.from(document.querySelectorAll("link[rel~=\"stylesheet\"][href]"));
+		for (const link of links) try {
+			if (new URL(link.href, location.href).origin !== location.origin) {
+				const hasIntegrity = link.integrity.trim().length > 0;
+				externalStylesheetMap.set(link.href, hasIntegrity);
 			}
-		});
-		if (initialSriDone && externalScripts.length === 0 && externalStylesheets.length === 0) return;
-		initialSriDone = true;
-		const missingScriptIntegrity = externalScripts.filter((s) => !s.integrity.trim()).length;
-		const missingStyleIntegrity = externalStylesheets.filter((l) => !l.integrity.trim()).length;
+		} catch {}
+		const totalExternalScripts = externalScriptMap.size;
+		let missingScriptIntegrity = 0;
+		for (const hasIntegrity of externalScriptMap.values()) if (!hasIntegrity) missingScriptIntegrity++;
+		const totalExternalStylesheets = externalStylesheetMap.size;
+		let missingStyleIntegrity = 0;
+		for (const hasIntegrity of externalStylesheetMap.values()) if (!hasIntegrity) missingStyleIntegrity++;
 		chrome.runtime.sendMessage({
 			type: "SRI_SCAN",
-			externalScripts: externalScripts.length,
+			externalScripts: totalExternalScripts,
 			missingIntegrity: missingScriptIntegrity,
-			externalStylesheets: externalStylesheets.length,
-			missingStyleIntegrity
+			externalStylesheets: totalExternalStylesheets,
+			missingStyleIntegrity,
+			generation,
+			eventId: `sri:${generation ?? 0}:${totalExternalScripts}:${missingScriptIntegrity}:${totalExternalStylesheets}:${missingStyleIntegrity}`
 		}).catch(() => void 0);
 	}
 	doReportSri();
@@ -335,7 +350,8 @@ function reportPageSignals() {
 			else doReportSri();
 		}
 	});
-	sriObserver.observe(document.documentElement, {
+	const targetRoot = document.documentElement ?? document;
+	sriObserver.observe(targetRoot, {
 		childList: true,
 		subtree: true,
 		attributes: true,
@@ -384,7 +400,8 @@ async function injectPageSignals(tabId, url) {
 						tabId,
 						frameIds: [0]
 					},
-					func: reportPageSignals
+					func: reportPageSignals,
+					args: [getTabGeneration(tabId)]
 				}).catch(() => void 0);
 			}
 			return;
@@ -397,7 +414,8 @@ async function injectPageSignals(tabId, url) {
 					tabId,
 					frameIds: [0]
 				},
-				func: reportPageSignals
+				func: reportPageSignals,
+				args: [getTabGeneration(tabId)]
 			}).catch(() => void 0);
 		});
 	};
@@ -3107,6 +3125,13 @@ function detectRedirectDegradation(hops) {
 }
 //#endregion
 //#region src/rules/auth-diff.ts
+function toCompactFinding(f) {
+	return {
+		ruleId: f.ruleId,
+		severity: f.severity,
+		title: f.title
+	};
+}
 /**
 * Checks if a cookie list contains an authentication or session token.
 * Requires both a sensitive naming pattern and either the session or httpOnly flag
@@ -3120,18 +3145,45 @@ function detectSensitiveAuthCookie(cookies, alwaysSensitive = [], alwaysIgnore =
 	return null;
 }
 /**
-* Computes which findings were added or removed between pre-auth and post-auth states.
+* Returns all sensitive authentication/session cookies in the list.
+*/
+function getSensitiveAuthCookies(cookies, alwaysSensitive = [], alwaysIgnore = []) {
+	return cookies.filter((c) => {
+		const { isSensitive } = isSensitiveCookie(c.name, alwaysSensitive, alwaysIgnore);
+		return isSensitive && (c.session || c.httpOnly);
+	});
+}
+/**
+* Computes a deterministic signature of sensitive cookie metadata (names, flags, expiry).
+* Allows detecting token rotation, flag upgrades/downgrades, or new tokens even when
+* a session cookie was already present.
+*/
+function computeSensitiveCookiesSignature(cookies, alwaysSensitive = [], alwaysIgnore = []) {
+	return getSensitiveAuthCookies(cookies, alwaysSensitive, alwaysIgnore).map((c) => `${c.name}|${c.httpOnly}|${c.secure}|${c.sameSite}|${c.partitioned}|${c.expiresAt ?? "session"}`).sort().join(";;");
+}
+/**
+* Computes which findings were added, removed, or modified between pre-auth and post-auth states.
 */
 function computeFindingChanges(pre, post) {
 	const preMap = new Map(pre.map((f) => [f.ruleId, f]));
 	const postMap = new Map(post.map((f) => [f.ruleId, f]));
 	const changes = [];
-	for (const [ruleId, postFinding] of postMap.entries()) if (!preMap.has(ruleId)) changes.push({
-		ruleId,
-		title: postFinding.title,
-		severity: postFinding.severity,
-		type: "added"
-	});
+	for (const [ruleId, postFinding] of postMap.entries()) {
+		const preFinding = preMap.get(ruleId);
+		if (!preFinding) changes.push({
+			ruleId,
+			title: postFinding.title,
+			severity: postFinding.severity,
+			type: "added"
+		});
+		else if (preFinding.severity !== postFinding.severity || preFinding.title !== postFinding.title) changes.push({
+			ruleId,
+			title: postFinding.title,
+			severity: postFinding.severity,
+			type: "modified",
+			oldSeverity: preFinding.severity
+		});
+	}
 	for (const [ruleId, preFinding] of preMap.entries()) if (!postMap.has(ruleId)) changes.push({
 		ruleId,
 		title: preFinding.title,
@@ -3141,45 +3193,71 @@ function computeFindingChanges(pre, post) {
 	return changes;
 }
 /**
-* Evaluates whether an origin transition represents a login event.
-* If transitioning from pre-auth (no sensitive session cookie) to post-auth (sensitive session cookie),
-* emits an AuthDiffRecord and updates the baseline.
+* Evaluates whether an origin/tab transition represents a login event.
+* Detects:
+* 1. Transition from pre-auth (no sensitive session cookie) to post-auth (sensitive session cookie).
+* 2. Sensitive cookie reissued via Set-Cookie on main-frame hop after non-GET request.
+* 3. Sensitive cookie rotation or flag/expiry changes when already in session.
 */
-function checkAuthTransition(origin, baseline, currentCookies, currentFindings, currentScore, currentGrade, alwaysSensitive = [], alwaysIgnore = []) {
+function checkAuthTransition(origin, baseline, currentCookies, currentFindings, currentScore, currentGrade, alwaysSensitive = [], alwaysIgnore = [], context) {
 	const authCookie = detectSensitiveAuthCookie(currentCookies, alwaysSensitive, alwaysIgnore);
 	const hasAuthNow = authCookie !== null;
+	const currentSig = computeSensitiveCookiesSignature(currentCookies, alwaysSensitive, alwaysIgnore);
+	const compactCurrentFindings = currentFindings.map(toCompactFinding);
 	const currentBaseline = {
 		origin,
+		tabId: context?.tabId ?? baseline?.tabId,
+		url: context?.url ?? baseline?.url,
 		cookies: currentCookies,
-		findings: currentFindings,
+		findings: compactCurrentFindings,
 		score: currentScore,
 		grade: currentGrade,
 		timestamp: Date.now(),
-		hasSensitiveCookie: hasAuthNow
+		hasSensitiveCookie: hasAuthNow,
+		sensitiveCookieSignature: currentSig
 	};
 	if (!baseline) return {
 		isAuthEvent: false,
 		record: null,
 		newBaseline: currentBaseline
 	};
+	let isAuthEvent = false;
+	let triggerReason;
 	if (!baseline.hasSensitiveCookie && hasAuthNow) {
+		isAuthEvent = true;
+		triggerReason = "new_session_cookie";
+	} else if (baseline.hasSensitiveCookie && hasAuthNow) {
+		if (context?.hasNonGetSetCookie === true) {
+			isAuthEvent = true;
+			triggerReason = "post_request_session_cookie_issued";
+		} else if (baseline.sensitiveCookieSignature !== void 0 && currentSig !== "" && baseline.sensitiveCookieSignature !== currentSig) {
+			isAuthEvent = true;
+			triggerReason = "session_cookie_rotated_or_modified";
+		}
+	}
+	if (isAuthEvent && authCookie !== null) {
 		const preScore = baseline.score;
 		const postScore = currentScore;
 		const scoreDelta = postScore - preScore;
-		const changes = computeFindingChanges(baseline.findings, currentFindings);
+		const changes = computeFindingChanges(baseline.findings, compactCurrentFindings);
 		return {
 			isAuthEvent: true,
 			record: {
 				origin,
+				tabId: context?.tabId ?? baseline.tabId,
 				timestamp: Date.now(),
 				triggeredByCookie: authCookie.name,
+				triggerReason,
 				preAuthScore: preScore,
 				postAuthScore: postScore,
 				scoreDelta,
 				preAuthGrade: baseline.grade,
 				postAuthGrade: currentGrade,
-				preAuthFindings: baseline.findings,
-				postAuthFindings: currentFindings,
+				preAuthUrl: baseline.url,
+				postAuthUrl: context?.url,
+				scope: "page",
+				preAuthFindings: baseline.findings.map(toCompactFinding),
+				postAuthFindings: compactCurrentFindings,
 				changes
 			},
 			newBaseline: currentBaseline
@@ -3195,11 +3273,14 @@ function checkAuthTransition(origin, baseline, currentCookies, currentFindings, 
 		record: null,
 		newBaseline: {
 			...baseline,
+			tabId: context?.tabId ?? baseline.tabId,
+			url: context?.url ?? baseline.url,
 			cookies: currentCookies,
-			findings: currentFindings,
+			findings: compactCurrentFindings,
 			score: currentScore,
 			grade: currentGrade,
-			timestamp: Date.now()
+			timestamp: Date.now(),
+			sensitiveCookieSignature: currentSig
 		}
 	};
 }
@@ -3628,6 +3709,36 @@ var startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(asyn
 	} catch {}
 	for (const [tabId, state] of tabStates.entries()) if (state.isIncognito === true) incognitoTabIds.add(tabId);
 });
+function isAuthBaselineEquivalent(a, b) {
+	if (a === void 0 || b === void 0) return a === b;
+	if (a.score !== b.score || a.grade !== b.grade || a.hasSensitiveCookie !== b.hasSensitiveCookie || a.sensitiveCookieSignature !== b.sensitiveCookieSignature) return false;
+	if (a.findings.length !== b.findings.length) return false;
+	for (let i = 0; i < a.findings.length; i++) {
+		const af = a.findings[i];
+		const bf = b.findings[i];
+		if (af === void 0 || bf === void 0 || af.ruleId !== bf.ruleId || af.severity !== bf.severity) return false;
+	}
+	return true;
+}
+var graphDebounceTimers = /* @__PURE__ */ new Map();
+function clearGraphDebounceTimers() {
+	for (const timer of graphDebounceTimers.values()) clearTimeout(timer);
+	graphDebounceTimers.clear();
+}
+function debounceGraphMerge(apex, hostname, state) {
+	const existing = graphDebounceTimers.get(apex);
+	if (existing !== void 0) clearTimeout(existing);
+	const timer = setTimeout(() => {
+		graphDebounceTimers.delete(apex);
+		(async () => {
+			try {
+				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+				await LocalStorage.mutateGraph(apex, (existingGraph) => mergeIntoGraph(existingGraph, hostname, state.score, state.grade, discovered, Boolean(currentSettings.evaluationMode)));
+			} catch {}
+		})();
+	}, 500);
+	graphDebounceTimers.set(apex, timer);
+}
 function recomputeTabState(tabId, state) {
 	const result = runRules({
 		hops: state.hops,
@@ -3636,8 +3747,8 @@ function recomputeTabState(tabId, state) {
 		metaCspFound: state.coverage.metaCspFound,
 		captureFindings: state.captureFindings ?? [],
 		cookieSettings: {
-			alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
-			alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []
+			alwaysSensitive: currentSettings.sensitiveCookieNames,
+			alwaysIgnore: currentSettings.ignoredCookieNames
 		}
 	});
 	state.findings = result.findings;
@@ -3660,18 +3771,18 @@ function recomputeTabState(tabId, state) {
 			grade: state.grade
 		});
 		const baseline = originAuthBaselines.get(state.origin);
-		const { isAuthEvent, record, newBaseline } = checkAuthTransition(state.origin, baseline, state.cookies, state.findings, state.score, state.grade, currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [], currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []);
+		const { isAuthEvent, record, newBaseline } = checkAuthTransition(state.origin, baseline, state.cookies, state.findings, state.score, state.grade, currentSettings.sensitiveCookieNames, currentSettings.ignoredCookieNames, {
+			tabId,
+			url: state.url,
+			hasNonGetSetCookie: state.hops.some((h) => h.status !== 0 && h.rawHeaders.some((r) => r.name.toLowerCase() === "set-cookie"))
+		});
 		originAuthBaselines.set(state.origin, newBaseline);
-		SessionStorage.setAuthBaseline(state.origin, newBaseline);
+		if (!isAuthBaselineEquivalent(baseline, newBaseline)) SessionStorage.setAuthBaseline(state.origin, newBaseline);
 		if (isAuthEvent && record !== null) LocalStorage.recordAuthDiff(state.origin, record);
-		(async () => {
-			try {
-				const hostname = new URL(state.origin).hostname;
-				const apex = registrableDomain(hostname) ?? hostname;
-				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-				await LocalStorage.mutateGraph(apex, (existingGraph) => mergeIntoGraph(existingGraph, hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro)));
-			} catch {}
-		})();
+		try {
+			const hostname = new URL(state.origin).hostname;
+			debounceGraphMerge(registrableDomain(hostname) ?? hostname, hostname, state);
+		} catch {}
 	}
 	setBadgeForTab(tabId, state.grade);
 	broadcastCoalescer.push(tabId, state);
@@ -3738,6 +3849,7 @@ settingsTransitionPipeline.registerHooks({
 	},
 	onModeChange: async (_prevMode, newMode) => {
 		if (newMode === "off") {
+			clearGraphDebounceTimers();
 			clearInFlightCaptures();
 			const activeTabIds = Array.from(tabStates.keys());
 			tabStates.clear();
@@ -3868,7 +3980,7 @@ async function onHopComplete(tabId, hop, isIncognito) {
 			notes: hop.headersDiffer ? "Headers modified by extension" : void 0
 		});
 		const setCookieValues = extractSetCookieHeaders(hop.rawHeaders);
-		const correlation = await correlateCookies(tabId, hop.url, setCookieValues, gen, (t, g) => getTabGeneration(t) === g);
+		const correlation = await correlateCookies(tabId, hop.url, setCookieValues, gen, (t, g) => getTabGeneration(t) === g, hop.requestId);
 		if (correlation.discarded === true) return;
 		state.cookies = correlation.records;
 		state.captureFindings = [...new Map([...state.captureFindings ?? [], ...correlation.findings].map((finding) => [`${finding.ruleId}:${finding.sourceUrl ?? ""}:${finding.evidence}`, finding])).values()];
@@ -3898,7 +4010,6 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 	setBadgeForTab(tabId, "?");
 });
 registerPageSignalInjection();
-chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => void 0);
 /**
 * Handles live cookie mutations (including JS-set cookies).
 * Re-correlates and re-scores every tab whose origin matches the affected
@@ -3985,8 +4096,32 @@ chrome.runtime.onConnect.addListener((port) => {
 		}
 	});
 });
+function isExtensionInternalSender(sender) {
+	if (sender === void 0 || typeof chrome === "undefined" || chrome.runtime === void 0) return false;
+	const runtimeId = chrome.runtime.id;
+	if (runtimeId === void 0 || sender.id !== runtimeId) return false;
+	if (typeof chrome.runtime.getURL !== "function") return true;
+	const extBaseUrl = chrome.runtime.getURL("");
+	return typeof sender.url === "string" && sender.url.startsWith(extBaseUrl);
+}
+function isContentScriptSender(sender) {
+	if (sender === void 0 || typeof chrome === "undefined" || chrome.runtime === void 0) return false;
+	const runtimeId = chrome.runtime.id;
+	if (runtimeId === void 0 || sender.id !== runtimeId) return false;
+	if (sender.tab === void 0 || typeof sender.tab.id !== "number") return false;
+	if (typeof chrome.runtime.getURL !== "function") return true;
+	const extBaseUrl = chrome.runtime.getURL("");
+	return typeof sender.url === "string" && !sender.url.startsWith(extBaseUrl);
+}
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message.type === "REQUEST_STATE") {
+		if (!isExtensionInternalSender(_sender)) {
+			sendResponse({
+				type: "STATE_RESPONSE",
+				state: null
+			});
+			return false;
+		}
 		startupReady.then(() => {
 			sendResponse({
 				type: "STATE_RESPONSE",
@@ -3996,6 +4131,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return true;
 	}
 	if (message.type === "PERMISSIONS_CHANGED") {
+		if (!isExtensionInternalSender(_sender)) return false;
 		(async () => {
 			try {
 				if (!message.granted && message.origins.length > 0) await reconcilePermissionsOnRemoved(message.origins, {
@@ -4022,16 +4158,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return false;
 	}
 	if (message.type === "SETTINGS_CHANGED") {
+		if (!isExtensionInternalSender(_sender)) {
+			sendResponse({
+				type: "SETTINGS_CHANGED_RESPONSE",
+				success: false,
+				error: "Unauthorized sender: SETTINGS_CHANGED only accepted from extension pages"
+			});
+			return false;
+		}
 		(async () => {
 			try {
 				await settingsTransitionPipeline.transition(message.settings, "message");
-			} catch {}
-			portRegistry.broadcastAll(message);
+				const storedSettings = await LocalStorage.getSettings();
+				const broadcastMsg = {
+					type: "SETTINGS_CHANGED",
+					settings: storedSettings
+				};
+				portRegistry.broadcastAll(broadcastMsg);
+				sendResponse({
+					type: "SETTINGS_CHANGED_RESPONSE",
+					success: true,
+					settings: storedSettings
+				});
+			} catch (err) {
+				sendResponse({
+					type: "SETTINGS_CHANGED_RESPONSE",
+					success: false,
+					error: err instanceof Error ? err.message : "Settings transition failed"
+				});
+			}
 		})();
-		sendResponse(message);
-		return false;
+		return true;
 	}
 	if (message.type === "SERVICE_WORKER_STATUS") {
+		if (!isContentScriptSender(_sender)) return false;
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
 			const currentGen = getTabGeneration(senderTabId);
@@ -4068,6 +4228,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return false;
 	}
 	if (message.type === "META_CSP_FOUND") {
+		if (!isContentScriptSender(_sender)) return false;
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
 			const currentGen = getTabGeneration(senderTabId);
@@ -4114,6 +4275,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return false;
 	}
 	if (message.type === "SRI_SCAN") {
+		if (!isContentScriptSender(_sender)) return false;
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
 			const currentGen = getTabGeneration(senderTabId);
@@ -4151,11 +4313,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return false;
 	}
 	if (message.type === "REQUEST_GRAPH") {
+		if (!isExtensionInternalSender(_sender)) return false;
 		(async () => {
 			try {
 				const apex = message.apexDomain;
 				const graph = await LocalStorage.getGraph(apex);
-				const isPro = Boolean(currentSettings.isPro);
+				const isPro = Boolean(currentSettings.evaluationMode);
 				if (!graph) {
 					sendResponse({
 						type: "GRAPH_RESPONSE",
@@ -4206,6 +4369,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return true;
 	}
 	if (message.type === "GENERATE_POC") {
+		if (!isExtensionInternalSender(_sender)) {
+			sendResponse({
+				type: "GENERATE_POC_RESPONSE",
+				success: false,
+				error: "Unauthorized sender: GENERATE_POC only accepted from extension pages"
+			});
+			return false;
+		}
 		const state = tabStates.get(message.tabId);
 		if (!state || !state.monitoredByUser) {
 			sendResponse({
@@ -4232,8 +4403,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		return true;
 	}
 	if (message.type === "RESET_ALL_DATA") {
+		if (!isExtensionInternalSender(_sender)) {
+			sendResponse({
+				type: "RESET_ALL_DATA_RESPONSE",
+				success: false,
+				error: "Unauthorized sender: RESET_ALL_DATA only accepted from extension pages"
+			});
+			return false;
+		}
 		(async () => {
 			try {
+				clearGraphDebounceTimers();
 				writeBatcher.clearAll();
 				broadcastCoalescer.clearAll();
 				tabStates.clear();
@@ -4293,8 +4473,8 @@ registerCaptureListeners((tabId, hop, isIncognito) => {
 		const isFirstParty = state.origin === targetOrigin;
 		apiHop.isThirdParty = !isFirstParty;
 		const findings = runApiRules(apiHop, {
-			alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
-			alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? []
+			alwaysSensitive: currentSettings.sensitiveCookieNames,
+			alwaysIgnore: currentSettings.ignoredCookieNames
 		});
 		if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
 		const endpointState = {
@@ -4324,7 +4504,7 @@ registerCaptureListeners((tabId, hop, isIncognito) => {
 				const hostname = new URL(state.origin).hostname;
 				const apex = registrableDomain(hostname) ?? hostname;
 				const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-				await LocalStorage.mutateGraph(apex, (existingGraph) => mergeIntoGraph(existingGraph, hostname, state.score, state.grade, discovered, Boolean(currentSettings.isPro)));
+				await LocalStorage.mutateGraph(apex, (existingGraph) => mergeIntoGraph(existingGraph, hostname, state.score, state.grade, discovered, Boolean(currentSettings.evaluationMode)));
 			} catch {}
 		})();
 		portRegistry.broadcast(apiHop.tabId, {
@@ -4369,4 +4549,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-De4f7n91.js.map
+//# sourceMappingURL=index.ts-CSq3VS5F.js.map

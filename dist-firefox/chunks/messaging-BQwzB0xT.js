@@ -55,7 +55,8 @@ var STORAGE_KEYS = {
 	AUTH_DIFF_PREFIX: "authdiff:",
 	AUTH_BASELINE_PREFIX: "authbase:",
 	GRAPH_PREFIX: "graph:",
-	ONBOARDING_DISMISSED: "onboarding_dismissed"
+	ONBOARDING_DISMISSED: "onboarding_dismissed",
+	HISTORY_INDEX: "hist_index"
 };
 /** Runtime port name for popup ↔ service worker connection. */
 var POPUP_PORT_NAME = "popup";
@@ -883,4 +884,4 @@ function sendToBackground(msg) {
 //#endregion
 export { RESTRICTED_SCHEMES as C, STORAGE_KEYS as D, SIDEPANEL_PORT_NAME as E, POPUP_PORT_NAME as S, SEVERITY_ORDER as T, sanitizeEvidence as _, registrableDomain as a, GRADE_THRESHOLDS as b, hasCspBypassProtection as c, normalizeHeaders as d, originFromUrl as f, redactUrlQueryParams as g, redactUrlPath as h, checkSubdomainTrust as i, headersDiffer as l, redactHeaderValue as m, portSend as n, checkDuplicateHeaders as o, parseCspDirectives as p, sendToBackground as r, extractSetCookieHeaders as s, PortRegistry as t, isSensitiveCookie as u, BADGE_COLORS as v, SCORE_VERSION as w, MAINTENANCE_ALARM as x, DEFAULT_SETTINGS as y };
 
-//# sourceMappingURL=messaging-BtJyJf3R.js.map
+//# sourceMappingURL=messaging-BQwzB0xT.js.map

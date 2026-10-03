@@ -1,5 +1,5 @@
-import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { E as resolveCookieOverlaps, S as LocalStorage, T as normalizeCookieList, s as PermissionsService, w as SettingsService } from "./capture-DOfvRG7K.js";
+import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BQwzB0xT.js";
+import { E as resolveCookieOverlaps, S as LocalStorage, T as normalizeCookieList, s as PermissionsService, w as SettingsService } from "./capture-DnbUjg5i.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/options/options.ts
@@ -146,14 +146,15 @@ async function handleSave() {
 	saveBtn.textContent = "Saving…";
 	try {
 		await SettingsService.updateSettings(settings);
-		await sendToBackground({
+		const resp = await sendToBackground({
 			type: "SETTINGS_CHANGED",
 			settings
 		});
+		if (resp?.success === false) throw new Error(resp.error ?? "Failed to apply settings transition");
 		initialSettingsSnapshot = getFormStateString();
 		setStatus("Settings saved ✓", false);
-	} catch {
-		setStatus("Failed to save settings.", true);
+	} catch (err) {
+		setStatus(`Failed to save settings: ${err instanceof Error ? err.message : "Failed to save settings."}`, true);
 	} finally {
 		saveBtn.disabled = false;
 		saveBtn.textContent = "Save settings";
@@ -189,10 +190,7 @@ function readFormValues() {
 		maxHistoryPerOrigin,
 		sensitiveCookieNames: sensitive,
 		ignoredCookieNames: ignored,
-		evaluationMode: proModeToggle.checked,
-		alwaysSensitiveCookies: sensitive,
-		alwaysIgnoreCookies: ignored,
-		isPro: proModeToggle.checked
+		evaluationMode: proModeToggle.checked
 	};
 }
 /**
@@ -399,4 +397,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-eeGBvLO2.js.map
+//# sourceMappingURL=options.html-By5KZX8L.js.map

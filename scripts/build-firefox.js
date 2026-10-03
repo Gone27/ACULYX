@@ -48,6 +48,10 @@ if (manifest.side_panel && manifest.action && !manifest.action.default_popup) {
   manifest.action.default_popup = manifest.side_panel.default_path;
 }
 delete manifest.side_panel;
+delete manifest.sandbox;
+if (manifest.content_security_policy && manifest.content_security_policy.sandbox) {
+  delete manifest.content_security_policy.sandbox;
+}
 manifest.permissions = manifest.permissions.filter((permission) => permission !== 'sidePanel');
 
 // 4. Save adjusted manifest

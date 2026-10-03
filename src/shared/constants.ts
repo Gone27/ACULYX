@@ -69,6 +69,7 @@ export const STORAGE_KEYS = {
   AUTH_BASELINE_PREFIX: 'authbase:',
   GRAPH_PREFIX: 'graph:',
   ONBOARDING_DISMISSED: 'onboarding_dismissed',
+  HISTORY_INDEX: 'hist_index',
 } as const;
 
 // ─── Port / messaging ─────────────────────────────────────────────────────────
@@ -85,10 +86,7 @@ export const SIDEPANEL_PORT_NAME = 'sidepanel';
 // ─── Periodic maintenance alarm ───────────────────────────────────────────────
 
 export const MAINTENANCE_ALARM = 'maintenance';
-export const MAINTENANCE_PERIOD_MINUTES = 1.0;
-/** Deprecated alias retained for backward compatibility. */
-export const KEEPALIVE_ALARM = MAINTENANCE_ALARM;
-export const KEEPALIVE_PERIOD_MINUTES = MAINTENANCE_PERIOD_MINUTES;
+export const MAINTENANCE_PERIOD_MINUTES = 30.0;
 
 // ─── Default settings ─────────────────────────────────────────────────────────
 

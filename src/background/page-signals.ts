@@ -4,6 +4,7 @@ import { isModeCaptureAllowed, isRestrictedUrl } from '../shared/gating';
 import { SettingsService } from '../shared/settings';
 import { isBroadGrant, hasAllSitesCoverage } from './permissions';
 import { incognitoTabIds } from './capture';
+import { getTabGeneration } from './generations';
 import type { SettingsV2 } from '../shared/types';
 
 export async function injectPageSignals(tabId: number, url: string): Promise<void> {
@@ -53,6 +54,7 @@ export async function injectPageSignals(tabId: number, url: string): Promise<voi
           void chrome.scripting.executeScript({
             target: { tabId, frameIds: [0] },
             func: reportPageSignals,
+            args: [getTabGeneration(tabId)],
           }).catch(() => undefined);
         }
       }
@@ -70,6 +72,7 @@ export async function injectPageSignals(tabId: number, url: string): Promise<voi
         void chrome.scripting.executeScript({
           target: { tabId, frameIds: [0] },
           func: reportPageSignals,
+          args: [getTabGeneration(tabId)],
         }).catch(() => undefined);
       }
     });

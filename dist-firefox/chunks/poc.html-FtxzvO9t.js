@@ -55,28 +55,14 @@ document.addEventListener("DOMContentLoaded", () => {
 		return;
 	}
 	targetUrlDisplay.textContent = targetUrl;
-	let isAuthorized = false;
-	try {
-		isAuthorized = localStorage.getItem("seccheck_poc_authorized") === "true";
-	} catch {
-		isAuthorized = false;
-	}
-	if (!isAuthorized) {
-		gateOverlay.hidden = false;
-		gateCheckbox.addEventListener("change", () => {
-			gateProceedBtn.disabled = !gateCheckbox.checked;
-		});
-		gateProceedBtn.addEventListener("click", () => {
-			try {
-				localStorage.setItem("seccheck_poc_authorized", "true");
-			} catch {}
-			gateOverlay.hidden = true;
-			initializePoc();
-		});
-	} else {
+	gateOverlay.hidden = false;
+	gateCheckbox.addEventListener("change", () => {
+		gateProceedBtn.disabled = !gateCheckbox.checked;
+	});
+	gateProceedBtn.addEventListener("click", () => {
 		gateOverlay.hidden = true;
 		initializePoc();
-	}
+	});
 	function initializePoc() {
 		if (initialType === "coop") selectTab("coop");
 		else selectTab("clickjacking");
@@ -165,4 +151,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=poc.html-BUCLNufp.js.map
+//# sourceMappingURL=poc.html-FtxzvO9t.js.map

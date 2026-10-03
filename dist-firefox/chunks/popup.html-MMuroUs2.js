@@ -1,5 +1,5 @@
-import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BtJyJf3R.js";
-import { S as LocalStorage, p as isModeCaptureAllowed, s as PermissionsService, u as patternFromOrigin, w as SettingsService } from "./capture-DOfvRG7K.js";
+import { S as POPUP_PORT_NAME, T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BQwzB0xT.js";
+import { S as LocalStorage, p as isModeCaptureAllowed, s as PermissionsService, u as patternFromOrigin, w as SettingsService } from "./capture-DnbUjg5i.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/shared/filters.ts
@@ -1135,4 +1135,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Dp-ePNTw.js.map
+//# sourceMappingURL=popup.html-MMuroUs2.js.map

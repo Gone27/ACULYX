@@ -197,4 +197,95 @@ describe('LocalStorage pruning and purging', () => {
     expect(graph.edges.some((e) => e.source === 'app.example.com')).toBe(false);
     expect(graph.edges.some((e) => e.source === 'api.example.com')).toBe(true);
   });
+
+  it('pruneAllHistory prunes auth diffs and graphs according to retention settings', async () => {
+    const settings: SettingsV2 = {
+      schemaVersion: 2,
+      monitoringMode: 'per-site',
+      severityFilter: ['critical'],
+      retainHistoryDays: 7,
+      maxHistoryPerOrigin: 10,
+      sensitiveCookieNames: [],
+      ignoredCookieNames: [],
+      evaluationMode: false,
+    };
+
+    const staleAuthDiff = {
+      origin: 'https://stale.com',
+      timestamp: now - 15 * ONE_DAY_MS,
+      triggeredByCookie: 'sess',
+      preAuthScore: 80,
+      postAuthScore: 70,
+      scoreDelta: -10,
+      preAuthGrade: 'B' as const,
+      postAuthGrade: 'C' as const,
+      preAuthFindings: [],
+      postAuthFindings: [],
+      changes: [],
+    };
+
+    const activeAuthDiff = {
+      origin: 'https://active.com',
+      timestamp: now - 2 * ONE_DAY_MS,
+      triggeredByCookie: 'sess',
+      preAuthScore: 80,
+      postAuthScore: 70,
+      scoreDelta: -10,
+      preAuthGrade: 'B' as const,
+      postAuthGrade: 'C' as const,
+      preAuthFindings: [],
+      postAuthFindings: [],
+      changes: [],
+    };
+
+    mockStore[`${STORAGE_KEYS.AUTH_DIFF_PREFIX}https://stale.com`] = [staleAuthDiff];
+    mockStore[`${STORAGE_KEYS.AUTH_DIFF_PREFIX}https://active.com`] = [
+      { ...staleAuthDiff, origin: 'https://active.com' },
+      activeAuthDiff,
+    ];
+
+    mockStore[`${STORAGE_KEYS.GRAPH_PREFIX}old.com`] = {
+      apexDomain: 'old.com',
+      lastUpdated: now - 20 * ONE_DAY_MS,
+      nodes: [
+        { hostname: 'old.com', isApex: true, lastSeen: now - 20 * ONE_DAY_MS, discoveredVia: ['navigation'] },
+      ],
+      edges: [],
+    };
+
+    mockStore[`${STORAGE_KEYS.GRAPH_PREFIX}mixed.com`] = {
+      apexDomain: 'mixed.com',
+      lastUpdated: now,
+      nodes: [
+        { hostname: 'mixed.com', isApex: true, lastSeen: now, discoveredVia: ['navigation'] },
+        { hostname: 'stale.mixed.com', isApex: false, lastSeen: now - 15 * ONE_DAY_MS, discoveredVia: ['navigation'] },
+        { hostname: 'active.mixed.com', isApex: false, lastSeen: now - 1 * ONE_DAY_MS, discoveredVia: ['navigation'] },
+      ],
+      edges: [
+        { source: 'stale.mixed.com', target: 'mixed.com', type: 'subdomain', severity: 'low', provenance: 'inferred' },
+        { source: 'active.mixed.com', target: 'mixed.com', type: 'subdomain', severity: 'low', provenance: 'inferred' },
+      ],
+    };
+
+    await LocalStorage.pruneAllHistory(now, settings);
+
+    // Stale auth diff removed entirely
+    expect(mockStore[`${STORAGE_KEYS.AUTH_DIFF_PREFIX}https://stale.com`]).toBeUndefined();
+
+    // Active auth diff has only recent one
+    const activeDiffs = mockStore[`${STORAGE_KEYS.AUTH_DIFF_PREFIX}https://active.com`] as typeof activeAuthDiff[];
+    expect(activeDiffs).toHaveLength(1);
+    expect(activeDiffs[0]?.timestamp).toBe(activeAuthDiff.timestamp);
+
+    // Old graph removed
+    expect(mockStore[`${STORAGE_KEYS.GRAPH_PREFIX}old.com`]).toBeUndefined();
+
+    // Mixed graph pruned stale node and its edge
+    const mixedGraph = mockStore[`${STORAGE_KEYS.GRAPH_PREFIX}mixed.com`] as { nodes: { hostname: string }[]; edges: { source: string }[] };
+    expect(mixedGraph.nodes.some((n) => n.hostname === 'stale.mixed.com')).toBe(false);
+    expect(mixedGraph.nodes.some((n) => n.hostname === 'active.mixed.com')).toBe(true);
+    expect(mixedGraph.edges.some((e) => e.source === 'stale.mixed.com')).toBe(false);
+    expect(mixedGraph.edges.some((e) => e.source === 'active.mixed.com')).toBe(true);
+  });
 });
+

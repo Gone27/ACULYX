@@ -29,6 +29,13 @@ export interface SettingsChangedMessage {
   settings: Settings;
 }
 
+export interface SettingsChangedResponse {
+  type: 'SETTINGS_CHANGED_RESPONSE';
+  success: boolean;
+  settings?: Settings;
+  error?: string;
+}
+
 export interface ServiceWorkerStatusMessage {
   type: 'SERVICE_WORKER_STATUS';
   status: 'controlled' | 'not-controlled';
@@ -98,6 +105,7 @@ export type ExtensionMessage =
   | StateResponseMessage
   | PermissionsChangedMessage
   | SettingsChangedMessage
+  | SettingsChangedResponse
   | ServiceWorkerStatusMessage
   | MetaCspFoundMessage
   | SriScanMessage

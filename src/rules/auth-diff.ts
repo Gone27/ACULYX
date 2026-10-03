@@ -2,9 +2,8 @@
  * auth-diff.ts
  *
  * Implements pre-login vs. post-login security posture diffing.
- * Detects transition when a sensitive session/auth cookie appears on an origin
- * where previous requests had no active session, and snapshots the delta between
- * findings, scores, and grades.
+ * Detects transition when a sensitive session/auth cookie appears, rotates, or changes on an origin/tab,
+ * and snapshots the delta between findings, scores, and grades.
  */
 
 import type {
@@ -14,10 +13,19 @@ import type {
   AuthDiffRecord,
   AuthDiffFindingChange,
   AuthBaseline,
+  CompactFinding,
 } from '../shared/types';
 import { isSensitiveCookie } from './utils';
 
-export type { AuthBaseline };
+export type { AuthBaseline, CompactFinding };
+
+export function toCompactFinding(f: Finding | CompactFinding): CompactFinding {
+  return {
+    ruleId: f.ruleId,
+    severity: f.severity,
+    title: f.title,
+  };
+}
 
 /**
  * Checks if a cookie list contains an authentication or session token.
@@ -39,21 +47,64 @@ export function detectSensitiveAuthCookie(
 }
 
 /**
- * Computes which findings were added or removed between pre-auth and post-auth states.
+ * Returns all sensitive authentication/session cookies in the list.
  */
-export function computeFindingChanges(pre: Finding[], post: Finding[]): AuthDiffFindingChange[] {
+export function getSensitiveAuthCookies(
+  cookies: CookieRecord[],
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): CookieRecord[] {
+  return cookies.filter((c) => {
+    const { isSensitive } = isSensitiveCookie(c.name, alwaysSensitive, alwaysIgnore);
+    return isSensitive && (c.session || c.httpOnly);
+  });
+}
+
+/**
+ * Computes a deterministic signature of sensitive cookie metadata (names, flags, expiry).
+ * Allows detecting token rotation, flag upgrades/downgrades, or new tokens even when
+ * a session cookie was already present.
+ */
+export function computeSensitiveCookiesSignature(
+  cookies: CookieRecord[],
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): string {
+  const sensitiveCookies = getSensitiveAuthCookies(cookies, alwaysSensitive, alwaysIgnore);
+  return sensitiveCookies
+    .map((c) => `${c.name}|${c.httpOnly}|${c.secure}|${c.sameSite}|${c.partitioned}|${c.expiresAt ?? 'session'}`)
+    .sort()
+    .join(';;');
+}
+
+/**
+ * Computes which findings were added, removed, or modified between pre-auth and post-auth states.
+ */
+export function computeFindingChanges(
+  pre: (Finding | CompactFinding)[],
+  post: (Finding | CompactFinding)[]
+): AuthDiffFindingChange[] {
   const preMap = new Map(pre.map((f) => [f.ruleId, f]));
   const postMap = new Map(post.map((f) => [f.ruleId, f]));
   const changes: AuthDiffFindingChange[] = [];
 
-  // Findings introduced post-login (e.g. looser cookie flags or missing headers on authenticated view)
+  // Findings introduced or modified post-login
   for (const [ruleId, postFinding] of postMap.entries()) {
-    if (!preMap.has(ruleId)) {
+    const preFinding = preMap.get(ruleId);
+    if (!preFinding) {
       changes.push({
         ruleId,
         title: postFinding.title,
         severity: postFinding.severity,
         type: 'added',
+      });
+    } else if (preFinding.severity !== postFinding.severity || preFinding.title !== postFinding.title) {
+      changes.push({
+        ruleId,
+        title: postFinding.title,
+        severity: postFinding.severity,
+        type: 'modified',
+        oldSeverity: preFinding.severity,
       });
     }
   }
@@ -73,32 +124,46 @@ export function computeFindingChanges(pre: Finding[], post: Finding[]): AuthDiff
   return changes;
 }
 
+export interface AuthTransitionContext {
+  tabId?: number;
+  url?: string;
+  hasNonGetSetCookie?: boolean;
+}
+
 /**
- * Evaluates whether an origin transition represents a login event.
- * If transitioning from pre-auth (no sensitive session cookie) to post-auth (sensitive session cookie),
- * emits an AuthDiffRecord and updates the baseline.
+ * Evaluates whether an origin/tab transition represents a login event.
+ * Detects:
+ * 1. Transition from pre-auth (no sensitive session cookie) to post-auth (sensitive session cookie).
+ * 2. Sensitive cookie reissued via Set-Cookie on main-frame hop after non-GET request.
+ * 3. Sensitive cookie rotation or flag/expiry changes when already in session.
  */
 export function checkAuthTransition(
   origin: string,
   baseline: AuthBaseline | undefined,
   currentCookies: CookieRecord[],
-  currentFindings: Finding[],
+  currentFindings: (Finding | CompactFinding)[],
   currentScore: number,
   currentGrade: Grade,
   alwaysSensitive: string[] = [],
-  alwaysIgnore: string[] = []
+  alwaysIgnore: string[] = [],
+  context?: AuthTransitionContext,
 ): { isAuthEvent: boolean; record: AuthDiffRecord | null; newBaseline: AuthBaseline } {
   const authCookie = detectSensitiveAuthCookie(currentCookies, alwaysSensitive, alwaysIgnore);
   const hasAuthNow = authCookie !== null;
+  const currentSig = computeSensitiveCookiesSignature(currentCookies, alwaysSensitive, alwaysIgnore);
+  const compactCurrentFindings = currentFindings.map(toCompactFinding);
 
   const currentBaseline: AuthBaseline = {
     origin,
+    tabId: context?.tabId ?? baseline?.tabId,
+    url: context?.url ?? baseline?.url,
     cookies: currentCookies,
-    findings: currentFindings,
+    findings: compactCurrentFindings,
     score: currentScore,
     grade: currentGrade,
     timestamp: Date.now(),
     hasSensitiveCookie: hasAuthNow,
+    sensitiveCookieSignature: currentSig,
   };
 
   // If there was no previous baseline, establish this state as the initial baseline.
@@ -106,24 +171,51 @@ export function checkAuthTransition(
     return { isAuthEvent: false, record: null, newBaseline: currentBaseline };
   }
 
-  // Transition from pre-auth to post-auth detected:
+  let isAuthEvent = false;
+  let triggerReason: string | undefined;
+
+  // Case 1: Transition from pre-auth to post-auth
   if (!baseline.hasSensitiveCookie && hasAuthNow) {
+    isAuthEvent = true;
+    triggerReason = 'new_session_cookie';
+  } else if (baseline.hasSensitiveCookie && hasAuthNow) {
+    // Case 2: Post-login re-authentication via non-GET Set-Cookie (e.g. POST form submission login)
+    if (context?.hasNonGetSetCookie === true) {
+      isAuthEvent = true;
+      triggerReason = 'post_request_session_cookie_issued';
+    } else if (
+      baseline.sensitiveCookieSignature !== undefined &&
+      currentSig !== '' &&
+      baseline.sensitiveCookieSignature !== currentSig
+    ) {
+      // Case 3: Sensitive cookie name, expiry or flags rotated/changed
+      isAuthEvent = true;
+      triggerReason = 'session_cookie_rotated_or_modified';
+    }
+  }
+
+  if (isAuthEvent && authCookie !== null) {
     const preScore = baseline.score;
     const postScore = currentScore;
     const scoreDelta = postScore - preScore;
-    const changes = computeFindingChanges(baseline.findings, currentFindings);
+    const changes = computeFindingChanges(baseline.findings, compactCurrentFindings);
 
     const record: AuthDiffRecord = {
       origin,
+      tabId: context?.tabId ?? baseline.tabId,
       timestamp: Date.now(),
       triggeredByCookie: authCookie.name,
+      triggerReason,
       preAuthScore: preScore,
       postAuthScore: postScore,
       scoreDelta,
       preAuthGrade: baseline.grade,
       postAuthGrade: currentGrade,
-      preAuthFindings: baseline.findings,
-      postAuthFindings: currentFindings,
+      preAuthUrl: baseline.url,
+      postAuthUrl: context?.url,
+      scope: 'page',
+      preAuthFindings: baseline.findings.map(toCompactFinding),
+      postAuthFindings: compactCurrentFindings,
       changes,
     };
 
@@ -142,11 +234,14 @@ export function checkAuthTransition(
     record: null,
     newBaseline: {
       ...baseline,
+      tabId: context?.tabId ?? baseline.tabId,
+      url: context?.url ?? baseline.url,
       cookies: currentCookies,
-      findings: currentFindings,
+      findings: compactCurrentFindings,
       score: currentScore,
       grade: currentGrade,
       timestamp: Date.now(),
+      sensitiveCookieSignature: currentSig,
     },
   };
 }

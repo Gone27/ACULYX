@@ -49,6 +49,7 @@ import type {
   ApiHop,
   ApiEndpointState,
   Hop,
+  AuthBaseline,
 } from '../shared/types';
 import type {
   ExtensionMessage,
@@ -241,6 +242,64 @@ export const startupReady = Promise.all([settingsReady, sessionHydrationReady]).
   return undefined;
 });
 
+function isAuthBaselineEquivalent(a?: AuthBaseline, b?: AuthBaseline): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (
+    a.score !== b.score ||
+    a.grade !== b.grade ||
+    a.hasSensitiveCookie !== b.hasSensitiveCookie ||
+    a.sensitiveCookieSignature !== b.sensitiveCookieSignature
+  ) {
+    return false;
+  }
+  if (a.findings.length !== b.findings.length) return false;
+  for (let i = 0; i < a.findings.length; i++) {
+    const af = a.findings[i];
+    const bf = b.findings[i];
+    if (af === undefined || bf === undefined || af.ruleId !== bf.ruleId || af.severity !== bf.severity) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const graphDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearGraphDebounceTimers(): void {
+  for (const timer of graphDebounceTimers.values()) {
+    clearTimeout(timer);
+  }
+  graphDebounceTimers.clear();
+}
+
+function debounceGraphMerge(apex: string, hostname: string, state: TabState): void {
+  const existing = graphDebounceTimers.get(apex);
+  if (existing !== undefined) {
+    clearTimeout(existing);
+  }
+  const timer = setTimeout(() => {
+    graphDebounceTimers.delete(apex);
+    void (async () => {
+      try {
+        const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
+        await LocalStorage.mutateGraph(apex, (existingGraph) =>
+          mergeIntoGraph(
+            existingGraph,
+            hostname,
+            state.score,
+            state.grade,
+            discovered,
+            Boolean(currentSettings.evaluationMode),
+          ),
+        );
+      } catch {
+        // Silently ignore graph merge errors
+      }
+    })();
+  }, 500);
+  graphDebounceTimers.set(apex, timer);
+}
+
 function recomputeTabState(tabId: number, state: TabState): void {
   const result = runRules({
     hops: state.hops,
@@ -249,8 +308,8 @@ function recomputeTabState(tabId: number, state: TabState): void {
     metaCspFound: state.coverage.metaCspFound,
     captureFindings: state.captureFindings ?? [],
     cookieSettings: {
-      alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
-      alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? [],
+      alwaysSensitive: currentSettings.sensitiveCookieNames,
+      alwaysIgnore: currentSettings.ignoredCookieNames,
     },
   });
 
@@ -286,37 +345,34 @@ function recomputeTabState(tabId: number, state: TabState): void {
       state.findings,
       state.score,
       state.grade,
-      currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
-      currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? [],
+      currentSettings.sensitiveCookieNames,
+      currentSettings.ignoredCookieNames,
+      {
+        tabId,
+        url: state.url,
+        hasNonGetSetCookie: state.hops.some(
+          (h) => h.status !== 0 && h.rawHeaders.some((r) => r.name.toLowerCase() === 'set-cookie'),
+        ),
+      },
     );
     originAuthBaselines.set(state.origin, newBaseline);
-    void SessionStorage.setAuthBaseline(state.origin, newBaseline);
+    if (!isAuthBaselineEquivalent(baseline, newBaseline)) {
+      void SessionStorage.setAuthBaseline(state.origin, newBaseline);
+    }
 
     if (isAuthEvent && record !== null) {
       void LocalStorage.recordAuthDiff(state.origin, record);
     }
 
-    // Accumulate attack surface graph atomically (serialized per apex domain)
-    void (async () => {
-      try {
-        const u = new URL(state.origin);
-        const hostname = u.hostname;
-        const apex = registrableDomain(hostname) ?? hostname;
-        const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-        await LocalStorage.mutateGraph(apex, (existingGraph) =>
-          mergeIntoGraph(
-            existingGraph,
-            hostname,
-            state.score,
-            state.grade,
-            discovered,
-            Boolean(currentSettings.isPro),
-          ),
-        );
-      } catch {
-        // Silently ignore graph merge errors
-      }
-    })();
+    // Accumulate attack surface graph atomically (serialized per apex domain, debounced)
+    try {
+      const u = new URL(state.origin);
+      const hostname = u.hostname;
+      const apex = registrableDomain(hostname) ?? hostname;
+      debounceGraphMerge(apex, hostname, state);
+    } catch {
+      // Silently ignore graph merge errors for non-standard origins
+    }
   }
 
   setBadgeForTab(tabId, state.grade);
@@ -399,6 +455,7 @@ settingsTransitionPipeline.registerHooks({
   },
   onModeChange: async (_prevMode, newMode) => {
     if (newMode === 'off') {
+      clearGraphDebounceTimers();
       // 1. Immediately clear in-flight WebRequest captures (synchronous gate flip)
       clearInFlightCaptures();
 
@@ -592,6 +649,7 @@ async function onHopComplete(
       setCookieValues,
       gen,
       (t, g) => getTabGeneration(t) === g,
+      hop.requestId,
     );
     if (correlation.discarded === true) return;
     state.cookies = correlation.records;
@@ -660,8 +718,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 );
 
 registerPageSignalInjection();
-
-chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
 
 // ---------------------------------------------------------------------------
 // Cookie change listener
@@ -822,6 +878,27 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port): void => {
   });
 });
 
+// ─── Sender Validation Helpers ───────────────────────────────────────────────
+
+function isExtensionInternalSender(sender?: chrome.runtime.MessageSender): boolean {
+  if (sender === undefined || typeof chrome === 'undefined' || chrome.runtime === undefined) return false;
+  const runtimeId = chrome.runtime.id;
+  if (runtimeId === undefined || sender.id !== runtimeId) return false;
+  if (typeof chrome.runtime.getURL !== 'function') return true;
+  const extBaseUrl = chrome.runtime.getURL('');
+  return typeof sender.url === 'string' && sender.url.startsWith(extBaseUrl);
+}
+
+function isContentScriptSender(sender?: chrome.runtime.MessageSender): boolean {
+  if (sender === undefined || typeof chrome === 'undefined' || chrome.runtime === undefined) return false;
+  const runtimeId = chrome.runtime.id;
+  if (runtimeId === undefined || sender.id !== runtimeId) return false;
+  if (sender.tab === undefined || typeof sender.tab.id !== 'number') return false;
+  if (typeof chrome.runtime.getURL !== 'function') return true;
+  const extBaseUrl = chrome.runtime.getURL('');
+  return typeof sender.url === 'string' && !sender.url.startsWith(extBaseUrl);
+}
+
 // ---------------------------------------------------------------------------
 // Runtime message handler (one-shot messages, not port-based)
 // ---------------------------------------------------------------------------
@@ -833,6 +910,10 @@ chrome.runtime.onMessage.addListener(
     sendResponse: (response: ExtensionMessage) => void,
   ): boolean => {
     if (message.type === 'REQUEST_STATE') {
+      if (!isExtensionInternalSender(_sender)) {
+        sendResponse({ type: 'STATE_RESPONSE', state: null });
+        return false;
+      }
       void startupReady.then(() => {
         const stateForTab = message.tabId !== undefined && currentSettings.monitoringMode !== 'off'
           ? tabStates.get(message.tabId) ?? null
@@ -848,6 +929,9 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'PERMISSIONS_CHANGED') {
+      if (!isExtensionInternalSender(_sender)) {
+        return false;
+      }
       void (async () => {
         try {
           if (!message.granted && message.origins.length > 0) {
@@ -883,20 +967,45 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'SETTINGS_CHANGED') {
+      if (!isExtensionInternalSender(_sender)) {
+        sendResponse({
+          type: 'SETTINGS_CHANGED_RESPONSE',
+          success: false,
+          error: 'Unauthorized sender: SETTINGS_CHANGED only accepted from extension pages',
+        });
+        return false;
+      }
+
       void (async () => {
         try {
           await settingsTransitionPipeline.transition(message.settings, 'message');
-        } catch {
-          // Fail closed on unsupported schema or invalid data
+          const storedSettings = await LocalStorage.getSettings();
+          const broadcastMsg: SettingsChangedMessage = {
+            type: 'SETTINGS_CHANGED',
+            settings: storedSettings,
+          };
+          portRegistry.broadcastAll(broadcastMsg);
+          sendResponse({
+            type: 'SETTINGS_CHANGED_RESPONSE',
+            success: true,
+            settings: storedSettings,
+          });
+        } catch (err) {
+          sendResponse({
+            type: 'SETTINGS_CHANGED_RESPONSE',
+            success: false,
+            error: err instanceof Error ? err.message : 'Settings transition failed',
+          });
         }
-        portRegistry.broadcastAll(message);
       })();
 
-      sendResponse(message);
-      return false;
+      return true;
     }
 
     if (message.type === 'SERVICE_WORKER_STATUS') {
+      if (!isContentScriptSender(_sender)) {
+        return false;
+      }
       const senderTabId = _sender.tab?.id;
       if (senderTabId !== undefined) {
         const currentGen = getTabGeneration(senderTabId);
@@ -946,6 +1055,9 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'META_CSP_FOUND') {
+      if (!isContentScriptSender(_sender)) {
+        return false;
+      }
       const senderTabId = _sender.tab?.id;
       if (senderTabId !== undefined) {
         const currentGen = getTabGeneration(senderTabId);
@@ -1011,6 +1123,9 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'SRI_SCAN') {
+      if (!isContentScriptSender(_sender)) {
+        return false;
+      }
       const senderTabId = _sender.tab?.id;
       if (senderTabId !== undefined) {
         const currentGen = getTabGeneration(senderTabId);
@@ -1056,11 +1171,14 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'REQUEST_GRAPH') {
+      if (!isExtensionInternalSender(_sender)) {
+        return false;
+      }
       void (async () => {
         try {
           const apex = message.apexDomain;
           const graph = await LocalStorage.getGraph(apex);
-          const isPro = Boolean(currentSettings.isPro);
+          const isPro = Boolean(currentSettings.evaluationMode);
 
           if (!graph) {
             sendResponse({
@@ -1109,6 +1227,14 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'GENERATE_POC') {
+      if (!isExtensionInternalSender(_sender)) {
+        sendResponse({
+          type: 'GENERATE_POC_RESPONSE',
+          success: false,
+          error: 'Unauthorized sender: GENERATE_POC only accepted from extension pages',
+        });
+        return false;
+      }
       const state = tabStates.get(message.tabId);
       if (!state || !state.monitoredByUser) {
         sendResponse({
@@ -1139,8 +1265,17 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'RESET_ALL_DATA') {
+      if (!isExtensionInternalSender(_sender)) {
+        sendResponse({
+          type: 'RESET_ALL_DATA_RESPONSE',
+          success: false,
+          error: 'Unauthorized sender: RESET_ALL_DATA only accepted from extension pages',
+        });
+        return false;
+      }
       void (async () => {
         try {
+          clearGraphDebounceTimers();
           writeBatcher.clearAll();
           broadcastCoalescer.clearAll();
           
@@ -1219,8 +1354,8 @@ registerCaptureListeners(
       apiHop.isThirdParty = !isFirstParty;
 
       const findings = runApiRules(apiHop, {
-        alwaysSensitive: currentSettings.sensitiveCookieNames ?? currentSettings.alwaysSensitiveCookies ?? [],
-        alwaysIgnore: currentSettings.ignoredCookieNames ?? currentSettings.alwaysIgnoreCookies ?? [],
+        alwaysSensitive: currentSettings.sensitiveCookieNames,
+        alwaysIgnore: currentSettings.ignoredCookieNames,
       });
 
       if (!state.apiEndpoints) {
@@ -1271,7 +1406,7 @@ registerCaptureListeners(
                 state.score,
                 state.grade,
                 discovered,
-                Boolean(currentSettings.isPro),
+                Boolean(currentSettings.evaluationMode),
               ),
             );
           } catch {

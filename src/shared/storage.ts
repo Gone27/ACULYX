@@ -369,6 +369,36 @@ export function pruneHistoryItems(
   return filtered;
 }
 
+/**
+ * Pure function to prune auth diff items according to age and count policies.
+ */
+export function pruneAuthDiffItems(
+  items: readonly import('./types').AuthDiffRecord[],
+  now: number,
+  retainHistoryDays: number,
+  maxHistoryPerOrigin: number = DEFAULT_MAX_HISTORY_PER_ORIGIN,
+): import('./types').AuthDiffRecord[] {
+  let filtered = [...items];
+
+  // 1. Age pruning
+  if (retainHistoryDays > 0) {
+    const maxAgeMs = retainHistoryDays * 24 * 60 * 60 * 1000;
+    const cutoff = now - maxAgeMs;
+    filtered = filtered.filter((item) => item.timestamp >= cutoff);
+  }
+
+  // 2. Count cap (clamped between 1 and 50)
+  const rawCap = typeof maxHistoryPerOrigin === 'number' && !Number.isNaN(maxHistoryPerOrigin)
+    ? maxHistoryPerOrigin
+    : DEFAULT_MAX_HISTORY_PER_ORIGIN;
+  const cap = Math.max(1, Math.min(50, Math.floor(rawCap)));
+  if (filtered.length > cap) {
+    filtered = filtered.slice(-cap);
+  }
+
+  return filtered;
+}
+
 export const LocalStorage = {
   async getSettings(): Promise<SettingsV2> {
     return await SettingsService.getSettings();
@@ -418,7 +448,7 @@ export const LocalStorage = {
     try {
       const currentSettings = settings ?? (await this.getSettings());
       const all = await chrome.storage.local.get(null);
-      const updates: Record<string, OriginHistoryItem[]> = {};
+      const updates: Record<string, unknown> = {};
       const toRemove: string[] = [];
 
       for (const [key, value] of Object.entries(all)) {
@@ -434,6 +464,45 @@ export const LocalStorage = {
               toRemove.push(key);
             } else {
               updates[key] = pruned;
+            }
+          }
+        } else if (key.startsWith(STORAGE_KEYS.AUTH_DIFF_PREFIX)) {
+          if (Array.isArray(value)) {
+            const pruned = pruneAuthDiffItems(
+              value as import('./types').AuthDiffRecord[],
+              now,
+              currentSettings.retainHistoryDays,
+              currentSettings.maxHistoryPerOrigin,
+            );
+            if (pruned.length === 0) {
+              toRemove.push(key);
+            } else {
+              updates[key] = pruned;
+            }
+          }
+        } else if (key.startsWith(STORAGE_KEYS.GRAPH_PREFIX)) {
+          if (typeof value === 'object' && value !== null && 'nodes' in value && Array.isArray((value as { nodes?: unknown }).nodes)) {
+            const graph = value as import('./types').AttackSurfaceGraph;
+            const maxAgeMs = currentSettings.retainHistoryDays > 0
+              ? currentSettings.retainHistoryDays * 24 * 60 * 60 * 1000
+              : GRAPH_NODE_TTL_MS;
+            const cutoff = now - maxAgeMs;
+            const filteredNodes = graph.nodes.filter(
+              (n) => n.isApex || !n.lastSeen || n.lastSeen >= cutoff,
+            );
+            const validHosts = new Set(filteredNodes.map((n) => n.hostname));
+            const filteredEdges = graph.edges.filter(
+              (e) => validHosts.has(e.source) && validHosts.has(e.target),
+            );
+            if (filteredNodes.length <= 1 && filteredEdges.length === 0 && (graph.lastUpdated || 0) < cutoff) {
+              toRemove.push(key);
+            } else if (filteredNodes.length !== graph.nodes.length || filteredEdges.length !== graph.edges.length) {
+              updates[key] = {
+                ...graph,
+                nodes: filteredNodes,
+                edges: filteredEdges,
+                lastUpdated: now,
+              };
             }
           }
         }
@@ -520,7 +589,13 @@ export const LocalStorage = {
     return storageMutex.runExclusive(`auth_diff:${origin}`, async () => {
       try {
         const history = await this.getAuthDiffHistory(origin);
-        const updated = [...history, diff].slice(-DEFAULT_MAX_HISTORY_PER_ORIGIN);
+        const settings = await this.getSettings();
+        const updated = pruneAuthDiffItems(
+          [...history, diff],
+          diff.timestamp || Date.now(),
+          settings.retainHistoryDays,
+          settings.maxHistoryPerOrigin,
+        );
         const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
         await chrome.storage.local.set({ [key]: updated });
       } catch (err) {

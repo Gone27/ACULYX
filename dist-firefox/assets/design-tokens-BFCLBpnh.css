@@ -76,3 +76,34 @@
   outline-offset: 2px;
 }
 
+@media (prefers-color-scheme: light) {
+  :root {
+    /* ─── Surfaces ─────────────────────────────────────────── */
+    --sc-bg:          #f8fafc;
+    --sc-bg-card:     #ffffff;
+    --sc-bg-raised:   #f1f5f9;
+    --sc-bg-hover:    #e2e8f0;
+    --sc-bg-input:    #ffffff;
+
+    /* ─── Accent ────────────────────────────────────────────── */
+    --sc-accent:      #0d9488;
+    --sc-accent-dim:  #14b8a6;
+    --sc-accent-ink:  #ffffff;
+    --sc-violet:      #6366f1;
+
+    /* ─── Borders ───────────────────────────────────────────── */
+    --sc-border:      #cbd5e1;
+    --sc-border-focus:#0d9488;
+
+    /* ─── Typography ────────────────────────────────────────── */
+    --sc-text:        #0f172a;
+    --sc-text-muted:  #64748b;
+    --sc-text-code:   #0369a1;
+
+    /* ─── Elevation / Glow ──────────────────────────────────── */
+    --sc-glow-accent: 0 0 8px 0 rgba(13, 148, 136, 0.15);
+    --sc-shadow-card: 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+  }
+}
+
+

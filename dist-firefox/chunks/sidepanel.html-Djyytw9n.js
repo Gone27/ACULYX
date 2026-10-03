@@ -1,4 +1,4 @@
-import { E as SIDEPANEL_PORT_NAME, a as registrableDomain, r as sendToBackground } from "./messaging-BtJyJf3R.js";
+import { E as SIDEPANEL_PORT_NAME, a as registrableDomain, r as sendToBackground } from "./messaging-BQwzB0xT.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region node_modules/d3-force/src/center.js
@@ -976,11 +976,11 @@ document.addEventListener("DOMContentLoaded", () => {
 	function renderGraph(graph) {
 		graphLoading.hidden = true;
 		if (graph.isPro) {
-			tierBadge.textContent = "PRO";
+			tierBadge.textContent = "Evaluation";
 			tierBadge.className = "tier-badge pro";
 			proBanner.hidden = true;
 		} else {
-			tierBadge.textContent = "Free Tier";
+			tierBadge.textContent = "Standard";
 			tierBadge.className = "tier-badge free";
 			proBanner.hidden = false;
 		}
@@ -1184,4 +1184,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-DF80hl_6.js.map
+//# sourceMappingURL=sidepanel.html-Djyytw9n.js.map

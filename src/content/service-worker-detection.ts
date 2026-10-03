@@ -1,15 +1,18 @@
 /** Runs in the page's isolated world only after host permission is granted. */
-export function reportPageSignals(): void {
+export function reportPageSignals(generation?: number): void {
   const isolatedWorld = globalThis as typeof globalThis & { __seccheckPageSignalsInstalled?: boolean };
   if (isolatedWorld.__seccheckPageSignalsInstalled === true) return;
   isolatedWorld.__seccheckPageSignalsInstalled = true;
 
   const controller = navigator.serviceWorker?.controller;
+  const swUrl = controller?.scriptURL ?? null;
 
   void chrome.runtime.sendMessage({
     type: 'SERVICE_WORKER_STATUS',
     status: controller == null ? 'not-controlled' : 'controlled',
-    serviceWorkerUrl: controller?.scriptURL ?? null,
+    serviceWorkerUrl: swUrl,
+    generation,
+    eventId: `sw:${generation ?? 0}:${controller == null ? 'not-controlled' : 'controlled'}:${swUrl ?? ''}`,
   }).catch(() => undefined);
 
   // ── Meta CSP ──────────────────────────────────────────────────────────────
@@ -39,6 +42,8 @@ export function reportPageSignals(): void {
     void chrome.runtime.sendMessage({
       type: 'META_CSP_FOUND',
       policies, // full policy strings — NOT injected into DOM, sent over runtime message
+      generation,
+      eventId: `meta-csp:${generation ?? 0}:${policies.length}:${policies.join(';').slice(0, 100)}`,
     }).catch(() => undefined);
   }
 
@@ -65,38 +70,58 @@ export function reportPageSignals(): void {
   }
 
   // ── SRI scan ──────────────────────────────────────────────────────────────
-  const scannedUrls = new Set<string>();
-  let initialSriDone = false;
+  // Track all external resources seen on the page across its lifetime so cumulative
+  // totals are sent on every update (prevents flickering on lazy-loaded pages).
+  const externalScriptMap = new Map<string, boolean>(); // src -> hasIntegrity
+  const externalStylesheetMap = new Map<string, boolean>(); // href -> hasIntegrity
 
   function doReportSri(): void {
-    const externalScripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'))
-      .filter((script) => {
-        if (scannedUrls.has(script.src)) return false;
-        scannedUrls.add(script.src);
-        try { return new URL(script.src, location.href).origin !== location.origin; }
-        catch { return false; }
-      });
+    const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'));
+    for (const script of scripts) {
+      try {
+        const scriptUrl = new URL(script.src, location.href);
+        if (scriptUrl.origin !== location.origin) {
+          const hasIntegrity = script.integrity.trim().length > 0;
+          externalScriptMap.set(script.src, hasIntegrity);
+        }
+      } catch {
+        // Ignore invalid URLs
+      }
+    }
 
-    const externalStylesheets = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))
-      .filter((link) => {
-        if (scannedUrls.has(link.href)) return false;
-        scannedUrls.add(link.href);
-        try { return new URL(link.href, location.href).origin !== location.origin; }
-        catch { return false; }
-      });
+    const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'));
+    for (const link of links) {
+      try {
+        const linkUrl = new URL(link.href, location.href);
+        if (linkUrl.origin !== location.origin) {
+          const hasIntegrity = link.integrity.trim().length > 0;
+          externalStylesheetMap.set(link.href, hasIntegrity);
+        }
+      } catch {
+        // Ignore invalid URLs
+      }
+    }
 
-    if (initialSriDone && externalScripts.length === 0 && externalStylesheets.length === 0) return;
-    initialSriDone = true;
+    const totalExternalScripts = externalScriptMap.size;
+    let missingScriptIntegrity = 0;
+    for (const hasIntegrity of externalScriptMap.values()) {
+      if (!hasIntegrity) missingScriptIntegrity++;
+    }
 
-    const missingScriptIntegrity = externalScripts.filter((s) => !s.integrity.trim()).length;
-    const missingStyleIntegrity = externalStylesheets.filter((l) => !l.integrity.trim()).length;
+    const totalExternalStylesheets = externalStylesheetMap.size;
+    let missingStyleIntegrity = 0;
+    for (const hasIntegrity of externalStylesheetMap.values()) {
+      if (!hasIntegrity) missingStyleIntegrity++;
+    }
 
     void chrome.runtime.sendMessage({
       type: 'SRI_SCAN',
-      externalScripts: externalScripts.length,
+      externalScripts: totalExternalScripts,
       missingIntegrity: missingScriptIntegrity,
-      externalStylesheets: externalStylesheets.length,
+      externalStylesheets: totalExternalStylesheets,
       missingStyleIntegrity,
+      generation,
+      eventId: `sri:${generation ?? 0}:${totalExternalScripts}:${missingScriptIntegrity}:${totalExternalStylesheets}:${missingStyleIntegrity}`,
     }).catch(() => undefined);
   }
 
@@ -133,7 +158,9 @@ export function reportPageSignals(): void {
       }
     }
   });
-  sriObserver.observe(document.documentElement, {
+
+  const targetRoot = document.documentElement ?? document;
+  sriObserver.observe(targetRoot, {
     childList: true,
     subtree: true,
     attributes: true,

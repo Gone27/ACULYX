@@ -213,13 +213,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderGraph(graph: AttackSurfaceGraph): void {
     graphLoading.hidden = true;
 
-    // Update Pro/Free badges
+    // Update Evaluation/Standard badges
     if (graph.isPro) {
-      tierBadge.textContent = 'PRO';
+      tierBadge.textContent = 'Evaluation';
       tierBadge.className = 'tier-badge pro';
       proBanner.hidden = true;
     } else {
-      tierBadge.textContent = 'Free Tier';
+      tierBadge.textContent = 'Standard';
       tierBadge.className = 'tier-badge free';
       proBanner.hidden = false;
     }

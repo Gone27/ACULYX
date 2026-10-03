@@ -40,15 +40,29 @@ export const originAuthBaselines: Map<string, AuthBaseline> = new Map();
  * Never uses keepalive alarms.
  */
 export function initLifecycle(): void {
-  void chrome.alarms.create(MAINTENANCE_ALARM, {
-    periodInMinutes: MAINTENANCE_PERIOD_MINUTES,
-  });
-
-  chrome.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm): void => {
-    if (alarm.name === MAINTENANCE_ALARM) {
-      void LocalStorage.pruneAllHistory();
+  if (typeof chrome !== 'undefined' && chrome.alarms !== undefined) {
+    if (typeof chrome.alarms.get === 'function') {
+      chrome.alarms.get(MAINTENANCE_ALARM, (existingAlarm) => {
+        if (existingAlarm === undefined || existingAlarm === null) {
+          void chrome.alarms.create(MAINTENANCE_ALARM, {
+            periodInMinutes: MAINTENANCE_PERIOD_MINUTES,
+          });
+        }
+      });
+    } else {
+      void chrome.alarms.create(MAINTENANCE_ALARM, {
+        periodInMinutes: MAINTENANCE_PERIOD_MINUTES,
+      });
     }
-  });
+
+    if (chrome.alarms.onAlarm !== undefined && typeof chrome.alarms.onAlarm.addListener === 'function') {
+      chrome.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm): void => {
+        if (alarm.name === MAINTENANCE_ALARM) {
+          void LocalStorage.pruneAllHistory();
+        }
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

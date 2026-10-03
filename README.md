@@ -36,8 +36,11 @@ The engine evaluates responses against over a dozen targeted security rules. Key
 
 - Cookie values are not accessed, persisted, displayed, or exported by this extension. Chrome's `cookies.getAll()` API returns cookie objects that include a `value` property; this extension reads only metadata fields and never accesses `cookie.value`.
 - The extension manifest declares `connect-src 'none'` in its Content Security Policy, making outbound network requests from extension pages impossible (and easily verifiable in the source).
-- No remote code, no analytics, no telemetry
-- All storage is local: `chrome.storage.session` for live tab state, `chrome.storage.local` for settings
+- No remote code, no analytics, no telemetry.
+- **Local persistence**: All storage is strictly on-device:
+  - `chrome.storage.session`: Live tab state and temporary API endpoint captures (LRU capped at 50 per tab, with URL credentials/query tokens stripped).
+  - `chrome.storage.local`: User settings, historical domain scores, authentication diffs (`AuthDiffRecord` storing only compact finding metadata and score deltas; no session tokens or passwords), and attack-surface graphs (bounded at 100 nodes / 150 edges and pruned according to history retention rules).
+- **Evaluation Mode**: Exploring the multi-session attack surface graph is enabled locally via "Evaluation Mode" in Settings; there are no external billing or authentication servers.
 - **CLI network contact**: The CLI `--url` mode intentionally contacts the target URL to fetch headers. This is the only operation that sends a network request outside the browser.
 
 ## Permissions

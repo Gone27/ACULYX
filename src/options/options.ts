@@ -201,11 +201,18 @@ async function handleSave(): Promise<void> {
 
   try {
     await SettingsService.updateSettings(settings);
-    await sendToBackground({ type: 'SETTINGS_CHANGED', settings });
+    const resp = (await sendToBackground({ type: 'SETTINGS_CHANGED', settings })) as {
+      success?: boolean;
+      error?: string;
+    };
+    if (resp?.success === false) {
+      throw new Error(resp.error ?? 'Failed to apply settings transition');
+    }
     initialSettingsSnapshot = getFormStateString();
     setStatus('Settings saved ✓', false);
-  } catch {
-    setStatus('Failed to save settings.', true);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Failed to save settings.';
+    setStatus(`Failed to save settings: ${errorMsg}`, true);
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = 'Save settings';
@@ -272,9 +279,6 @@ function readFormValues(): Settings {
     sensitiveCookieNames: sensitive,
     ignoredCookieNames: ignored,
     evaluationMode: proModeToggle.checked,
-    alwaysSensitiveCookies: sensitive,
-    alwaysIgnoreCookies: ignored,
-    isPro: proModeToggle.checked,
   };
 }
 

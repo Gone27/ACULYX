@@ -74,4 +74,22 @@ describe('Set-Cookie jar correlation diagnostics', () => {
     expect(mismatch).toHaveLength(0);
     expect(matchingPath).toHaveLength(1);
   });
+
+  it('does not report cookie deletions with Max-Age=0 as COOKIE-REJECTED (N1)', () => {
+    const findings = findUnobservedCookieFindings(
+      ['session=; Max-Age=0; Path=/; Secure; HttpOnly'],
+      [],
+      'https://app.example.com/',
+    );
+    expect(findings).toHaveLength(0);
+  });
+
+  it('does not report cookie deletions with past Expires as COOKIE-REJECTED (N1)', () => {
+    const findings = findUnobservedCookieFindings(
+      ['session=deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly'],
+      [],
+      'https://app.example.com/',
+    );
+    expect(findings).toHaveLength(0);
+  });
 });

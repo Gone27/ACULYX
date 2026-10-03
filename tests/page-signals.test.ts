@@ -67,6 +67,7 @@ describe('permission-gated page signal injection', () => {
     expect(executeScript).toHaveBeenCalledWith({
       target: { tabId: 12, frameIds: [0] },
       func: reportPageSignals,
+      args: [expect.any(Number)],
     });
   });
 

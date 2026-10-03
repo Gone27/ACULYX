@@ -4,18 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SecCheck — Attack Surface Graph</title>
-  <script type="module" crossorigin src="/chunks/sidepanel.html-DF80hl_6.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-BtJyJf3R.js">
+  <script type="module" crossorigin src="/chunks/sidepanel.html-Djyytw9n.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-BQwzB0xT.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
   <link rel="stylesheet" crossorigin href="/assets/sidepanel-BmcrnKBz.css">
-  <link rel="stylesheet" crossorigin href="/assets/design-tokens-5_sJXYzH.css">
+  <link rel="stylesheet" crossorigin href="/assets/design-tokens-BFCLBpnh.css">
 </head>
 <body class="view-graph">
   <!-- Header bar -->
   <header class="sidepanel-header" role="banner">
     <div class="header-main">
       <span class="sidepanel-title">Attack Surface Graph</span>
-      <span class="tier-badge" id="tier-badge">Free Tier</span>
+      <span class="tier-badge" id="tier-badge">Standard</span>
     </div>
     <div class="header-actions">
       <button type="button" id="view-toggle-btn" aria-pressed="false" title="Switch between graph and list view">
@@ -26,13 +26,13 @@
     </div>
   </header>
 
-  <!-- Pro Upsell Banner (when on free tier) -->
+  <!-- Evaluation Banner (when in standard mode) -->
   <div class="pro-banner" id="pro-banner" hidden>
     <div class="pro-banner-content">
-      <span class="pro-icon">⭐</span>
+      <span class="pro-icon">ℹ️</span>
       <div class="pro-text">
-        <strong>Free Tier View</strong>
-        <p id="pro-banner-text">Showing active host and apex node. Upgrade to Pro in Settings to explore the full accumulated attack surface graph.</p>
+        <strong>Standard View</strong>
+        <p id="pro-banner-text">Showing active host and apex node. Enable evaluation mode in Settings to explore the full accumulated attack surface graph.</p>
       </div>
     </div>
   </div>

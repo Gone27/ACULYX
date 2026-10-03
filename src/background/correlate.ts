@@ -34,6 +34,7 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
   domain: string | null;
   sameSiteNone: boolean;
   secure: boolean;
+  isDeletion: boolean;
 } {
   const parts = setCookieHeader.split(';').map((part) => part.trim());
   const name = parseCookieName(setCookieHeader);
@@ -42,6 +43,7 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
   let domain: string | null = null;
   let sameSiteNone = false;
   let secure = false;
+  let isDeletion = false;
 
   for (const attribute of parts.slice(1)) {
     const separator = attribute.indexOf('=');
@@ -59,9 +61,21 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
       sameSiteNone = attribute.slice(separator + 1).trim().toLowerCase() === 'none';
     }
     if (attributeName === 'secure' && separator === -1) secure = true;
+    if (attributeName === 'max-age' && separator !== -1) {
+      const maxAge = parseInt(attribute.slice(separator + 1).trim(), 10);
+      if (!isNaN(maxAge) && maxAge <= 0) {
+        isDeletion = true;
+      }
+    }
+    if (attributeName === 'expires' && separator !== -1) {
+      const expTime = Date.parse(attribute.slice(separator + 1).trim());
+      if (!isNaN(expTime) && expTime <= Date.now()) {
+        isDeletion = true;
+      }
+    }
   }
 
-  return { name, path, domainAttributePresent, domain, sameSiteNone, secure };
+  return { name, path, domainAttributePresent, domain, sameSiteNone, secure, isDeletion };
 }
 
 export const MAX_SET_COOKIES = 100;
@@ -86,7 +100,7 @@ export function findUnobservedCookieFindings(
 
   const visibleNames = new Set(cookies.map((cookie) => cookie.name));
   const findings = metadata
-    .filter((cookie) => cookie.name.length > 0 && !visibleNames.has(cookie.name))
+    .filter((cookie) => cookie.name.length > 0 && !cookie.isDeletion && !visibleNames.has(cookie.name))
     .flatMap((cookie): Finding[] => {
       const reasons: string[] = [];
       let likelyRejected = false;
@@ -230,6 +244,7 @@ export async function correlateCookies(
   setCookieHeaders: string[],
   generation?: number,
   isCurrentGeneration?: (tabId: number, generation: number) => boolean,
+  hopId?: string,
 ): Promise<{ records: CookieRecord[]; findings: Finding[]; discarded?: boolean }> {
   // Pre-query generation check: discard if generation already superseded
   if (
@@ -240,7 +255,9 @@ export async function correlateCookies(
     return { records: [], findings: [], discarded: true };
   }
 
-  const dedupKey = `${tabId}:${tabUrl}:${generation ?? 0}`;
+  const dedupKey = hopId !== undefined && hopId.length > 0
+    ? `${tabId}:${tabUrl}:${generation ?? 0}:${hopId}`
+    : `${tabId}:${tabUrl}:${generation ?? 0}`;
   const existing = inFlightCorrelations.get(dedupKey);
   if (existing) {
     return existing;
@@ -304,9 +321,10 @@ export async function correlateCookies(
           (cookie as chrome.cookies.Cookie & { partitionKey?: unknown })
             .partitionKey != null;
 
-        const expiresAt: number | null = cookie.session
-          ? null
-          : Math.round(cookie.expirationDate ?? 0) * 1000;
+        const expiresAt: number | null =
+          cookie.session || cookie.expirationDate == null || cookie.expirationDate <= 0
+            ? null
+            : Math.round(cookie.expirationDate) * 1000;
 
         return {
           name: cookie.name,

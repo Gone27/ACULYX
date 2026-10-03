@@ -1,4 +1,4 @@
-import { D as STORAGE_KEYS, a as registrableDomain, d as normalizeHeaders, f as originFromUrl, g as redactUrlQueryParams, h as redactUrlPath, l as headersDiffer, m as redactHeaderValue, x as MAINTENANCE_ALARM, y as DEFAULT_SETTINGS } from "./messaging-BtJyJf3R.js";
+import { D as STORAGE_KEYS, a as registrableDomain, d as normalizeHeaders, f as originFromUrl, g as redactUrlQueryParams, h as redactUrlPath, l as headersDiffer, m as redactHeaderValue, x as MAINTENANCE_ALARM, y as DEFAULT_SETTINGS } from "./messaging-BQwzB0xT.js";
 //#region src/shared/settings.ts
 /**
 * settings.ts
@@ -347,6 +347,7 @@ function recordStorageFailure(error) {
 	storageHealth.lastError = error instanceof Error ? error.message : String(error);
 	storageHealth.lastErrorTimestamp = Date.now();
 }
+var GRAPH_NODE_TTL_MS = 2592e6;
 function serializeTabState(state) {
 	const { apiEndpoints, ...rest } = state;
 	if (apiEndpoints !== void 0) return {
@@ -526,6 +527,19 @@ function pruneHistoryItems(items, now, retainHistoryDays, maxHistoryPerOrigin = 
 	if (filtered.length > cap) filtered = filtered.slice(-cap);
 	return filtered;
 }
+/**
+* Pure function to prune auth diff items according to age and count policies.
+*/
+function pruneAuthDiffItems(items, now, retainHistoryDays, maxHistoryPerOrigin = DEFAULT_MAX_HISTORY_PER_ORIGIN) {
+	let filtered = [...items];
+	if (retainHistoryDays > 0) {
+		const cutoff = now - retainHistoryDays * 24 * 60 * 60 * 1e3;
+		filtered = filtered.filter((item) => item.timestamp >= cutoff);
+	}
+	const cap = Math.max(1, Math.min(50, Math.floor(typeof maxHistoryPerOrigin === "number" && !Number.isNaN(maxHistoryPerOrigin) ? maxHistoryPerOrigin : DEFAULT_MAX_HISTORY_PER_ORIGIN)));
+	if (filtered.length > cap) filtered = filtered.slice(-cap);
+	return filtered;
+}
 var LocalStorage = {
 	async getSettings() {
 		return await SettingsService.getSettings();
@@ -567,6 +581,27 @@ var LocalStorage = {
 					const pruned = pruneHistoryItems(value, now, currentSettings.retainHistoryDays, currentSettings.maxHistoryPerOrigin);
 					if (pruned.length === 0) toRemove.push(key);
 					else updates[key] = pruned;
+				}
+			} else if (key.startsWith(STORAGE_KEYS.AUTH_DIFF_PREFIX)) {
+				if (Array.isArray(value)) {
+					const pruned = pruneAuthDiffItems(value, now, currentSettings.retainHistoryDays, currentSettings.maxHistoryPerOrigin);
+					if (pruned.length === 0) toRemove.push(key);
+					else updates[key] = pruned;
+				}
+			} else if (key.startsWith(STORAGE_KEYS.GRAPH_PREFIX)) {
+				if (typeof value === "object" && value !== null && "nodes" in value && Array.isArray(value.nodes)) {
+					const graph = value;
+					const cutoff = now - (currentSettings.retainHistoryDays > 0 ? currentSettings.retainHistoryDays * 24 * 60 * 60 * 1e3 : GRAPH_NODE_TTL_MS);
+					const filteredNodes = graph.nodes.filter((n) => n.isApex || !n.lastSeen || n.lastSeen >= cutoff);
+					const validHosts = new Set(filteredNodes.map((n) => n.hostname));
+					const filteredEdges = graph.edges.filter((e) => validHosts.has(e.source) && validHosts.has(e.target));
+					if (filteredNodes.length <= 1 && filteredEdges.length === 0 && (graph.lastUpdated || 0) < cutoff) toRemove.push(key);
+					else if (filteredNodes.length !== graph.nodes.length || filteredEdges.length !== graph.edges.length) updates[key] = {
+						...graph,
+						nodes: filteredNodes,
+						edges: filteredEdges,
+						lastUpdated: now
+					};
 				}
 			}
 			if (Object.keys(updates).length > 0) await chrome.storage.local.set(updates);
@@ -625,7 +660,9 @@ var LocalStorage = {
 		if (!origin) return;
 		return storageMutex.runExclusive(`auth_diff:${origin}`, async () => {
 			try {
-				const updated = [...await this.getAuthDiffHistory(origin), diff].slice(-10);
+				const history = await this.getAuthDiffHistory(origin);
+				const settings = await this.getSettings();
+				const updated = pruneAuthDiffItems([...history, diff], diff.timestamp || Date.now(), settings.retainHistoryDays, settings.maxHistoryPerOrigin);
 				const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
 				await chrome.storage.local.set({ [key]: updated });
 			} catch (err) {
@@ -782,10 +819,15 @@ var originAuthBaselines = /* @__PURE__ */ new Map();
 * Never uses keepalive alarms.
 */
 function initLifecycle() {
-	chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 1 });
-	chrome.alarms.onAlarm.addListener((alarm) => {
-		if (alarm.name === "maintenance") LocalStorage.pruneAllHistory();
-	});
+	if (typeof chrome !== "undefined" && chrome.alarms !== void 0) {
+		if (typeof chrome.alarms.get === "function") chrome.alarms.get(MAINTENANCE_ALARM, (existingAlarm) => {
+			if (existingAlarm === void 0 || existingAlarm === null) chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 30 });
+		});
+		else chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 30 });
+		if (chrome.alarms.onAlarm !== void 0 && typeof chrome.alarms.onAlarm.addListener === "function") chrome.alarms.onAlarm.addListener((alarm) => {
+			if (alarm.name === "maintenance") LocalStorage.pruneAllHistory();
+		});
+	}
 }
 /**
 * Loads all previously persisted TabState records from chrome.storage.session
@@ -1570,4 +1612,4 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 //#endregion
 export { SessionStorage as C, settingsTransitionPipeline as D, resolveCookieOverlaps as E, LocalStorage as S, normalizeCookieList as T, tabGenerations as _, registerCaptureListeners as a, originAuthBaselines as b, hasAllSitesCoverage as c, reconcilePermissionsOnRemoved as d, reconcilePermissionsOnStartup as f, incrementTabGeneration as g, getTabGeneration as h, incognitoTabIds as i, isBroadGrant as l, isRestrictedUrl as m, clearInFlightCaptures as n, CapturePolicy as o, isModeCaptureAllowed as p, inFlightRequests as r, PermissionsService as s, captureMap as t, patternFromOrigin as u, hydrateFromSession as v, SettingsService as w, tabStates as x, initLifecycle as y };
 
-//# sourceMappingURL=capture-DOfvRG7K.js.map
+//# sourceMappingURL=capture-DnbUjg5i.js.map

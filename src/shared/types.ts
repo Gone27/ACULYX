@@ -267,34 +267,49 @@ export interface ApiEndpointState {
 
 // ─── Posture diff (Pre-login vs. Post-login) ──────────────────────────────────
 
+export interface CompactFinding {
+  ruleId: string;
+  title: string;
+  severity: Severity;
+}
+
 export interface AuthBaseline {
   origin: string;
+  tabId?: number | undefined;
+  url?: string | undefined;
   cookies: CookieRecord[];
-  findings: Finding[];
+  findings: CompactFinding[] | Finding[];
   score: number;
   grade: Grade;
   timestamp: number;
   hasSensitiveCookie: boolean;
+  sensitiveCookieSignature?: string | undefined;
 }
 
 export interface AuthDiffFindingChange {
   ruleId: string;
   title: string;
   severity: Severity;
-  type: 'added' | 'removed';
+  type: 'added' | 'removed' | 'modified';
+  oldSeverity?: Severity | undefined;
 }
 
 export interface AuthDiffRecord {
   origin: string;
+  tabId?: number | undefined;
   timestamp: number;
   triggeredByCookie: string;
+  triggerReason?: string | undefined;
   preAuthScore: number;
   postAuthScore: number;
   scoreDelta: number;
   preAuthGrade: Grade;
   postAuthGrade: Grade;
-  preAuthFindings: Finding[];
-  postAuthFindings: Finding[];
+  preAuthUrl?: string | undefined;
+  postAuthUrl?: string | undefined;
+  scope?: 'origin' | 'page' | undefined;
+  preAuthFindings: CompactFinding[];
+  postAuthFindings: CompactFinding[];
   changes: AuthDiffFindingChange[];
 }
 
