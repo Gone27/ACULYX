@@ -326,7 +326,9 @@ var SENSITIVE_PATH_KEYWORDS = /* @__PURE__ */ new Set([
 	"otp",
 	"code",
 	"codes",
-	"recovery"
+	"recovery",
+	"credential",
+	"credentials"
 ]);
 var COMMON_SAFE_SUBPATHS = /* @__PURE__ */ new Set([
 	"login",
@@ -354,7 +356,9 @@ var COMMON_SAFE_SUBPATHS = /* @__PURE__ */ new Set([
 	"list"
 ]);
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var JWT_RE = /^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/;
+var UUID_SUBSTRING_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+var JWT_RE = /^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/;
+var HEX_TOKEN_RE = /^[0-9a-f]{16,}$/i;
 var LONG_OPAQUE_RE = /^[a-zA-Z0-9_.-]{20,}$/;
 /**
 * Redacts sensitive path segments (tokens, UUIDs, JWTs, opaque hashes, and parameters following
@@ -365,27 +369,68 @@ function redactUrlPath(pathname) {
 	for (let i = 0; i < segments.length; i++) {
 		const seg = segments[i];
 		if (seg === void 0 || seg.length === 0) continue;
-		if (UUID_RE.test(seg)) {
+		if (seg === "[id]" || seg === "[token]" || seg === "[redacted]") continue;
+		const stem = seg.replace(/\.[a-zA-Z0-9]+$/, "");
+		if (UUID_RE.test(seg) || UUID_RE.test(stem) || UUID_SUBSTRING_RE.test(seg)) {
 			segments[i] = "[id]";
 			continue;
 		}
-		if (JWT_RE.test(seg)) {
+		if (JWT_RE.test(seg) || JWT_RE.test(stem) || /^eyJ/.test(seg)) {
 			segments[i] = "[token]";
 			continue;
 		}
 		const prev = i > 0 ? segments[i - 1]?.toLowerCase() : void 0;
 		if (prev !== void 0 && SENSITIVE_PATH_KEYWORDS.has(prev)) {
-			if (!COMMON_SAFE_SUBPATHS.has(seg.toLowerCase())) {
+			if (!COMMON_SAFE_SUBPATHS.has(seg.toLowerCase()) && !COMMON_SAFE_SUBPATHS.has(stem.toLowerCase())) {
 				segments[i] = "[token]";
 				continue;
 			}
 		}
-		if (LONG_OPAQUE_RE.test(seg)) {
+		if (HEX_TOKEN_RE.test(seg) || HEX_TOKEN_RE.test(stem) || LONG_OPAQUE_RE.test(seg) || LONG_OPAQUE_RE.test(stem)) {
 			segments[i] = "[token]";
 			continue;
 		}
 	}
 	return segments.join("/");
+}
+/**
+* Sanitizes a URL for safe storage: strips query strings, fragments, and credentials,
+* and redacts sensitive tokens/UUIDs in path segments.
+*/
+function sanitizeUrlForStorage(rawUrl) {
+	if (rawUrl === null || rawUrl === void 0 || rawUrl === "") return "";
+	const cleaned = ((rawUrl.split("#")[0] ?? "").split("?")[0] ?? "").trim();
+	if (cleaned.length === 0) return "";
+	try {
+		const parsed = new URL(cleaned);
+		const proto = parsed.protocol.toLowerCase();
+		if (proto === "http:" || proto === "https:" || proto === "ws:" || proto === "wss:") return `${`${parsed.protocol}//${parsed.host}`}${redactUrlPath(parsed.pathname)}`;
+	} catch {}
+	return redactUrlPath(cleaned.replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, "").replace(/^[^@/]+@/, ""));
+}
+/**
+* Sanitizes a CSP policy string for storage by parsing directives and sanitizing
+* reporting URLs in report-uri and report-to directives.
+*/
+function sanitizeCspPolicyForStorage(policy) {
+	if (!policy || typeof policy !== "string") return "";
+	const directives = policy.split(";").map((p) => p.trim()).filter(Boolean);
+	const sanitizedDirectives = [];
+	for (const directive of directives) {
+		const spaceIdx = directive.indexOf(" ");
+		if (spaceIdx === -1) {
+			sanitizedDirectives.push(directive);
+			continue;
+		}
+		const name = directive.slice(0, spaceIdx).trim();
+		const value = directive.slice(spaceIdx + 1).trim();
+		const lowerName = name.toLowerCase();
+		if (lowerName === "report-uri" || lowerName === "report-to") {
+			const sanitizedTokens = value.split(/\s+/).filter(Boolean).map((token) => sanitizeUrlForStorage(token));
+			sanitizedDirectives.push(`${name} ${sanitizedTokens.join(" ")}`);
+		} else sanitizedDirectives.push(`${name} ${value}`);
+	}
+	return sanitizedDirectives.join("; ");
 }
 var SENSITIVE_PARAM_WORD_TOKENS = /* @__PURE__ */ new Set([
 	"token",
@@ -882,6 +927,6 @@ function sendToBackground(msg) {
 	});
 }
 //#endregion
-export { RESTRICTED_SCHEMES as C, STORAGE_KEYS as D, SIDEPANEL_PORT_NAME as E, POPUP_PORT_NAME as S, SEVERITY_ORDER as T, sanitizeEvidence as _, registrableDomain as a, GRADE_THRESHOLDS as b, hasCspBypassProtection as c, normalizeHeaders as d, originFromUrl as f, redactUrlQueryParams as g, redactUrlPath as h, checkSubdomainTrust as i, headersDiffer as l, redactHeaderValue as m, portSend as n, checkDuplicateHeaders as o, parseCspDirectives as p, sendToBackground as r, extractSetCookieHeaders as s, PortRegistry as t, isSensitiveCookie as u, BADGE_COLORS as v, SCORE_VERSION as w, MAINTENANCE_ALARM as x, DEFAULT_SETTINGS as y };
+export { MAINTENANCE_ALARM as C, SEVERITY_ORDER as D, SCORE_VERSION as E, SIDEPANEL_PORT_NAME as O, GRADE_THRESHOLDS as S, RESTRICTED_SCHEMES as T, sanitizeCspPolicyForStorage as _, registrableDomain as a, BADGE_COLORS as b, hasCspBypassProtection as c, normalizeHeaders as d, originFromUrl as f, redactUrlQueryParams as g, redactUrlPath as h, checkSubdomainTrust as i, STORAGE_KEYS as k, headersDiffer as l, redactHeaderValue as m, portSend as n, checkDuplicateHeaders as o, parseCspDirectives as p, sendToBackground as r, extractSetCookieHeaders as s, PortRegistry as t, isSensitiveCookie as u, sanitizeEvidence as v, POPUP_PORT_NAME as w, DEFAULT_SETTINGS as x, sanitizeUrlForStorage as y };
 
-//# sourceMappingURL=messaging-BQwzB0xT.js.map
+//# sourceMappingURL=messaging-B0qCnidt.js.map

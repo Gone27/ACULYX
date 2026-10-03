@@ -18,3 +18,11 @@ export function incrementTabGeneration(tabId: number): number {
   tabGenerations.set(tabId, next);
   return next;
 }
+
+export function setTabGeneration(tabId: number, gen: number): void {
+  tabGenerations.set(tabId, gen);
+}
+
+export function clearTabGenerations(): void {
+  tabGenerations.clear();
+}

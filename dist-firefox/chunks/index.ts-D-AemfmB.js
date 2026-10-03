@@ -1,5 +1,5 @@
-import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BQwzB0xT.js";
-import { C as SessionStorage, D as settingsTransitionPipeline, S as LocalStorage, _ as tabGenerations, a as registerCaptureListeners, b as originAuthBaselines, c as hasAllSitesCoverage, d as reconcilePermissionsOnRemoved, f as reconcilePermissionsOnStartup, g as incrementTabGeneration, h as getTabGeneration, i as incognitoTabIds, l as isBroadGrant, m as isRestrictedUrl$1, n as clearInFlightCaptures, o as CapturePolicy, p as isModeCaptureAllowed, r as inFlightRequests, t as captureMap, v as hydrateFromSession, w as SettingsService, x as tabStates, y as initLifecycle } from "./capture-Bm5xZSus.js";
+import { E as SCORE_VERSION, O as SIDEPANEL_PORT_NAME, S as GRADE_THRESHOLDS, T as RESTRICTED_SCHEMES, _ as sanitizeCspPolicyForStorage, a as registrableDomain, b as BADGE_COLORS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as sanitizeEvidence, w as POPUP_PORT_NAME, x as DEFAULT_SETTINGS, y as sanitizeUrlForStorage } from "./messaging-B0qCnidt.js";
+import { C as tabGenerations, E as SettingsService, S as setTabGeneration, T as SessionStorage, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, k as settingsTransitionPipeline, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, w as LocalStorage, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-CKYjIEjs.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -3790,6 +3790,39 @@ var startupReady = Promise.all([settingsReady, sessionHydrationReady]).then(asyn
 	} catch {}
 	for (const [tabId, state] of tabStates.entries()) if (state.isIncognito === true) incognitoTabIds.add(tabId);
 });
+var pendingPrivacyLookups = /* @__PURE__ */ new Map();
+async function resolveTabPrivacy(tabId) {
+	if (incognitoTabIds.has(tabId)) return true;
+	if (tabId < 0) return false;
+	const existing = pendingPrivacyLookups.get(tabId);
+	if (existing !== void 0) return existing;
+	const lookupPromise = (async () => {
+		try {
+			if (typeof chrome !== "undefined" && chrome.tabs !== void 0 && typeof chrome.tabs.get === "function") {
+				if ((await chrome.tabs.get(tabId))?.incognito === true) {
+					incognitoTabIds.add(tabId);
+					return true;
+				}
+			}
+			return incognitoTabIds.has(tabId);
+		} catch {
+			return incognitoTabIds.has(tabId);
+		} finally {
+			pendingPrivacyLookups.delete(tabId);
+		}
+	})();
+	pendingPrivacyLookups.set(tabId, lookupPromise);
+	return lookupPromise;
+}
+if (typeof CapturePolicy.updateSnapshot !== "function") CapturePolicy.updateSnapshot = function(settings, grantedOrigins = []) {
+	CapturePolicy.setSnapshotForTesting({
+		ready: true,
+		revision: Date.now(),
+		mode: settings.monitoringMode,
+		broadGrantActive: settings.monitoringMode === "all-sites",
+		grantedOrigins: new Set(grantedOrigins)
+	});
+};
 function isAuthBaselineEquivalent(a, b) {
 	if (a === void 0 || b === void 0) return a === b;
 	if (a.score !== b.score || a.grade !== b.grade || a.hasSensitiveCookie !== b.hasSensitiveCookie || a.sensitiveCookieSignature !== b.sensitiveCookieSignature) return false;
@@ -3845,7 +3878,12 @@ function recomputeTabState(tabId, state) {
 	state.updatedAt = Date.now();
 	tabStates.set(tabId, state);
 	writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state));
-	if (state.monitoredByUser && state.origin !== "" && state.isIncognito !== true) {
+	const isIncognito = state.isIncognito === true || incognitoTabIds.has(tabId);
+	if (isIncognito) {
+		state.isIncognito = true;
+		incognitoTabIds.add(tabId);
+	}
+	if (state.monitoredByUser && state.origin !== "" && !isIncognito) {
 		LocalStorage.recordOriginHistory(state.origin, {
 			timestamp: state.updatedAt,
 			score: state.score,
@@ -3955,8 +3993,12 @@ function computeBlindSpots(coverage) {
 	return spots;
 }
 function pushLedgerEntry(state, entry) {
+	const sanitizedEntry = {
+		...entry,
+		url: sanitizeUrlForStorage(entry.url)
+	};
 	const ledger = state.coverage.ledger ?? (state.coverage.ledger = []);
-	ledger.push(entry);
+	ledger.push(sanitizedEntry);
 	if (ledger.length > 50) state.coverage.ledger = ledger.slice(-50);
 }
 function createDefaultTabState(tabId, url) {
@@ -4005,21 +4047,22 @@ function createDefaultTabState(tabId, url) {
 * given request.  Runs the full analysis pipeline through the per-tab ordered
 * reducer queue and pushes updates to all connected ports.
 */
-async function onHopComplete(tabId, hop, isIncognito) {
+async function onHopComplete(tabId, hop, isIncognito, gen) {
 	if (!Number.isInteger(tabId) || tabId < 0) return;
 	const currentGen = getTabGeneration(tabId);
-	if (hop.generation !== void 0 && hop.generation !== currentGen) return;
-	const gen = hop.generation ?? currentGen;
-	hop.generation = gen;
+	const targetGen = gen ?? hop.generation ?? currentGen;
+	if (hop.generation !== void 0 && hop.generation !== currentGen && gen === void 0) return;
+	hop.generation = targetGen;
 	pruneTransientStructures();
-	await tabActionQueue.enqueue(tabId, gen, async () => {
+	await resolveTabPrivacy(tabId);
+	await tabActionQueue.enqueue(tabId, targetGen, async () => {
 		await startupReady;
-		if (getTabGeneration(tabId) !== gen) return;
+		if (getTabGeneration(tabId) !== targetGen) return;
 		const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
-		const resolvedIncognito = isIncognito === true || state.isIncognito === true || incognitoTabIds.has(tabId) || isIncognito === void 0;
+		const resolvedIncognito = await resolveTabPrivacy(tabId) || isIncognito === true || state.isIncognito === true;
 		state.isIncognito = resolvedIncognito;
 		if (resolvedIncognito) incognitoTabIds.add(tabId);
-		state.navigationGeneration = gen;
+		state.navigationGeneration = targetGen;
 		state.url = hop.url;
 		state.origin = originFromUrl(hop.url) ?? hop.url;
 		const captureCheck = await CapturePolicy.evaluate(hop.url);
@@ -4076,10 +4119,7 @@ async function onHopComplete(tabId, hop, isIncognito) {
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 	if (details.frameId !== 0) return;
 	const { tabId } = details;
-	chrome.tabs.get(tabId).then((tab) => {
-		if (tab.incognito) incognitoTabIds.add(tabId);
-		else incognitoTabIds.delete(tabId);
-	}).catch(() => void 0);
+	resolveTabPrivacy(tabId);
 	incrementTabGeneration(tabId);
 	tabActionQueue.clearTab(tabId);
 	broadcastCoalescer.clear(tabId);
@@ -4202,6 +4242,34 @@ function isContentScriptSender(sender) {
 	const extBaseUrl = chrome.runtime.getURL("");
 	return typeof sender.url === "string" && !sender.url.startsWith(extBaseUrl);
 }
+async function executeResetAllData() {
+	CapturePolicy.updateSnapshot({
+		...DEFAULT_SETTINGS,
+		monitoringMode: "off"
+	}, []);
+	clearGraphDebounceTimers();
+	writeBatcher.clearAll();
+	broadcastCoalescer.clearAll();
+	tabActionQueue.clearAll();
+	tabStates.clear();
+	originAuthBaselines.clear();
+	captureMap.clear();
+	inFlightRequests.clear();
+	incognitoTabIds.clear();
+	clearTabGenerations();
+	await clearBadgesOnAllTabs();
+	await LocalStorage.resetAllData();
+	currentSettings = {
+		...DEFAULT_SETTINGS,
+		monitoringMode: "off"
+	};
+	await SettingsService.updateSettings(currentSettings);
+	portRegistry.broadcastAll({
+		type: "SETTINGS_CHANGED",
+		settings: currentSettings
+	});
+}
+var handleResetAllData = executeResetAllData;
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message.type === "REQUEST_STATE") {
 		if (!isExtensionInternalSender(_sender)) {
@@ -4283,11 +4351,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (!isContentScriptSender(_sender)) return false;
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
+			if (_sender.tab?.incognito === true) incognitoTabIds.add(senderTabId);
 			const currentGen = getTabGeneration(senderTabId);
 			if (message.generation !== void 0 && message.generation !== currentGen) return false;
 			const gen = message.generation ?? currentGen;
 			const rawSwUrl = message.serviceWorkerUrl;
-			const swUrl = rawSwUrl !== null && rawSwUrl !== void 0 && rawSwUrl !== "" ? (rawSwUrl.split("?")[0] ?? "").split("#")[0] ?? null : null;
+			const swUrl = rawSwUrl !== null && rawSwUrl !== void 0 && rawSwUrl !== "" ? sanitizeUrlForStorage(rawSwUrl) || null : null;
 			if (isDuplicateEvent(message.eventId ?? `sw:${senderTabId}:${gen}:${message.status}:${swUrl ?? ""}`)) return false;
 			const report = {
 				status: message.status,
@@ -4300,6 +4369,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				if (getTabGeneration(senderTabId) !== gen) return;
 				const state = tabStates.get(senderTabId);
 				if (state) {
+					if (_sender.tab?.incognito === true || incognitoTabIds.has(senderTabId) || state.isIncognito === true) {
+						incognitoTabIds.add(senderTabId);
+						state.isIncognito = true;
+					}
 					state.coverage.serviceWorkerStatus = report.status;
 					state.coverage.serviceWorkerUrl = report.serviceWorkerUrl;
 					state.coverage.hasServiceWorker = report.status === "controlled";
@@ -4320,12 +4393,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (!isContentScriptSender(_sender)) return false;
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
+			if (_sender.tab?.incognito === true) incognitoTabIds.add(senderTabId);
 			const currentGen = getTabGeneration(senderTabId);
 			if (message.generation !== void 0 && message.generation !== currentGen) return false;
 			const gen = message.generation ?? currentGen;
-			const sanitizedPolicies = (message.policies ?? []).map((p) => p.replace(/(report-uri|report-to)\s+([^;\s]+)/gi, (_match, dir, uri) => {
-				return `${dir} ${(uri.split("?")[0] ?? "").split("#")[0] ?? ""}`;
-			}));
+			const sanitizedPolicies = (message.policies ?? []).map((p) => sanitizeCspPolicyForStorage(p));
 			const policiesStr = sanitizedPolicies.join(";");
 			if (isDuplicateEvent(message.eventId ?? `meta-csp:${senderTabId}:${gen}:${policiesStr}`)) return false;
 			pendingMetaCspReports.add(senderTabId);
@@ -4334,6 +4406,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				if (getTabGeneration(senderTabId) !== gen) return;
 				const state = tabStates.get(senderTabId);
 				if (state) {
+					if (_sender.tab?.incognito === true || incognitoTabIds.has(senderTabId) || state.isIncognito === true) {
+						incognitoTabIds.add(senderTabId);
+						state.isIncognito = true;
+					}
 					state.coverage.metaCspFound = true;
 					if (sanitizedPolicies.length > 0) {
 						state.coverage.metaCspPolicies = sanitizedPolicies.slice(0, 5).map((p) => p.slice(0, 2048));
@@ -4367,6 +4443,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (!isContentScriptSender(_sender)) return false;
 		const senderTabId = _sender.tab?.id;
 		if (senderTabId !== void 0) {
+			if (_sender.tab?.incognito === true) incognitoTabIds.add(senderTabId);
 			const currentGen = getTabGeneration(senderTabId);
 			if (message.generation !== void 0 && message.generation !== currentGen) return false;
 			const gen = message.generation ?? currentGen;
@@ -4379,6 +4456,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 				if (getTabGeneration(senderTabId) !== gen) return;
 				const state = tabStates.get(senderTabId);
 				if (state) {
+					if (_sender.tab?.incognito === true || incognitoTabIds.has(senderTabId) || state.isIncognito === true) {
+						incognitoTabIds.add(senderTabId);
+						state.isIncognito = true;
+					}
 					state.captureFindings = (state.captureFindings ?? []).filter((finding) => finding.ruleId !== "SRI-001");
 					if (totalMissing > 0) {
 						const parts = [];
@@ -4500,16 +4581,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 			});
 			return false;
 		}
+		CapturePolicy.updateSnapshot({
+			...DEFAULT_SETTINGS,
+			monitoringMode: "off"
+		}, []);
+		clearGraphDebounceTimers();
+		writeBatcher.clearAll();
+		broadcastCoalescer.clearAll();
+		tabActionQueue.clearAll();
+		tabStates.clear();
+		originAuthBaselines.clear();
+		captureMap.clear();
+		inFlightRequests.clear();
+		incognitoTabIds.clear();
+		clearTabGenerations();
 		(async () => {
 			try {
-				clearGraphDebounceTimers();
-				writeBatcher.clearAll();
-				broadcastCoalescer.clearAll();
-				tabStates.clear();
-				originAuthBaselines.clear();
-				captureMap.clear();
-				inFlightRequests.clear();
-				incognitoTabIds.clear();
 				await clearBadgesOnAllTabs();
 				await LocalStorage.resetAllData();
 				currentSettings = {
@@ -4553,7 +4640,7 @@ registerCaptureListeners((tabId, hop, isIncognito) => {
 		if (getTabGeneration(tabId) !== gen) return;
 		const state = tabStates.get(tabId);
 		if (!state) return;
-		const resolvedIncognito = isIncognito === true || state.isIncognito === true || incognitoTabIds.has(tabId) || isIncognito === void 0;
+		const resolvedIncognito = await resolveTabPrivacy(tabId) || isIncognito === true || state.isIncognito === true;
 		state.isIncognito = resolvedIncognito;
 		if (resolvedIncognito) incognitoTabIds.add(tabId);
 		if (!await CapturePolicy.isAllowed(apiHop.url)) return;
@@ -4588,7 +4675,12 @@ registerCaptureListeners((tabId, hop, isIncognito) => {
 		state.updatedAt = Date.now();
 		state.navigationGeneration = gen;
 		SessionStorage.setTabState(state);
-		if (!state.isIncognito) (async () => {
+		const isTabIncognito = state.isIncognito === true || incognitoTabIds.has(tabId);
+		if (isTabIncognito) {
+			state.isIncognito = true;
+			incognitoTabIds.add(tabId);
+		}
+		if (!isTabIncognito) (async () => {
 			try {
 				const hostname = new URL(state.origin).hostname;
 				const apex = registrableDomain(hostname) ?? hostname;
@@ -4636,6 +4728,6 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 	});
 });
 //#endregion
-export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
+export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, resolveTabPrivacy, sessionHydrationReady, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-ByoIdtB3.js.map
+//# sourceMappingURL=index.ts-D-AemfmB.js.map

@@ -273,7 +273,7 @@ const SENSITIVE_PATH_KEYWORDS = new Set([
   'reset', 'token', 'tokens', 'auth', 'password', 'passwords', 'passwd', 'pwd',
   'invite', 'invites', 'invitation', 'verify', 'verification', 'confirm',
   'confirmation', 'session', 'sessions', 'secret', 'secrets', 'key', 'keys',
-  'apikey', 'otp', 'code', 'codes', 'recovery',
+  'apikey', 'otp', 'code', 'codes', 'recovery', 'credential', 'credentials',
 ]);
 
 const COMMON_SAFE_SUBPATHS = new Set([
@@ -283,7 +283,9 @@ const COMMON_SAFE_SUBPATHS = new Set([
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const JWT_RE = /^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/;
+const UUID_SUBSTRING_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const JWT_RE = /^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/;
+const HEX_TOKEN_RE = /^[0-9a-f]{16,}$/i;
 const LONG_OPAQUE_RE = /^[a-zA-Z0-9_.-]{20,}$/;
 
 /**
@@ -295,36 +297,99 @@ export function redactUrlPath(pathname: string): string {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (seg === undefined || seg.length === 0) continue;
+    if (seg === '[id]' || seg === '[token]' || seg === '[redacted]') continue;
 
-    // 1. UUID
-    if (UUID_RE.test(seg)) {
+    const stem = seg.replace(/\.[a-zA-Z0-9]+$/, '');
+
+    // 1. UUID: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} -> [id]
+    if (UUID_RE.test(seg) || UUID_RE.test(stem) || UUID_SUBSTRING_RE.test(seg)) {
       segments[i] = '[id]';
       continue;
     }
 
-    // 2. JWT
-    if (JWT_RE.test(seg)) {
+    // 2. JWT: eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+ -> [token]
+    if (JWT_RE.test(seg) || JWT_RE.test(stem) || /^eyJ/.test(seg)) {
       segments[i] = '[token]';
       continue;
     }
 
-    // 3. Preceding segment keyword indicates a secret, token, or one-time code
+    // 3. Preceding segment keyword indicates a secret, token, or one-time code -> [token]
     const prev = i > 0 ? segments[i - 1]?.toLowerCase() : undefined;
     if (prev !== undefined && SENSITIVE_PATH_KEYWORDS.has(prev)) {
-      if (!COMMON_SAFE_SUBPATHS.has(seg.toLowerCase())) {
+      if (!COMMON_SAFE_SUBPATHS.has(seg.toLowerCase()) && !COMMON_SAFE_SUBPATHS.has(stem.toLowerCase())) {
         segments[i] = '[token]';
         continue;
       }
     }
 
-    // 4. Long opaque alphanumeric/hex/hash token (e.g. >= 20 chars)
-    if (LONG_OPAQUE_RE.test(seg)) {
+    // 4. Hex/Opaque Tokens: 16+ hex characters or 20+ base64/alphanumeric characters -> [token]
+    if (HEX_TOKEN_RE.test(seg) || HEX_TOKEN_RE.test(stem) || LONG_OPAQUE_RE.test(seg) || LONG_OPAQUE_RE.test(stem)) {
       segments[i] = '[token]';
       continue;
     }
   }
 
   return segments.join('/');
+}
+
+/**
+ * Sanitizes a URL for safe storage: strips query strings, fragments, and credentials,
+ * and redacts sensitive tokens/UUIDs in path segments.
+ */
+export function sanitizeUrlForStorage(rawUrl: string): string {
+  if (rawUrl === null || rawUrl === undefined || rawUrl === '') return '';
+  const beforeHash = rawUrl.split('#')[0] ?? '';
+  const beforeQuery = beforeHash.split('?')[0] ?? '';
+  const cleaned = beforeQuery.trim();
+  if (cleaned.length === 0) return '';
+
+  try {
+    const parsed = new URL(cleaned);
+    const proto = parsed.protocol.toLowerCase();
+    if (proto === 'http:' || proto === 'https:' || proto === 'ws:' || proto === 'wss:') {
+      // Reconstruct origin without credentials (user:pass@)
+      const origin = `${parsed.protocol}//${parsed.host}`;
+      const redactedPath = redactUrlPath(parsed.pathname);
+      return `${origin}${redactedPath}`;
+    }
+  } catch {
+    // Relative path or non-standard protocol
+  }
+
+  // Strip credentials from relative path if present
+  const withoutCreds = cleaned.replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, '').replace(/^[^@/]+@/, '');
+  return redactUrlPath(withoutCreds);
+}
+
+/**
+ * Sanitizes a CSP policy string for storage by parsing directives and sanitizing
+ * reporting URLs in report-uri and report-to directives.
+ */
+export function sanitizeCspPolicyForStorage(policy: string): string {
+  if (!policy || typeof policy !== 'string') return '';
+  const directives = policy.split(';').map((p) => p.trim()).filter(Boolean);
+  const sanitizedDirectives: string[] = [];
+
+  for (const directive of directives) {
+    const spaceIdx = directive.indexOf(' ');
+    if (spaceIdx === -1) {
+      sanitizedDirectives.push(directive);
+      continue;
+    }
+    const name = directive.slice(0, spaceIdx).trim();
+    const value = directive.slice(spaceIdx + 1).trim();
+    const lowerName = name.toLowerCase();
+
+    if (lowerName === 'report-uri' || lowerName === 'report-to') {
+      const tokens = value.split(/\s+/).filter(Boolean);
+      const sanitizedTokens = tokens.map((token) => sanitizeUrlForStorage(token));
+      sanitizedDirectives.push(`${name} ${sanitizedTokens.join(' ')}`);
+    } else {
+      sanitizedDirectives.push(`${name} ${value}`);
+    }
+  }
+
+  return sanitizedDirectives.join('; ');
 }
 
 const SENSITIVE_PARAM_WORD_TOKENS = new Set([

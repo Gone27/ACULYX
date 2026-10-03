@@ -1,107 +1,342 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any, @typescript-eslint/require-await */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-describe('Complete Reset Integration', () => {
-  let localData: Record<string, unknown>;
-  let sessionData: Record<string, unknown>;
-  let inMemoryTabs: Map<number, unknown>;
-  let actionBadge: string;
-  
-  beforeEach(() => {
-    localData = {};
-    sessionData = {};
-    inMemoryTabs = new Map();
-    actionBadge = '';
+const { mockLocalStorageData, mockSessionStorageData, onMessageListeners } = vi.hoisted(() => {
+  const mockLocalStorageData: Record<string, unknown> = {};
+  const mockSessionStorageData: Record<string, unknown> = {};
+  const onMessageListeners: Array<
+    (message: unknown, sender: unknown, sendResponse: (res: unknown) => void) => boolean | void
+  > = [];
 
-    vi.stubGlobal('chrome', {
-      storage: {
-        local: {
-          get: vi.fn(async (keys: unknown) => {
-            if (keys === null) return localData;
-            return {};
-          }),
-          set: vi.fn(async (data: Record<string, unknown>) => {
-            Object.assign(localData, data);
-          }),
-          remove: vi.fn(async (keys: string | string[]) => {
-            const keysArray = Array.isArray(keys) ? keys : [keys];
-            keysArray.forEach((k: string) => { delete localData[k]; });
-          }),
-          clear: vi.fn(async () => {
-            localData = {};
-          })
-        },
-        session: {
-          clear: vi.fn(async () => {
-            sessionData = {};
-          })
-        }
-      },
-      action: {
-        setBadgeText: vi.fn(async ({ text }: { text: string }) => {
-          actionBadge = text;
-        })
-      }
-    });
+  const dummyEvent = () => ({
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    hasListener: vi.fn(),
   });
 
-  const performFullReset = async () => {
-    const chrome = (globalThis as any).chrome;
-    // 1. Clear session storage
-    await chrome.storage.session.clear();
-    
-    // 2. Clear local storage entirely, or remove specific keys + history
-    const allLocal = await chrome.storage.local.get(null);
-    const historyKeys = Object.keys(allLocal).filter(k => k.startsWith('history:'));
-    if (historyKeys.length > 0) {
-      await chrome.storage.local.remove(historyKeys);
-    }
-    await chrome.storage.local.clear();
-    
-    // 3. Restore default settings
-    await chrome.storage.local.set({ settings: { default: true } });
-    
-    // 4. Clear badges
-    await chrome.action.setBadgeText({ text: '' });
-    
-    // 5. Clear in-memory state
-    inMemoryTabs.clear();
+  (globalThis as unknown as { chrome: unknown }).chrome = {
+    webNavigation: {
+      onBeforeNavigate: dummyEvent(),
+      onCommitted: dummyEvent(),
+      onHistoryStateUpdated: dummyEvent(),
+    },
+    webRequest: {
+      onBeforeSendHeaders: dummyEvent(),
+      onHeadersReceived: dummyEvent(),
+      onResponseStarted: dummyEvent(),
+      onBeforeRedirect: dummyEvent(),
+      onErrorOccurred: dummyEvent(),
+      onCompleted: dummyEvent(),
+    },
+    cookies: {
+      onChanged: dummyEvent(),
+      getAll: vi.fn().mockResolvedValue([]),
+    },
+    tabs: {
+      onRemoved: dummyEvent(),
+      query: vi.fn((_q: unknown, cb?: (tabs: unknown[]) => void) => {
+        if (typeof cb === 'function') cb([]);
+        return Promise.resolve([]);
+      }),
+      get: vi.fn(),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    runtime: {
+      id: 'mock-extension-id',
+      onConnect: dummyEvent(),
+      onMessage: {
+        addListener: vi.fn((listener: (m: unknown, s: unknown, r: (res: unknown) => void) => boolean | void) => {
+          onMessageListeners.push(listener);
+        }),
+        removeListener: vi.fn(),
+        hasListener: vi.fn(),
+      },
+      getURL: vi.fn((path: string) => `chrome-extension://mock-extension-id/${path}`),
+    },
+    action: {
+      setBadgeText: vi.fn().mockResolvedValue(undefined),
+      setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+    },
+    alarms: {
+      get: vi.fn((_name: string, cb?: (a: unknown) => void) => {
+        if (cb) cb(null);
+      }),
+      create: vi.fn(),
+      onAlarm: dummyEvent(),
+    },
+    sidePanel: {
+      setPanelBehavior: vi.fn().mockResolvedValue(undefined),
+    },
+    permissions: {
+      onRemoved: dummyEvent(),
+      getAll: vi.fn().mockResolvedValue({ origins: [] }),
+      contains: vi.fn((_p: unknown, cb?: (res: boolean) => void) => {
+        if (typeof cb === 'function') cb(true);
+        return Promise.resolve(true);
+      }),
+    },
+    storage: {
+      local: {
+        get: vi.fn((keys?: unknown) => {
+          if (keys === null || keys === undefined) return Promise.resolve({ ...mockLocalStorageData });
+          if (typeof keys === 'string') return Promise.resolve({ [keys]: mockLocalStorageData[keys] });
+          if (Array.isArray(keys)) {
+            const res: Record<string, unknown> = {};
+            for (const k of keys as string[]) {
+              if (mockLocalStorageData[k] !== undefined) res[k] = mockLocalStorageData[k];
+            }
+            return Promise.resolve(res);
+          }
+          return Promise.resolve({ ...mockLocalStorageData });
+        }),
+        set: vi.fn((items: Record<string, unknown>) => {
+          Object.assign(mockLocalStorageData, items);
+          return Promise.resolve();
+        }),
+        remove: vi.fn((keys: string | string[]) => {
+          const arr = Array.isArray(keys) ? keys : [keys];
+          for (const k of arr) delete mockLocalStorageData[k];
+          return Promise.resolve();
+        }),
+        clear: vi.fn(() => {
+          for (const key of Object.keys(mockLocalStorageData)) delete mockLocalStorageData[key];
+          return Promise.resolve();
+        }),
+      },
+      session: {
+        get: vi.fn((keys?: unknown) => {
+          if (keys === null || keys === undefined) return Promise.resolve({ ...mockSessionStorageData });
+          if (typeof keys === 'string') return Promise.resolve({ [keys]: mockSessionStorageData[keys] });
+          if (Array.isArray(keys)) {
+            const res: Record<string, unknown> = {};
+            for (const k of keys as string[]) {
+              if (mockSessionStorageData[k] !== undefined) res[k] = mockSessionStorageData[k];
+            }
+            return Promise.resolve(res);
+          }
+          return Promise.resolve({ ...mockSessionStorageData });
+        }),
+        set: vi.fn((items: Record<string, unknown>) => {
+          Object.assign(mockSessionStorageData, items);
+          return Promise.resolve();
+        }),
+        remove: vi.fn((keys: string | string[]) => {
+          const arr = Array.isArray(keys) ? keys : [keys];
+          for (const k of arr) delete mockSessionStorageData[k];
+          return Promise.resolve();
+        }),
+        clear: vi.fn(() => {
+          for (const key of Object.keys(mockSessionStorageData)) delete mockSessionStorageData[key];
+          return Promise.resolve();
+        }),
+      },
+    },
   };
 
-  it('completely resets storage, memory, badges, and settings', async () => {
-    // Setup state
-    localData = {
-      'settings': { modified: true },
-      'history:123': 'some-history',
-      'history:456': 'other-history',
-      'random_key': 'random-value'
+  return { mockLocalStorageData, mockSessionStorageData, onMessageListeners };
+});
+
+import {
+  executeResetAllData,
+  tabGenerations,
+  badgeTrackedTabs,
+} from '../../src/background/index';
+import { tabStates, originAuthBaselines } from '../../src/background/lifecycle';
+import {
+  captureMap,
+  inFlightRequests,
+  incognitoTabIds,
+  isCaptureActiveForUrl,
+} from '../../src/background/capture';
+import type { PartialCapture } from '../../src/background/capture';
+import { CapturePolicy } from '../../src/background/capture-policy';
+import { LocalStorage } from '../../src/shared/storage';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
+import type { TabState, AuthBaseline } from '../../src/shared/types';
+
+describe('Complete Reset Integration', () => {
+  beforeEach(() => {
+    for (const key of Object.keys(mockLocalStorageData)) delete mockLocalStorageData[key];
+    for (const key of Object.keys(mockSessionStorageData)) delete mockSessionStorageData[key];
+    tabStates.clear();
+    originAuthBaselines.clear();
+    captureMap.clear();
+    inFlightRequests.clear();
+    incognitoTabIds.clear();
+    tabGenerations.clear();
+    badgeTrackedTabs.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('immediately switches CapturePolicy snapshot to off and rejects traffic mid-reset', async () => {
+    // 1. Configure active monitoring snapshot
+    CapturePolicy.setSnapshotForTesting({
+      ready: true,
+      revision: 1,
+      mode: 'all-sites',
+      broadGrantActive: true,
+      grantedOrigins: new Set(),
+    });
+
+    // Verify traffic is permitted before reset
+    expect(isCaptureActiveForUrl('https://example.com/checkout')).toBe(true);
+
+    // 2. Populate in-memory state and persistent stores
+    const dummyState: TabState = {
+      tabId: 10,
+      navigationGeneration: 4,
+      origin: 'https://example.com',
+      url: 'https://example.com/checkout',
+      hops: [],
+      cookies: [],
+      findings: [],
+      grade: 'B',
+      score: 75,
+      qualityScore: 100,
+      qualityGrade: 'A',
+      scoreVersion: '1.0',
+      scoreBreakdown: [],
+      coverage: {
+        hopsExpected: 1,
+        hopsCaptured: 1,
+        hasCache: false,
+        hasServiceWorker: false,
+        serviceWorkerStatus: 'unknown',
+        serviceWorkerUrl: null,
+        isRestricted: false,
+        metaCspFound: false,
+        blindSpots: [],
+      },
+      subdomainTrust: { hasEscalationPath: false, vectors: [] },
+      monitoredByUser: true,
+      updatedAt: Date.now(),
     };
-    sessionData = {
-      'tab_1': 'session-data'
+    tabStates.set(10, dummyState);
+    tabGenerations.set(10, 4);
+    badgeTrackedTabs.add(10);
+    incognitoTabIds.add(10);
+
+    const dummyPartial: PartialCapture = {
+      tabId: 10,
+      url: 'https://example.com/checkout',
+      status: 200,
+      headersReceived: null,
+      rawHeadersReceived: [],
+      headersStarted: null,
+      rawHeadersStarted: [],
+      fromCache: false,
+      wasRedirected: false,
+      timestamp: Date.now(),
+      redirectCount: 0,
+      generation: 4,
     };
-    inMemoryTabs.set(1, { generation: 2 });
-    actionBadge = '9+';
+    captureMap.set('req-pending', dummyPartial);
 
-    // Execute full reset
-    await performFullReset();
+    inFlightRequests.set('req-xhr-pending', {
+      method: 'POST',
+      origin: 'https://example.com',
+      timestamp: Date.now(),
+      generation: 4,
+    });
 
-    const chrome = (globalThis as any).chrome;
+    const dummyBaseline: AuthBaseline = {
+      origin: 'https://example.com',
+      score: 80,
+      grade: 'B',
+      cookies: [],
+      findings: [],
+      hasSensitiveCookie: false,
+      timestamp: Date.now(),
+    };
+    originAuthBaselines.set('https://example.com#tab:10', dummyBaseline);
 
-    // Verify local storage is default
-    expect(localData).toEqual({ settings: { default: true } });
-    // Verify legacy history keys are removed
-    expect(localData).not.toHaveProperty('history:123');
-    expect(localData).not.toHaveProperty('history:456');
-    
-    // Verify session is empty
-    expect(sessionData).toEqual({});
-    expect(chrome.storage.session.clear).toHaveBeenCalled();
-    
-    // Verify badges are cleared
-    expect(actionBadge).toBe('');
+    await LocalStorage.recordOriginHistory('https://example.com', {
+      timestamp: Date.now(),
+      score: 75,
+      grade: 'B',
+    });
+
+    // 3. Initiate full reset
+    const resetPromise = executeResetAllData();
+
+    // Verify SYNCHRONOUS fail-closed gate: CapturePolicy is switched to 'off' FIRST
+    const immediateSnapshot = CapturePolicy.getSnapshot();
+    expect(immediateSnapshot.mode).toBe('off');
+
+    // Any traffic arriving mid-reset must be rejected immediately at the boundary
+    expect(isCaptureActiveForUrl('https://example.com/checkout')).toBe(false);
+    expect(isCaptureActiveForUrl('https://any-other-site.com/')).toBe(false);
+
+    // Verify synchronous clearing of all in-memory structures
+    expect(tabStates.size).toBe(0);
+    expect(originAuthBaselines.size).toBe(0);
+    expect(captureMap.size).toBe(0);
+    expect(inFlightRequests.size).toBe(0);
+    expect(incognitoTabIds.size).toBe(0);
+    expect(tabGenerations.size).toBe(0);
+
+    // 4. Await full async completion
+    await resetPromise;
+
+    // Badges must be cleared across tabs
     expect(chrome.action.setBadgeText).toHaveBeenCalledWith({ text: '' });
-    
-    // Verify in-memory maps are empty
-    expect(inMemoryTabs.size).toBe(0);
+
+    // LocalStorage must have no residual history or graph data
+    const localKeys = Object.keys(mockLocalStorageData).filter(
+      (k) => k.startsWith('history:') || k.startsWith('auth_diff:') || k.startsWith('graph:'),
+    );
+    expect(localKeys).toHaveLength(0);
+
+    // Settings must be reset to defaults with monitoringMode 'off'
+    const finalSettings = await LocalStorage.getSettings();
+    expect(finalSettings.monitoringMode).toBe('off');
+    expect(finalSettings).toEqual({ ...DEFAULT_SETTINGS, monitoringMode: 'off' });
+  });
+
+  it('handles RESET_ALL_DATA extension message with fail-closed gate and success response', async () => {
+    CapturePolicy.setSnapshotForTesting({
+      ready: true,
+      revision: 2,
+      mode: 'all-sites',
+      broadGrantActive: true,
+      grantedOrigins: new Set(),
+    });
+
+    expect(isCaptureActiveForUrl('https://secure.example.com')).toBe(true);
+
+    const onMessageListener = onMessageListeners.at(-1);
+    expect(onMessageListener).toBeDefined();
+
+    const sender = {
+      id: 'mock-extension-id',
+      url: 'chrome-extension://mock-extension-id/options.html',
+    };
+
+    let responseResult: unknown;
+    if (onMessageListener !== undefined) {
+      const handled = onMessageListener(
+        { type: 'RESET_ALL_DATA' },
+        sender,
+        (res: unknown) => {
+          responseResult = res;
+        },
+      );
+      expect(handled).toBe(true);
+    }
+
+    // Gate must immediately flip to 'off'
+    expect(CapturePolicy.getSnapshot().mode).toBe('off');
+    expect(isCaptureActiveForUrl('https://secure.example.com')).toBe(false);
+
+    // Wait a tick for async completion
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(responseResult).toEqual({
+      type: 'RESET_ALL_DATA_RESPONSE',
+      success: true,
+    });
   });
 });

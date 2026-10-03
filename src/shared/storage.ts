@@ -160,6 +160,39 @@ export function assertNoSensitiveSecrets(state: TabState): void {
     if (match !== null) {
       throw new Error(`[SecCheck] Unredacted credentials detected in ${context} — storage aborted.`);
     }
+
+    const checkSegments = (segments: string[]): void => {
+      for (const seg of segments) {
+        if (!seg || seg === '[id]' || seg === '[token]' || seg === '[redacted]') continue;
+        const stem = seg.replace(/\.[a-zA-Z0-9]+$/, '');
+        if (stem === '[id]' || stem === '[token]' || stem === '[redacted]') continue;
+
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) ||
+                       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem) ||
+                       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(seg);
+        const isJwt = /^eyJ/.test(seg) || /^eyJ/.test(stem);
+        const isLongOpaque = seg.length >= 20 || stem.length >= 20 || /^[0-9a-f]{16,}$/i.test(stem);
+
+        if (isUuid || isJwt || isLongOpaque) {
+          throw new Error(`[SecCheck] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
+        }
+      }
+    };
+
+    const tokens = urlStr.split(/[\s;]+/).filter(Boolean);
+    for (const token of tokens) {
+      if (token.includes('/')) {
+        try {
+          const u = new URL(token);
+          checkSegments(u.pathname.split('/'));
+        } catch {
+          const pathOnly = token.replace(/^[a-zA-Z0-9+.-]+:\/\/[^/]+/, '');
+          checkSegments(pathOnly.split('/'));
+        }
+      } else if (context === 'serviceWorkerUrl') {
+        checkSegments([token]);
+      }
+    }
   };
 
   if (state.coverage !== undefined && state.coverage !== null) {

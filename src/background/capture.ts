@@ -51,8 +51,8 @@ export interface PartialCapture {
   timestamp: number;
   /** Number of redirects observed for this request. */
   redirectCount: number;
-  /** True if the tab is incognito. Defaults to false for non-incognito or unknown tabs. */
-  isIncognito?: boolean;
+  /** True if the tab is incognito. Undefined when privacy status is unknown. */
+  isIncognito?: boolean | undefined;
   /** Navigation generation */
   generation?: number;
 }
@@ -133,8 +133,8 @@ export function isCaptureActiveForUrl(url: string): boolean {
  * @param onApiHopComplete - Optional callback invoked for each captured XHR/Fetch response.
  */
 export function registerCaptureListeners(
-  onHopComplete: (tabId: number, hop: Hop, isIncognito: boolean) => void,
-  onApiHopComplete?: (apiHop: ApiHop, isIncognito: boolean) => void,
+  onHopComplete: (tabId: number, hop: Hop, isIncognito: boolean | undefined) => void,
+  onApiHopComplete?: (apiHop: ApiHop, isIncognito: boolean | undefined) => void,
 ): void {
   const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
   const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
@@ -188,7 +188,7 @@ export function registerCaptureListeners(
       if (!isCaptureActiveForUrl(details.url)) return;
 
       const raw = details.responseHeaders ?? [];
-      const isIncog = incognitoTabIds.has(details.tabId);
+      const isIncog = incognitoTabIds.has(details.tabId) ? true : undefined;
       const partial: PartialCapture = {
         tabId: details.tabId,
         url: details.url,
@@ -249,7 +249,7 @@ export function registerCaptureListeners(
           fromCache: details.fromCache ?? false,
           generation: reqMeta?.generation ?? getTabGeneration(details.tabId),
         };
-        const isIncog = incognitoTabIds.has(details.tabId);
+        const isIncog = incognitoTabIds.has(details.tabId) ? true : undefined;
         try {
           const res = onApiHopComplete(apiHop, isIncog) as unknown;
           if (res instanceof Promise) {
@@ -277,7 +277,7 @@ export function registerCaptureListeners(
       if (!partial) {
         // onHeadersReceived was missed (e.g. very fast cached response).
         // Build a minimal partial so we can still emit a hop.
-        const isIncog = incognitoTabIds.has(details.tabId);
+        const isIncog = incognitoTabIds.has(details.tabId) ? true : undefined;
         partial = {
           tabId: details.tabId,
           url: redactUrlQueryParams(details.url),
@@ -336,7 +336,7 @@ export function registerCaptureListeners(
 
       // Notify the orchestrator safely.
       try {
-        const res = onHopComplete(details.tabId, hop, partial.isIncognito ?? false) as unknown;
+        const res = onHopComplete(details.tabId, hop, partial.isIncognito) as unknown;
         if (res instanceof Promise) {
           res.catch(() => {});
         }
@@ -384,7 +384,7 @@ export function registerCaptureListeners(
         generation: existing?.generation ?? getTabGeneration(details.tabId),
       };
 
-      const isIncog = existing?.isIncognito ?? incognitoTabIds.has(details.tabId);
+      const isIncog = existing?.isIncognito ?? (incognitoTabIds.has(details.tabId) ? true : undefined);
       captureMap.delete(details.requestId);
       void onHopComplete(details.tabId, hop, isIncog);
     },

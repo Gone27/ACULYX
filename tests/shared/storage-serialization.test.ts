@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   KeyedAsyncMutex,
   LocalStorage,
+  SessionStorage,
+  assertNoSensitiveSecrets,
   getStorageHealth,
   resetStorageHealth,
   recordStorageFailure,
@@ -9,7 +11,7 @@ import {
   MAX_GRAPH_EDGES,
   GRAPH_NODE_TTL_MS,
 } from '../../src/shared/storage';
-import type { AttackSurfaceGraph, GraphNode, GraphEdge } from '../../src/shared/types';
+import type { AttackSurfaceGraph, GraphNode, GraphEdge, TabState } from '../../src/shared/types';
 
 describe('KeyedAsyncMutex', () => {
   it('serializes operations with the same key', async () => {
@@ -326,3 +328,131 @@ describe('LocalStorage.mutateGraph serialization and bounds', () => {
     expect(health.lastError).toBe('Disk full');
   });
 });
+
+describe('assertNoSensitiveSecrets & SessionStorage guard verification', () => {
+  const createBaseState = (): TabState => ({
+    tabId: 101,
+    origin: 'https://example.com',
+    url: 'https://example.com/dashboard',
+    hops: [
+      {
+        requestId: 'req-1',
+        url: 'https://example.com/dashboard',
+        status: 200,
+        headers: {
+          'set-cookie': 'session=[REDACTED]; Path=/; Secure; HttpOnly',
+        },
+        rawHeaders: [
+          { name: 'Set-Cookie', value: 'session=[REDACTED]; Path=/; Secure; HttpOnly' },
+        ],
+        fromCache: false,
+        isHstsUpgrade: false,
+        capturedAt: 'onResponseStarted',
+        headersDiffer: false,
+        timestamp: Date.now(),
+      },
+    ],
+    cookies: [
+      {
+        name: 'session',
+        domain: 'example.com',
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        sameSite: 'lax',
+        session: true,
+        expiresAt: null,
+        partitioned: false,
+        setByJs: false,
+        isThirdParty: false,
+        domainAttributePresent: true,
+      },
+    ],
+    findings: [],
+    grade: 'A',
+    score: 95,
+    qualityScore: 90,
+    qualityGrade: 'A',
+    scoreVersion: '1.0.0',
+    scoreBreakdown: [],
+    coverage: {
+      hopsExpected: 1,
+      hopsCaptured: 1,
+      hasCache: false,
+      hasServiceWorker: false,
+      serviceWorkerStatus: 'not-controlled',
+      serviceWorkerUrl: null,
+      isRestricted: false,
+      metaCspFound: false,
+      metaCspPolicies: [],
+    },
+    subdomainTrust: { hasEscalationPath: false, vectors: [] },
+    monitoredByUser: true,
+    updatedAt: Date.now(),
+  });
+
+  it('rejects raw cookie value attribute in cookies array', () => {
+    const state = createBaseState();
+    (state.cookies[0] as unknown as { value: string }).value = 'SECRET_COOKIE_VALUE';
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Cookie value detected on session/);
+  });
+
+  it('rejects serviceWorkerUrl with query parameters', () => {
+    const state = createBaseState();
+    state.coverage.serviceWorkerUrl = 'https://example.com/sw.js?token=secret123';
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Unredacted query string detected in serviceWorkerUrl/);
+  });
+
+  it('rejects serviceWorkerUrl with embedded credentials', () => {
+    const state = createBaseState();
+    state.coverage.serviceWorkerUrl = 'https://admin:pass123@example.com/sw.js';
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Unredacted credentials detected in serviceWorkerUrl/);
+  });
+
+  it('rejects serviceWorkerUrl with unredacted UUID path segment', () => {
+    const state = createBaseState();
+    state.coverage.serviceWorkerUrl = 'https://example.com/worker/550e8400-e29b-41d4-a716-446655440000.js';
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Unredacted sensitive token\/path detected in serviceWorkerUrl/);
+  });
+
+  it('rejects serviceWorkerUrl with unredacted JWT path segment', () => {
+    const state = createBaseState();
+    state.coverage.serviceWorkerUrl = 'https://example.com/api/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozG6tPqSTcT3M7W-Tss8T_mAmc8G_6bB5g';
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Unredacted sensitive token\/path detected in serviceWorkerUrl/);
+  });
+
+  it('rejects serviceWorkerUrl with 32-character hex token', () => {
+    const state = createBaseState();
+    state.coverage.serviceWorkerUrl = 'https://example.com/sw/4a8f9c2d1e0b3a7f8e9d0c1b2a3f4e5d.js';
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Unredacted sensitive token\/path detected in serviceWorkerUrl/);
+  });
+
+  it('rejects metaCspPolicies with unredacted sensitive tokens', () => {
+    const state = createBaseState();
+    state.coverage.metaCspPolicies = [
+      "default-src 'self'; report-uri https://collector.example.com/report/550e8400-e29b-41d4-a716-446655440000.js",
+    ];
+    expect(() => assertNoSensitiveSecrets(state)).toThrowError(/Unredacted sensitive token\/path detected in metaCspPolicies/);
+  });
+
+  it('allows cleanly sanitized serviceWorkerUrl and metaCspPolicies', () => {
+    const state = createBaseState();
+    state.coverage.serviceWorkerUrl = 'https://example.com/worker/[id]';
+    state.coverage.metaCspPolicies = [
+      "default-src 'self'; report-uri https://collector.example.com/report/[id]",
+    ];
+    expect(() => assertNoSensitiveSecrets(state)).not.toThrow();
+  });
+
+  it('SessionStorage.setTabState enforces assertNoSensitiveSecrets', async () => {
+    const badState = createBaseState();
+    badState.coverage.serviceWorkerUrl = 'https://example.com/sw.js?token=secret123';
+
+    await expect(SessionStorage.setTabState(badState)).rejects.toThrowError(/Unredacted query string/);
+
+    const goodState = createBaseState();
+    goodState.coverage.serviceWorkerUrl = 'https://example.com/sw.js';
+    await expect(SessionStorage.setTabState(goodState)).resolves.toBeUndefined();
+  });
+});
+

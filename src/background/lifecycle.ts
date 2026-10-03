@@ -11,6 +11,8 @@
 import { MAINTENANCE_ALARM, MAINTENANCE_PERIOD_MINUTES } from '../shared/constants';
 import { SessionStorage, LocalStorage } from '../shared/storage';
 import type { TabState, AuthBaseline } from '../shared/types';
+import { setTabGeneration } from './generations';
+import { incognitoTabIds } from './capture';
 
 // ---------------------------------------------------------------------------
 // In-memory store
@@ -83,6 +85,12 @@ export async function hydrateFromSession(): Promise<void> {
     const existing = tabStates.get(state.tabId);
     if (!existing || (state.updatedAt > existing.updatedAt)) {
       tabStates.set(state.tabId, state);
+    }
+    if (state.navigationGeneration !== undefined && state.navigationGeneration > 0) {
+      setTabGeneration(state.tabId, state.navigationGeneration);
+    }
+    if (state.isIncognito === true) {
+      incognitoTabIds.add(state.tabId);
     }
   }
 

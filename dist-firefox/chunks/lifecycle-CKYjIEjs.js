@@ -1,4 +1,4 @@
-import { D as STORAGE_KEYS, a as registrableDomain, d as normalizeHeaders, f as originFromUrl, g as redactUrlQueryParams, h as redactUrlPath, l as headersDiffer, m as redactHeaderValue, x as MAINTENANCE_ALARM, y as DEFAULT_SETTINGS } from "./messaging-BQwzB0xT.js";
+import { C as MAINTENANCE_ALARM, a as registrableDomain, d as normalizeHeaders, f as originFromUrl, g as redactUrlQueryParams, h as redactUrlPath, k as STORAGE_KEYS, l as headersDiffer, m as redactHeaderValue, x as DEFAULT_SETTINGS } from "./messaging-B0qCnidt.js";
 //#region src/shared/settings.ts
 /**
 * settings.ts
@@ -402,6 +402,24 @@ function assertNoSensitiveSecrets(state) {
 		if (urlStr === null || urlStr === void 0 || urlStr === "") return;
 		if (urlStr.includes("?")) throw new Error(`[SecCheck] Unredacted query string detected in ${context} — storage aborted.`);
 		if (urlStr.match(/:\/\/[^@/]+@/) !== null) throw new Error(`[SecCheck] Unredacted credentials detected in ${context} — storage aborted.`);
+		const checkSegments = (segments) => {
+			for (const seg of segments) {
+				if (!seg || seg === "[id]" || seg === "[token]" || seg === "[redacted]") continue;
+				const stem = seg.replace(/\.[a-zA-Z0-9]+$/, "");
+				if (stem === "[id]" || stem === "[token]" || stem === "[redacted]") continue;
+				const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem) || /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(seg);
+				const isJwt = /^eyJ/.test(seg) || /^eyJ/.test(stem);
+				const isLongOpaque = seg.length >= 20 || stem.length >= 20 || /^[0-9a-f]{16,}$/i.test(stem);
+				if (isUuid || isJwt || isLongOpaque) throw new Error(`[SecCheck] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
+			}
+		};
+		const tokens = urlStr.split(/[\s;]+/).filter(Boolean);
+		for (const token of tokens) if (token.includes("/")) try {
+			checkSegments(new URL(token).pathname.split("/"));
+		} catch {
+			checkSegments(token.replace(/^[a-zA-Z0-9+.-]+:\/\/[^/]+/, "").split("/"));
+		}
+		else if (context === "serviceWorkerUrl") checkSegments([token]);
 	};
 	if (state.coverage !== void 0 && state.coverage !== null) {
 		checkUrlStr(state.coverage.serviceWorkerUrl, "serviceWorkerUrl");
@@ -814,62 +832,6 @@ var LocalStorage = {
 	}
 };
 //#endregion
-//#region src/background/lifecycle.ts
-/**
-* lifecycle.ts
-*
-* Manages periodic maintenance (via chrome.alarms) and restores
-* in-memory tab state from chrome.storage.session after an SW revival.
-*
-* MV3 service workers are terminated after inactivity. Correctness relies
-* entirely on persistent storage and session hydration—never keepalive alarms.
-*/
-/**
-* Primary in-memory store for per-tab security analysis state.
-* Keyed by Chrome tabId.  Persisted to chrome.storage.session so it
-* survives SW restarts; re-hydrated via hydrateFromSession().
-*/
-var tabStates = /* @__PURE__ */ new Map();
-/**
-* In-memory cache for origin pre/post auth baselines.
-* Persisted to chrome.storage.session so it survives SW restarts.
-*/
-var originAuthBaselines = /* @__PURE__ */ new Map();
-/**
-* Registers the periodic maintenance alarm and its listener.
-*
-* Runs periodic history pruning sweeps and cleans up expired data.
-* Never uses keepalive alarms.
-*/
-function initLifecycle() {
-	if (typeof chrome !== "undefined" && chrome.alarms !== void 0) {
-		if (typeof chrome.alarms.get === "function") chrome.alarms.get(MAINTENANCE_ALARM, (existingAlarm) => {
-			if (existingAlarm === void 0 || existingAlarm === null) chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 30 });
-		});
-		else chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 30 });
-		if (chrome.alarms.onAlarm !== void 0 && typeof chrome.alarms.onAlarm.addListener === "function") chrome.alarms.onAlarm.addListener((alarm) => {
-			if (alarm.name === "maintenance") LocalStorage.pruneAllHistory();
-		});
-	}
-}
-/**
-* Loads all previously persisted TabState records from chrome.storage.session
-* into the in-memory {@link tabStates} map.
-*
-* Must be awaited before registering WebRequest listeners so that any
-* in-flight state from before the SW restart is available immediately.
-*/
-async function hydrateFromSession() {
-	const all = await SessionStorage.getAllTabStates();
-	for (const state of all) {
-		const existing = tabStates.get(state.tabId);
-		if (!existing || state.updatedAt > existing.updatedAt) tabStates.set(state.tabId, state);
-	}
-	const baselines = await SessionStorage.getAllAuthBaselines();
-	for (const [key, baseline] of baselines) if (!originAuthBaselines.has(key)) originAuthBaselines.set(key, baseline);
-	LocalStorage.pruneAllHistory();
-}
-//#endregion
 //#region src/background/generations.ts
 /**
 * generations.ts
@@ -887,6 +849,12 @@ function incrementTabGeneration(tabId) {
 	const next = (tabGenerations.get(tabId) ?? 0) + 1;
 	tabGenerations.set(tabId, next);
 	return next;
+}
+function setTabGeneration(tabId, gen) {
+	tabGenerations.set(tabId, gen);
+}
+function clearTabGenerations() {
+	tabGenerations.clear();
 }
 //#endregion
 //#region src/shared/gating.ts
@@ -1490,7 +1458,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 		if (details.type !== "main_frame" || details.tabId < 0) return;
 		if (!isCaptureActiveForUrl(details.url)) return;
 		const raw = details.responseHeaders ?? [];
-		const isIncog = incognitoTabIds.has(details.tabId);
+		const isIncog = incognitoTabIds.has(details.tabId) ? true : void 0;
 		const partial = {
 			tabId: details.tabId,
 			url: details.url,
@@ -1539,7 +1507,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 				fromCache: details.fromCache ?? false,
 				generation: reqMeta?.generation ?? getTabGeneration(details.tabId)
 			};
-			const isIncog = incognitoTabIds.has(details.tabId);
+			const isIncog = incognitoTabIds.has(details.tabId) ? true : void 0;
 			try {
 				const res = onApiHopComplete(apiHop, isIncog);
 				if (res instanceof Promise) res.catch(() => {});
@@ -1556,7 +1524,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 		const rawHeaders = toRawHeaders(raw);
 		let partial = captureMap.get(details.requestId);
 		if (!partial) {
-			const isIncog = incognitoTabIds.has(details.tabId);
+			const isIncog = incognitoTabIds.has(details.tabId) ? true : void 0;
 			partial = {
 				tabId: details.tabId,
 				url: redactUrlQueryParams(details.url),
@@ -1598,7 +1566,7 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 		};
 		captureMap.delete(details.requestId);
 		try {
-			const res = onHopComplete(details.tabId, hop, partial.isIncognito ?? false);
+			const res = onHopComplete(details.tabId, hop, partial.isIncognito);
 			if (res instanceof Promise) res.catch(() => {});
 		} catch {}
 	}, filter, extraInfoSpec);
@@ -1627,12 +1595,70 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 			redirectCount: 0,
 			generation: existing?.generation ?? getTabGeneration(details.tabId)
 		};
-		const isIncog = existing?.isIncognito ?? incognitoTabIds.has(details.tabId);
+		const isIncog = existing?.isIncognito ?? (incognitoTabIds.has(details.tabId) ? true : void 0);
 		captureMap.delete(details.requestId);
 		onHopComplete(details.tabId, hop, isIncog);
 	}, filter, extraInfoSpec);
 }
 //#endregion
-export { SessionStorage as C, settingsTransitionPipeline as D, resolveCookieOverlaps as E, LocalStorage as S, normalizeCookieList as T, tabGenerations as _, registerCaptureListeners as a, originAuthBaselines as b, hasAllSitesCoverage as c, reconcilePermissionsOnRemoved as d, reconcilePermissionsOnStartup as f, incrementTabGeneration as g, getTabGeneration as h, incognitoTabIds as i, isBroadGrant as l, isRestrictedUrl as m, clearInFlightCaptures as n, CapturePolicy as o, isModeCaptureAllowed as p, inFlightRequests as r, PermissionsService as s, captureMap as t, patternFromOrigin as u, hydrateFromSession as v, SettingsService as w, tabStates as x, initLifecycle as y };
+//#region src/background/lifecycle.ts
+/**
+* lifecycle.ts
+*
+* Manages periodic maintenance (via chrome.alarms) and restores
+* in-memory tab state from chrome.storage.session after an SW revival.
+*
+* MV3 service workers are terminated after inactivity. Correctness relies
+* entirely on persistent storage and session hydration—never keepalive alarms.
+*/
+/**
+* Primary in-memory store for per-tab security analysis state.
+* Keyed by Chrome tabId.  Persisted to chrome.storage.session so it
+* survives SW restarts; re-hydrated via hydrateFromSession().
+*/
+var tabStates = /* @__PURE__ */ new Map();
+/**
+* In-memory cache for origin pre/post auth baselines.
+* Persisted to chrome.storage.session so it survives SW restarts.
+*/
+var originAuthBaselines = /* @__PURE__ */ new Map();
+/**
+* Registers the periodic maintenance alarm and its listener.
+*
+* Runs periodic history pruning sweeps and cleans up expired data.
+* Never uses keepalive alarms.
+*/
+function initLifecycle() {
+	if (typeof chrome !== "undefined" && chrome.alarms !== void 0) {
+		if (typeof chrome.alarms.get === "function") chrome.alarms.get(MAINTENANCE_ALARM, (existingAlarm) => {
+			if (existingAlarm === void 0 || existingAlarm === null) chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 30 });
+		});
+		else chrome.alarms.create(MAINTENANCE_ALARM, { periodInMinutes: 30 });
+		if (chrome.alarms.onAlarm !== void 0 && typeof chrome.alarms.onAlarm.addListener === "function") chrome.alarms.onAlarm.addListener((alarm) => {
+			if (alarm.name === "maintenance") LocalStorage.pruneAllHistory();
+		});
+	}
+}
+/**
+* Loads all previously persisted TabState records from chrome.storage.session
+* into the in-memory {@link tabStates} map.
+*
+* Must be awaited before registering WebRequest listeners so that any
+* in-flight state from before the SW restart is available immediately.
+*/
+async function hydrateFromSession() {
+	const all = await SessionStorage.getAllTabStates();
+	for (const state of all) {
+		const existing = tabStates.get(state.tabId);
+		if (!existing || state.updatedAt > existing.updatedAt) tabStates.set(state.tabId, state);
+		if (state.navigationGeneration !== void 0 && state.navigationGeneration > 0) setTabGeneration(state.tabId, state.navigationGeneration);
+		if (state.isIncognito === true) incognitoTabIds.add(state.tabId);
+	}
+	const baselines = await SessionStorage.getAllAuthBaselines();
+	for (const [key, baseline] of baselines) if (!originAuthBaselines.has(key)) originAuthBaselines.set(key, baseline);
+	LocalStorage.pruneAllHistory();
+}
+//#endregion
+export { tabGenerations as C, normalizeCookieList as D, SettingsService as E, resolveCookieOverlaps as O, setTabGeneration as S, SessionStorage as T, isModeCaptureAllowed as _, captureMap as a, getTabGeneration as b, incognitoTabIds as c, PermissionsService as d, hasAllSitesCoverage as f, reconcilePermissionsOnStartup as g, reconcilePermissionsOnRemoved as h, tabStates as i, settingsTransitionPipeline as k, registerCaptureListeners as l, patternFromOrigin as m, initLifecycle as n, clearInFlightCaptures as o, isBroadGrant as p, originAuthBaselines as r, inFlightRequests as s, hydrateFromSession as t, CapturePolicy as u, isRestrictedUrl as v, LocalStorage as w, incrementTabGeneration as x, clearTabGenerations as y };
 
-//# sourceMappingURL=capture-Bm5xZSus.js.map
+//# sourceMappingURL=lifecycle-CKYjIEjs.js.map
