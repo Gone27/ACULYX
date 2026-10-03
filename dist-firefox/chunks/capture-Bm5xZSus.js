@@ -481,15 +481,22 @@ var SessionStorage = {
 		} catch {}
 		return results;
 	},
-	async getAuthBaseline(origin) {
+	getAuthBaselineKey(origin, tabId) {
+		if (typeof tabId === "number" && Number.isInteger(tabId) && tabId >= 0) return `${origin}#tab:${tabId}`;
+		return origin;
+	},
+	async getAuthBaseline(origin, tabId) {
 		if (!origin) return null;
-		const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+		const baselineKey = this.getAuthBaselineKey(origin, tabId);
+		const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
 		return (await chrome.storage.session.get(key))[key] ?? null;
 	},
-	async setAuthBaseline(origin, baseline) {
+	async setAuthBaseline(origin, baseline, tabId) {
 		if (!origin) return;
-		return storageMutex.runExclusive(`auth_baseline:${origin}`, async () => {
-			const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+		const resolvedTabId = tabId ?? baseline.tabId;
+		const baselineKey = this.getAuthBaselineKey(origin, resolvedTabId);
+		return storageMutex.runExclusive(`auth_baseline:${baselineKey}`, async () => {
+			const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
 			try {
 				await chrome.storage.session.set({ [key]: baseline });
 			} catch (err) {
@@ -498,12 +505,23 @@ var SessionStorage = {
 			}
 		});
 	},
+	async removeAuthBaseline(origin, tabId) {
+		if (!origin) return;
+		const baselineKey = this.getAuthBaselineKey(origin, tabId);
+		const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
+		try {
+			await chrome.storage.session.remove(key);
+		} catch (err) {
+			recordStorageFailure(err);
+			throw err;
+		}
+	},
 	async getAllAuthBaselines() {
 		const all = await chrome.storage.session.get(null);
 		const map = /* @__PURE__ */ new Map();
 		for (const [k, v] of Object.entries(all)) if (k.startsWith(STORAGE_KEYS.AUTH_BASELINE_PREFIX)) {
-			const origin = k.slice(STORAGE_KEYS.AUTH_BASELINE_PREFIX.length);
-			map.set(origin, v);
+			const baselineKey = k.slice(STORAGE_KEYS.AUTH_BASELINE_PREFIX.length);
+			map.set(baselineKey, v);
 		}
 		return map;
 	}
@@ -640,7 +658,12 @@ var LocalStorage = {
 				}
 				if (hostname && hostname !== apex) keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${hostname}`);
 				await chrome.storage.local.remove(keysToRemove);
-				if (typeof chrome !== "undefined" && chrome.storage?.session !== void 0) await chrome.storage.session.remove(`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`).catch(() => {});
+				if (typeof chrome !== "undefined" && chrome.storage?.session !== void 0) try {
+					const allSession = await chrome.storage.session.get(null);
+					const baselinePrefix = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+					const sessionKeysToRemove = Object.keys(allSession).filter((k) => k === baselinePrefix || k.startsWith(`${baselinePrefix}#tab:`));
+					if (sessionKeysToRemove.length > 0) await chrome.storage.session.remove(sessionKeysToRemove);
+				} catch {}
 			} catch (err) {
 				recordStorageFailure(err);
 				throw err;
@@ -843,7 +866,7 @@ async function hydrateFromSession() {
 		if (!existing || state.updatedAt > existing.updatedAt) tabStates.set(state.tabId, state);
 	}
 	const baselines = await SessionStorage.getAllAuthBaselines();
-	for (const [origin, baseline] of baselines) if (!originAuthBaselines.has(origin)) originAuthBaselines.set(origin, baseline);
+	for (const [key, baseline] of baselines) if (!originAuthBaselines.has(key)) originAuthBaselines.set(key, baseline);
 	LocalStorage.pruneAllHistory();
 }
 //#endregion
@@ -1612,4 +1635,4 @@ function registerCaptureListeners(onHopComplete, onApiHopComplete) {
 //#endregion
 export { SessionStorage as C, settingsTransitionPipeline as D, resolveCookieOverlaps as E, LocalStorage as S, normalizeCookieList as T, tabGenerations as _, registerCaptureListeners as a, originAuthBaselines as b, hasAllSitesCoverage as c, reconcilePermissionsOnRemoved as d, reconcilePermissionsOnStartup as f, incrementTabGeneration as g, getTabGeneration as h, incognitoTabIds as i, isBroadGrant as l, isRestrictedUrl as m, clearInFlightCaptures as n, CapturePolicy as o, isModeCaptureAllowed as p, inFlightRequests as r, PermissionsService as s, captureMap as t, patternFromOrigin as u, hydrateFromSession as v, SettingsService as w, tabStates as x, initLifecycle as y };
 
-//# sourceMappingURL=capture-DnbUjg5i.js.map
+//# sourceMappingURL=capture-Bm5xZSus.js.map

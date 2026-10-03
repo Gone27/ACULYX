@@ -87,9 +87,9 @@ export async function hydrateFromSession(): Promise<void> {
   }
 
   const baselines = await SessionStorage.getAllAuthBaselines();
-  for (const [origin, baseline] of baselines) {
-    if (!originAuthBaselines.has(origin)) {
-      originAuthBaselines.set(origin, baseline);
+  for (const [key, baseline] of baselines) {
+    if (!originAuthBaselines.has(key)) {
+      originAuthBaselines.set(key, baseline);
     }
   }
 

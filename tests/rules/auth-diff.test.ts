@@ -267,4 +267,219 @@ describe('Auth Posture Diff — checkAuthTransition', () => {
       globalThis.chrome = originalChrome;
     }
   });
+
+  it('sliding expiry updating expiresAt does not spam session_cookie_rotated_or_modified', () => {
+    const loggedInBaseline: AuthBaseline = {
+      origin,
+      cookies: [makeCookie({ name: 'session_id', httpOnly: true, session: false, expiresAt: 1700000000000 })],
+      findings: [makeFinding('HSTS-001')],
+      score: 70,
+      grade: 'B',
+      timestamp: Date.now() - 100000,
+      hasSensitiveCookie: true,
+      sensitiveCookieSignature: 'session_id|true|true|lax|false|persistent',
+      lastAuthEventTimestamp: Date.now() - 100000,
+    };
+
+    // Subsequent response refreshes the sliding expiration to a new timestamp
+    const refreshedCookies = [
+      makeCookie({ name: 'session_id', httpOnly: true, session: false, expiresAt: 1700000900000 }),
+    ];
+
+    const { isAuthEvent, record } = checkAuthTransition(
+      origin,
+      loggedInBaseline,
+      refreshedCookies,
+      [makeFinding('HSTS-001')],
+      70,
+      'B',
+    );
+
+    expect(isAuthEvent).toBe(false);
+    expect(record).toBeNull();
+  });
+
+  it('POST form submission refreshing existing session cookie does not trigger false login', () => {
+    const loggedInBaseline: AuthBaseline = {
+      origin,
+      cookies: [makeCookie({ name: 'session_id', httpOnly: true, session: true })],
+      findings: [makeFinding('HSTS-001')],
+      score: 70,
+      grade: 'B',
+      timestamp: Date.now() - 100000,
+      hasSensitiveCookie: true,
+      sensitiveCookieSignature: 'session_id|true|true|lax|false|session',
+      lastAuthEventTimestamp: Date.now() - 100000, // Cooldown elapsed
+    };
+
+    // Form submit had non-GET Set-Cookie, but identical session cookie (no change, no new cookie)
+    const sameCookies = [makeCookie({ name: 'session_id', httpOnly: true, session: true })];
+
+    const { isAuthEvent, record } = checkAuthTransition(
+      origin,
+      loggedInBaseline,
+      sameCookies,
+      [makeFinding('HSTS-001')],
+      70,
+      'B',
+      [],
+      [],
+      { hasNonGetSetCookie: true },
+    );
+
+    expect(isAuthEvent).toBe(false);
+    expect(record).toBeNull();
+  });
+
+  it('POST form submission within 60s cooldown is suppressed even if new sensitive cookie appears', () => {
+    const recentAuthTime = Date.now() - 15000; // 15 seconds ago (within 60s cooldown)
+    const loggedInBaseline: AuthBaseline = {
+      origin,
+      cookies: [makeCookie({ name: 'session_id', httpOnly: true, session: true })],
+      findings: [makeFinding('HSTS-001')],
+      score: 70,
+      grade: 'B',
+      timestamp: recentAuthTime,
+      hasSensitiveCookie: true,
+      sensitiveCookieSignature: 'session_id|true|true|lax|false|session',
+      lastAuthEventTimestamp: recentAuthTime,
+    };
+
+    // A POST form submission that also introduces user_token within cooldown
+    const updatedCookies = [
+      makeCookie({ name: 'session_id', httpOnly: true, session: true }),
+      makeCookie({ name: 'user_token', httpOnly: true, session: true }),
+    ];
+
+    const { isAuthEvent, record } = checkAuthTransition(
+      origin,
+      loggedInBaseline,
+      updatedCookies,
+      [makeFinding('HSTS-001')],
+      60,
+      'C',
+      [],
+      [],
+      { hasNonGetSetCookie: true },
+    );
+
+    expect(isAuthEvent).toBe(false);
+    expect(record).toBeNull();
+  });
+
+  it('POST form submission after cooldown with new sensitive cookie triggers auth diff', () => {
+    const oldAuthTime = Date.now() - 75000; // 75 seconds ago (> 60s cooldown)
+    const loggedInBaseline: AuthBaseline = {
+      origin,
+      cookies: [makeCookie({ name: 'session_id', httpOnly: true, session: true })],
+      findings: [makeFinding('HSTS-001')],
+      score: 70,
+      grade: 'B',
+      timestamp: oldAuthTime,
+      hasSensitiveCookie: true,
+      sensitiveCookieSignature: 'session_id|true|true|lax|false|session',
+      lastAuthEventTimestamp: oldAuthTime,
+    };
+
+    // User steps up auth or logs in to separate portal
+    const updatedCookies = [
+      makeCookie({ name: 'session_id', httpOnly: true, session: true }),
+      makeCookie({ name: 'step_up_token', httpOnly: true, session: true }),
+    ];
+
+    const { isAuthEvent, record } = checkAuthTransition(
+      origin,
+      loggedInBaseline,
+      updatedCookies,
+      [makeFinding('HSTS-001'), makeFinding('COOK-001', 'Missing secure', 'high')],
+      50,
+      'C',
+      [],
+      [],
+      { hasNonGetSetCookie: true },
+    );
+
+    expect(isAuthEvent).toBe(true);
+    expect(record).not.toBeNull();
+    expect(record?.triggerReason).toBe('post_request_session_cookie_issued');
+  });
+
+  it('maintains isolated baselines for two tabs on the same origin (M1)', async () => {
+    const { SessionStorage } = await import('../../src/shared/storage');
+
+    const storageMock: Record<string, unknown> = {};
+    const chromeMock = {
+      storage: {
+        session: {
+          get: (keys: string | string[] | null) => {
+            if (keys === null) return Promise.resolve(storageMock);
+            if (typeof keys === 'string') return Promise.resolve({ [keys]: storageMock[keys] });
+            const res: Record<string, unknown> = {};
+            for (const k of keys) res[k] = storageMock[k];
+            return Promise.resolve(res);
+          },
+          set: (items: Record<string, unknown>) => {
+            Object.assign(storageMock, items);
+            return Promise.resolve();
+          },
+          remove: (keys: string | string[]) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            for (const k of list) delete storageMock[k];
+            return Promise.resolve();
+          },
+        },
+      },
+    } as unknown as typeof chrome;
+
+    const originalChrome = globalThis.chrome;
+    globalThis.chrome = chromeMock;
+
+    try {
+      const originTest = 'https://portal.example.com';
+      const tab1Baseline: AuthBaseline = {
+        origin: originTest,
+        tabId: 101,
+        cookies: [makeCookie({ name: 'session_tab1', httpOnly: true, session: true })],
+        findings: [makeFinding('HSTS-001')],
+        score: 85,
+        grade: 'B',
+        timestamp: 1000,
+        hasSensitiveCookie: true,
+      };
+
+      const tab2Baseline: AuthBaseline = {
+        origin: originTest,
+        tabId: 102,
+        cookies: [],
+        findings: [makeFinding('HSTS-001'), makeFinding('CSP-001')],
+        score: 55,
+        grade: 'C',
+        timestamp: 2000,
+        hasSensitiveCookie: false,
+      };
+
+      // Set baselines for tab 101 and tab 102 on same origin
+      await SessionStorage.setAuthBaseline(originTest, tab1Baseline, 101);
+      await SessionStorage.setAuthBaseline(originTest, tab2Baseline, 102);
+
+      // Verify they do not overwrite each other
+      const fetchedTab1 = await SessionStorage.getAuthBaseline(originTest, 101);
+      const fetchedTab2 = await SessionStorage.getAuthBaseline(originTest, 102);
+
+      expect(fetchedTab1?.tabId).toBe(101);
+      expect(fetchedTab1?.hasSensitiveCookie).toBe(true);
+      expect(fetchedTab1?.score).toBe(85);
+
+      expect(fetchedTab2?.tabId).toBe(102);
+      expect(fetchedTab2?.hasSensitiveCookie).toBe(false);
+      expect(fetchedTab2?.score).toBe(55);
+
+      // Removing tab 101 baseline does not affect tab 102
+      await SessionStorage.removeAuthBaseline(originTest, 101);
+      expect(await SessionStorage.getAuthBaseline(originTest, 101)).toBeNull();
+      expect(await SessionStorage.getAuthBaseline(originTest, 102)).not.toBeNull();
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
 });

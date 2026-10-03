@@ -284,6 +284,7 @@ export interface AuthBaseline {
   timestamp: number;
   hasSensitiveCookie: boolean;
   sensitiveCookieSignature?: string | undefined;
+  lastAuthEventTimestamp?: number | undefined;
 }
 
 export interface AuthDiffFindingChange {

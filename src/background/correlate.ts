@@ -33,7 +33,12 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
   domainAttributePresent: boolean;
   domain: string | null;
   sameSiteNone: boolean;
+  sameSite: 'strict' | 'lax' | 'none' | '';
   secure: boolean;
+  httpOnly: boolean;
+  partitioned: boolean;
+  session: boolean;
+  expiresAt: number | null;
   isDeletion: boolean;
 } {
   const parts = setCookieHeader.split(';').map((part) => part.trim());
@@ -42,8 +47,13 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
   let domainAttributePresent = false;
   let domain: string | null = null;
   let sameSiteNone = false;
+  let sameSite: 'strict' | 'lax' | 'none' | '' = '';
   let secure = false;
+  let httpOnly = false;
+  let partitioned = false;
   let isDeletion = false;
+  let expiresAt: number | null = null;
+  let hasMaxAgeOrExpires = false;
 
   for (const attribute of parts.slice(1)) {
     const separator = attribute.indexOf('=');
@@ -58,24 +68,58 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
       domain = separator === -1 ? '' : attribute.slice(separator + 1).trim().replace(/^\./, '').toLowerCase();
     }
     if (attributeName === 'samesite' && separator !== -1) {
-      sameSiteNone = attribute.slice(separator + 1).trim().toLowerCase() === 'none';
+      const val = attribute.slice(separator + 1).trim().toLowerCase();
+      if (val === 'none') {
+        sameSiteNone = true;
+        sameSite = 'none';
+      } else if (val === 'lax') {
+        sameSite = 'lax';
+      } else if (val === 'strict') {
+        sameSite = 'strict';
+      }
     }
     if (attributeName === 'secure' && separator === -1) secure = true;
+    if (attributeName === 'httponly' && separator === -1) httpOnly = true;
+    if (attributeName === 'partitioned' && separator === -1) partitioned = true;
     if (attributeName === 'max-age' && separator !== -1) {
+      hasMaxAgeOrExpires = true;
       const maxAge = parseInt(attribute.slice(separator + 1).trim(), 10);
-      if (!isNaN(maxAge) && maxAge <= 0) {
-        isDeletion = true;
+      if (!isNaN(maxAge)) {
+        if (maxAge <= 0) {
+          isDeletion = true;
+        } else {
+          expiresAt = Date.now() + maxAge * 1000;
+        }
       }
     }
     if (attributeName === 'expires' && separator !== -1) {
+      hasMaxAgeOrExpires = true;
       const expTime = Date.parse(attribute.slice(separator + 1).trim());
-      if (!isNaN(expTime) && expTime <= Date.now()) {
-        isDeletion = true;
+      if (!isNaN(expTime)) {
+        if (expTime <= Date.now()) {
+          isDeletion = true;
+        } else if (expiresAt === null) {
+          expiresAt = expTime;
+        }
       }
     }
   }
 
-  return { name, path, domainAttributePresent, domain, sameSiteNone, secure, isDeletion };
+  const session = !hasMaxAgeOrExpires;
+  return {
+    name,
+    path,
+    domainAttributePresent,
+    domain,
+    sameSiteNone,
+    sameSite,
+    secure,
+    httpOnly,
+    partitioned,
+    session,
+    expiresAt,
+    isDeletion,
+  };
 }
 
 export const MAX_SET_COOKIES = 100;
@@ -86,22 +130,50 @@ export function findUnobservedCookieFindings(
   setCookieHeaders: string[],
   cookies: Array<{ name: string; path: string; domain: string }>,
   tabUrl: string,
+  hopUrl?: string,
 ): Finding[] {
   const boundedSetCookies = setCookieHeaders.slice(0, MAX_SET_COOKIES);
   const metadata = boundedSetCookies.map(parseCookieHeaderMetadata);
-  const url = (() => {
+  const pageUrl = (() => {
     try {
       return new URL(tabUrl);
     } catch {
       return null;
     }
   })();
-  if (url === null) return [];
+  if (pageUrl === null) return [];
+
+  const responseUrl = (() => {
+    if (hopUrl !== undefined && hopUrl.length > 0) {
+      try {
+        return new URL(hopUrl);
+      } catch {
+        // Fall back to pageUrl
+      }
+    }
+    return pageUrl;
+  })();
+
+  const pageHostname = pageUrl.hostname;
+  const responseHostname = responseUrl.hostname;
 
   const visibleNames = new Set(cookies.map((cookie) => cookie.name));
   const findings = metadata
     .filter((cookie) => cookie.name.length > 0 && !cookie.isDeletion && !visibleNames.has(cookie.name))
     .flatMap((cookie): Finding[] => {
+      const effectiveDomain = (cookie.domain !== null && cookie.domain.length > 0)
+        ? cookie.domain
+        : responseHostname;
+      const isThirdParty = isThirdPartyCookie(pageHostname, effectiveDomain);
+
+      // If this cookie was set by a third-party host and its Domain attribute applies to that host,
+      // it is naturally not in the URL-scoped jar of the top-level page, so do not falsely report as rejected.
+      const domainMatchesResponseHost = cookie.domain === null || cookie.domain === '' ||
+        responseHostname === cookie.domain || responseHostname.endsWith(`.${cookie.domain}`);
+      if (isThirdParty && domainMatchesResponseHost && responseHostname !== pageHostname) {
+        return [];
+      }
+
       const reasons: string[] = [];
       let likelyRejected = false;
       if (cookie.sameSiteNone && !cookie.secure) {
@@ -109,7 +181,7 @@ export function findUnobservedCookieFindings(
         likelyRejected = true;
       }
       if (cookie.domain !== null && cookie.domain.length > 0
-        && url.hostname !== cookie.domain && !url.hostname.endsWith(`.${cookie.domain}`)) {
+        && responseHostname !== cookie.domain && !responseHostname.endsWith(`.${cookie.domain}`)) {
         reasons.push('the Domain attribute does not match the response host');
         likelyRejected = true;
       }
@@ -120,7 +192,7 @@ export function findUnobservedCookieFindings(
 
       const pathDoesNotMatch = cookie.path !== null
         && cookie.path.startsWith('/')
-        && !cookiePathMatches(url.pathname, cookie.path);
+        && !cookiePathMatches(responseUrl.pathname, cookie.path);
       if (pathDoesNotMatch) {
         reasons.push(`the cookie Path (${cookie.path}) does not include the current page path`);
         if (!likelyRejected) return [];
@@ -142,7 +214,7 @@ export function findUnobservedCookieFindings(
         ].filter((part) => part.length > 0).join(', ')}`),
         recommendation: `Check whether ${reasons.join('; ')}. A name-only jar comparison cannot prove rejection if a same-name cookie existed before this response.`,
         reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie',
-        sourceUrl: url.href,
+        sourceUrl: responseUrl.href,
       }];
     });
 
@@ -245,6 +317,7 @@ export async function correlateCookies(
   generation?: number,
   isCurrentGeneration?: (tabId: number, generation: number) => boolean,
   hopId?: string,
+  hopUrl?: string,
 ): Promise<{ records: CookieRecord[]; findings: Finding[]; discarded?: boolean }> {
   // Pre-query generation check: discard if generation already superseded
   if (
@@ -257,7 +330,7 @@ export async function correlateCookies(
 
   const dedupKey = hopId !== undefined && hopId.length > 0
     ? `${tabId}:${tabUrl}:${generation ?? 0}:${hopId}`
-    : `${tabId}:${tabUrl}:${generation ?? 0}`;
+    : `${tabId}:${tabUrl}:${generation ?? 0}:${hopUrl ?? ''}`;
   const existing = inFlightCorrelations.get(dedupKey);
   if (existing) {
     return existing;
@@ -292,13 +365,22 @@ export async function correlateCookies(
     }
 
     // ------------------------------------------------------------------
-    // 3. Derive page hostname for third-party detection.
+    // 3. Derive page & hop hostnames for third-party detection.
     // ------------------------------------------------------------------
-    let pageHostname: string;
+    let pageHostname = '';
     try {
       pageHostname = new URL(tabUrl).hostname;
     } catch {
       pageHostname = '';
+    }
+
+    let hopHostname = '';
+    if (hopUrl !== undefined && hopUrl.length > 0) {
+      try {
+        hopHostname = new URL(hopUrl).hostname;
+      } catch {
+        hopHostname = '';
+      }
     }
 
     // ------------------------------------------------------------------
@@ -315,7 +397,11 @@ export async function correlateCookies(
         const matchingPath = matchingHeaders.find((item) => item.path === cookie.path);
         const headerMatch = matchingPath ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : undefined);
 
-        const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
+        // Derive target domain: header Domain attribute if present, else cookie.domain from jar
+        const targetDomain = (headerMatch?.domainAttributePresent === true && headerMatch.domain !== null && headerMatch.domain.length > 0)
+          ? headerMatch.domain
+          : cookie.domain;
+        const thirdParty = isThirdPartyCookie(pageHostname, targetDomain);
 
         const partitioned =
           (cookie as chrome.cookies.Cookie & { partitionKey?: unknown })
@@ -346,9 +432,43 @@ export async function correlateCookies(
       },
     );
 
+    // ------------------------------------------------------------------
+    // 5. Derive third-party cookies from Set-Cookie headers not in url-scoped jar.
+    // ------------------------------------------------------------------
+    const liveNames = new Set(boundedLiveCookies.map((cookie) => cookie.name));
+    const thirdPartyRecordsFromHeaders: CookieRecord[] = [];
+    const fallbackHost = hopHostname.length > 0 ? hopHostname : pageHostname;
+    for (const header of headerMetadata) {
+      if (header.name.length === 0 || header.isDeletion || liveNames.has(header.name)) {
+        continue;
+      }
+      const effectiveDomain = (header.domainAttributePresent && header.domain !== null && header.domain.length > 0)
+        ? header.domain
+        : fallbackHost;
+      const isThirdParty = isThirdPartyCookie(pageHostname, effectiveDomain);
+      if (isThirdParty) {
+        thirdPartyRecordsFromHeaders.push({
+          name: header.name,
+          domain: effectiveDomain,
+          domainAttributePresent: header.domainAttributePresent,
+          path: header.path ?? '/',
+          secure: header.secure,
+          httpOnly: header.httpOnly,
+          sameSite: header.sameSite,
+          session: header.session,
+          expiresAt: header.expiresAt,
+          partitioned: header.partitioned,
+          setByJs: false,
+          isThirdParty: true,
+        });
+      }
+    }
+
+    const allRecords: CookieRecord[] = [...records, ...thirdPartyRecordsFromHeaders].slice(0, MAX_COOKIE_RECORDS);
+
     return {
-      records,
-      findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl),
+      records: allRecords,
+      findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl, hopUrl),
     };
   })();
 

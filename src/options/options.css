@@ -39,7 +39,7 @@
   border-bottom: 1px solid var(--sc-border);
 }
 .danger-zone {
-  border-color: rgba(229, 57, 53, 0.3);
+  border-color: var(--sc-danger-border);
 }
 .danger-label {
   color: var(--sc-critical);
@@ -54,7 +54,7 @@
   font-size: 0.82rem;
 }
 .btn-danger:hover {
-  background: rgba(229, 57, 53, 0.12);
+  background: var(--sc-danger-bg);
 }
 .btn-danger-sm {
   background: transparent;
@@ -219,7 +219,7 @@ body {
   grid-row: 1 / 3;
   grid-column: 1;
   align-self: center;
-  accent-color: #2471a3;
+  accent-color: var(--sc-accent-options);
   width: 16px;
   height: 16px;
   cursor: pointer;
@@ -243,7 +243,7 @@ body {
 
 /* ── Conflict banner ────────────────────────────────────────── */
 .conflict-banner {
-  background: rgba(243, 156, 18, 0.12);
+  background: var(--sc-warn-bg);
   border: 1px solid var(--color-medium);
   border-radius: var(--radius);
   padding: 12px 14px;
@@ -314,7 +314,7 @@ body {
 .btn-remove:hover,
 .btn-remove:focus {
   background: var(--color-high);
-  color: #fff;
+  color: var(--sc-text-on-pill);
   outline: none;
 }
 
@@ -349,7 +349,7 @@ body {
 }
 
 .checkbox-label input[type="checkbox"] {
-  accent-color: #2471a3;
+  accent-color: var(--sc-accent-options);
   width: 15px;
   height: 15px;
   cursor: pointer;
@@ -363,14 +363,14 @@ body {
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--sc-text-on-pill);
   letter-spacing: 0.03em;
   user-select: none;
 }
 
 .sev-critical { background: var(--color-critical); }
 .sev-high     { background: var(--color-high); }
-.sev-medium   { background: var(--color-medium); color: #1a1a1a; }
+.sev-medium   { background: var(--color-medium); color: var(--sc-text-on-pill-dark); }
 .sev-low      { background: var(--color-low); }
 .sev-info     { background: var(--color-info); }
 .sev-pass     { background: var(--color-pass); }
@@ -400,7 +400,7 @@ body {
 
 .number-input:focus {
   outline: none;
-  border-color: #2471a3;
+  border-color: var(--sc-accent-options);
 }
 
 .field-hint {
@@ -410,7 +410,7 @@ body {
 
 /* ── Privacy link ───────────────────────────────────────────── */
 .text-link {
-  color: #5dade2;
+  color: var(--sc-accent-options-light);
   text-decoration: none;
 }
 
@@ -430,9 +430,9 @@ body {
 
 .btn-primary {
   padding: 10px 28px;
-  background: #0f3460;
-  color: #fff;
-  border: 1px solid #1a5276;
+  background: var(--sc-btn-primary-bg);
+  color: var(--sc-text-on-pill);
+  border: 1px solid var(--sc-btn-primary-border);
   border-radius: var(--radius);
   font-size: 14px;
   font-weight: 600;
@@ -443,13 +443,13 @@ body {
 
 .btn-primary:hover,
 .btn-primary:focus {
-  background: #154882;
-  border-color: #2471a3;
+  background: var(--sc-btn-primary-hover-bg);
+  border-color: var(--sc-btn-primary-hover-border);
   outline: none;
 }
 
 .btn-primary:active {
-  background: #0a2647;
+  background: var(--sc-btn-primary-active-bg);
 }
 
 .btn-primary:disabled {
@@ -521,5 +521,5 @@ body {
 
 .textarea-input:focus {
   outline: none;
-  border-color: #2471a3;
+  border-color: var(--sc-accent-options);
 }

@@ -1,5 +1,5 @@
 import { C as RESTRICTED_SCHEMES, E as SIDEPANEL_PORT_NAME, S as POPUP_PORT_NAME, _ as sanitizeEvidence, a as registrableDomain, b as GRADE_THRESHOLDS, c as hasCspBypassProtection, f as originFromUrl, i as checkSubdomainTrust, n as portSend, o as checkDuplicateHeaders, p as parseCspDirectives, s as extractSetCookieHeaders, t as PortRegistry, u as isSensitiveCookie, v as BADGE_COLORS, w as SCORE_VERSION, y as DEFAULT_SETTINGS } from "./messaging-BQwzB0xT.js";
-import { C as SessionStorage, D as settingsTransitionPipeline, S as LocalStorage, _ as tabGenerations, a as registerCaptureListeners, b as originAuthBaselines, c as hasAllSitesCoverage, d as reconcilePermissionsOnRemoved, f as reconcilePermissionsOnStartup, g as incrementTabGeneration, h as getTabGeneration, i as incognitoTabIds, l as isBroadGrant, m as isRestrictedUrl$1, n as clearInFlightCaptures, o as CapturePolicy, p as isModeCaptureAllowed, r as inFlightRequests, t as captureMap, v as hydrateFromSession, w as SettingsService, x as tabStates, y as initLifecycle } from "./capture-DnbUjg5i.js";
+import { C as SessionStorage, D as settingsTransitionPipeline, S as LocalStorage, _ as tabGenerations, a as registerCaptureListeners, b as originAuthBaselines, c as hasAllSitesCoverage, d as reconcilePermissionsOnRemoved, f as reconcilePermissionsOnStartup, g as incrementTabGeneration, h as getTabGeneration, i as incognitoTabIds, l as isBroadGrant, m as isRestrictedUrl$1, n as clearInFlightCaptures, o as CapturePolicy, p as isModeCaptureAllowed, r as inFlightRequests, t as captureMap, v as hydrateFromSession, w as SettingsService, x as tabStates, y as initLifecycle } from "./capture-Bm5xZSus.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -21,8 +21,13 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 	let domainAttributePresent = false;
 	let domain = null;
 	let sameSiteNone = false;
+	let sameSite = "";
 	let secure = false;
+	let httpOnly = false;
+	let partitioned = false;
 	let isDeletion = false;
+	let expiresAt = null;
+	let hasMaxAgeOrExpires = false;
 	for (const attribute of parts.slice(1)) {
 		const separator = attribute.indexOf("=");
 		const attributeName = (separator === -1 ? attribute : attribute.slice(0, separator)).trim().toLowerCase();
@@ -31,15 +36,32 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 			domainAttributePresent = true;
 			domain = separator === -1 ? "" : attribute.slice(separator + 1).trim().replace(/^\./, "").toLowerCase();
 		}
-		if (attributeName === "samesite" && separator !== -1) sameSiteNone = attribute.slice(separator + 1).trim().toLowerCase() === "none";
+		if (attributeName === "samesite" && separator !== -1) {
+			const val = attribute.slice(separator + 1).trim().toLowerCase();
+			if (val === "none") {
+				sameSiteNone = true;
+				sameSite = "none";
+			} else if (val === "lax") sameSite = "lax";
+			else if (val === "strict") sameSite = "strict";
+		}
 		if (attributeName === "secure" && separator === -1) secure = true;
+		if (attributeName === "httponly" && separator === -1) httpOnly = true;
+		if (attributeName === "partitioned" && separator === -1) partitioned = true;
 		if (attributeName === "max-age" && separator !== -1) {
+			hasMaxAgeOrExpires = true;
 			const maxAge = parseInt(attribute.slice(separator + 1).trim(), 10);
-			if (!isNaN(maxAge) && maxAge <= 0) isDeletion = true;
+			if (!isNaN(maxAge)) {
+				if (maxAge <= 0) isDeletion = true;
+				else expiresAt = Date.now() + maxAge * 1e3;
+			}
 		}
 		if (attributeName === "expires" && separator !== -1) {
+			hasMaxAgeOrExpires = true;
 			const expTime = Date.parse(attribute.slice(separator + 1).trim());
-			if (!isNaN(expTime) && expTime <= Date.now()) isDeletion = true;
+			if (!isNaN(expTime)) {
+				if (expTime <= Date.now()) isDeletion = true;
+				else if (expiresAt === null) expiresAt = expTime;
+			}
 		}
 	}
 	return {
@@ -48,29 +70,46 @@ function parseCookieHeaderMetadata(setCookieHeader) {
 		domainAttributePresent,
 		domain,
 		sameSiteNone,
+		sameSite,
 		secure,
+		httpOnly,
+		partitioned,
+		session: !hasMaxAgeOrExpires,
+		expiresAt,
 		isDeletion
 	};
 }
-function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
+function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl, hopUrl) {
 	const metadata = setCookieHeaders.slice(0, 100).map(parseCookieHeaderMetadata);
-	const url = (() => {
+	const pageUrl = (() => {
 		try {
 			return new URL(tabUrl);
 		} catch {
 			return null;
 		}
 	})();
-	if (url === null) return [];
+	if (pageUrl === null) return [];
+	const responseUrl = (() => {
+		if (hopUrl !== void 0 && hopUrl.length > 0) try {
+			return new URL(hopUrl);
+		} catch {}
+		return pageUrl;
+	})();
+	const pageHostname = pageUrl.hostname;
+	const responseHostname = responseUrl.hostname;
 	const visibleNames = new Set(cookies.map((cookie) => cookie.name));
 	return metadata.filter((cookie) => cookie.name.length > 0 && !cookie.isDeletion && !visibleNames.has(cookie.name)).flatMap((cookie) => {
+		const effectiveDomain = cookie.domain !== null && cookie.domain.length > 0 ? cookie.domain : responseHostname;
+		const isThirdParty = isThirdPartyCookie(pageHostname, effectiveDomain);
+		const domainMatchesResponseHost = cookie.domain === null || cookie.domain === "" || responseHostname === cookie.domain || responseHostname.endsWith(`.${cookie.domain}`);
+		if (isThirdParty && domainMatchesResponseHost && responseHostname !== pageHostname) return [];
 		const reasons = [];
 		let likelyRejected = false;
 		if (cookie.sameSiteNone && !cookie.secure) {
 			reasons.push("SameSite=None requires Secure in modern browsers");
 			likelyRejected = true;
 		}
-		if (cookie.domain !== null && cookie.domain.length > 0 && url.hostname !== cookie.domain && !url.hostname.endsWith(`.${cookie.domain}`)) {
+		if (cookie.domain !== null && cookie.domain.length > 0 && responseHostname !== cookie.domain && !responseHostname.endsWith(`.${cookie.domain}`)) {
 			reasons.push("the Domain attribute does not match the response host");
 			likelyRejected = true;
 		}
@@ -78,7 +117,7 @@ function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
 			reasons.push("the Domain attribute is empty or malformed");
 			likelyRejected = true;
 		}
-		if (cookie.path !== null && cookie.path.startsWith("/") && !cookiePathMatches(url.pathname, cookie.path)) {
+		if (cookie.path !== null && cookie.path.startsWith("/") && !cookiePathMatches(responseUrl.pathname, cookie.path)) {
 			reasons.push(`the cookie Path (${cookie.path}) does not include the current page path`);
 			if (!likelyRejected) return [];
 		}
@@ -96,7 +135,7 @@ function findUnobservedCookieFindings(setCookieHeaders, cookies, tabUrl) {
 			].filter((part) => part.length > 0).join(", ")}`),
 			recommendation: `Check whether ${reasons.join("; ")}. A name-only jar comparison cannot prove rejection if a same-name cookie existed before this response.`,
 			reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie",
-			sourceUrl: url.href
+			sourceUrl: responseUrl.href
 		}];
 	}).slice(0, 50);
 }
@@ -159,13 +198,13 @@ var MAX_IN_FLIGHT_CORRELATIONS = 50;
 * @param isCurrentGeneration - Optional callback verifying whether generation is still current.
 * @returns                   Array of {@link CookieRecord} metadata objects and findings.
 */
-async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isCurrentGeneration, hopId) {
+async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isCurrentGeneration, hopId, hopUrl) {
 	if (generation !== void 0 && isCurrentGeneration !== void 0 && !isCurrentGeneration(tabId, generation)) return {
 		records: [],
 		findings: [],
 		discarded: true
 	};
-	const dedupKey = hopId !== void 0 && hopId.length > 0 ? `${tabId}:${tabUrl}:${generation ?? 0}:${hopId}` : `${tabId}:${tabUrl}:${generation ?? 0}`;
+	const dedupKey = hopId !== void 0 && hopId.length > 0 ? `${tabId}:${tabUrl}:${generation ?? 0}:${hopId}` : `${tabId}:${tabUrl}:${generation ?? 0}:${hopUrl ?? ""}`;
 	const existing = inFlightCorrelations.get(dedupKey);
 	if (existing) return existing;
 	const correlationPromise = (async () => {
@@ -186,37 +225,66 @@ async function correlateCookies(tabId, tabUrl, setCookieHeaders, generation, isC
 			findings: [],
 			discarded: true
 		};
-		let pageHostname;
+		let pageHostname = "";
 		try {
 			pageHostname = new URL(tabUrl).hostname;
 		} catch {
 			pageHostname = "";
 		}
+		let hopHostname = "";
+		if (hopUrl !== void 0 && hopUrl.length > 0) try {
+			hopHostname = new URL(hopUrl).hostname;
+		} catch {
+			hopHostname = "";
+		}
 		const boundedLiveCookies = urlScopedCookies.slice(0, 100);
+		const records = boundedLiveCookies.map((cookie) => {
+			const setByJs = headerSetNames.has(cookie.name) ? false : null;
+			const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
+			const headerMatch = matchingHeaders.find((item) => item.path === cookie.path) ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : void 0);
+			const targetDomain = headerMatch?.domainAttributePresent === true && headerMatch.domain !== null && headerMatch.domain.length > 0 ? headerMatch.domain : cookie.domain;
+			const thirdParty = isThirdPartyCookie(pageHostname, targetDomain);
+			const partitioned = cookie.partitionKey != null;
+			const expiresAt = cookie.session || cookie.expirationDate == null || cookie.expirationDate <= 0 ? null : Math.round(cookie.expirationDate) * 1e3;
+			return {
+				name: cookie.name,
+				domain: cookie.domain,
+				domainAttributePresent: setByJs === null ? null : headerMatch?.domainAttributePresent ?? false,
+				path: cookie.path,
+				secure: cookie.secure,
+				httpOnly: cookie.httpOnly,
+				sameSite: mapSameSite(cookie.sameSite),
+				session: cookie.session,
+				expiresAt,
+				partitioned,
+				setByJs,
+				isThirdParty: thirdParty
+			};
+		});
+		const liveNames = new Set(boundedLiveCookies.map((cookie) => cookie.name));
+		const thirdPartyRecordsFromHeaders = [];
+		const fallbackHost = hopHostname.length > 0 ? hopHostname : pageHostname;
+		for (const header of headerMetadata) {
+			if (header.name.length === 0 || header.isDeletion || liveNames.has(header.name)) continue;
+			const effectiveDomain = header.domainAttributePresent && header.domain !== null && header.domain.length > 0 ? header.domain : fallbackHost;
+			if (isThirdPartyCookie(pageHostname, effectiveDomain)) thirdPartyRecordsFromHeaders.push({
+				name: header.name,
+				domain: effectiveDomain,
+				domainAttributePresent: header.domainAttributePresent,
+				path: header.path ?? "/",
+				secure: header.secure,
+				httpOnly: header.httpOnly,
+				sameSite: header.sameSite,
+				session: header.session,
+				expiresAt: header.expiresAt,
+				partitioned: header.partitioned,
+				setByJs: false,
+				isThirdParty: true
+			});
+		}
 		return {
-			records: boundedLiveCookies.map((cookie) => {
-				const setByJs = headerSetNames.has(cookie.name) ? false : null;
-				const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
-				const headerMatch = matchingHeaders.find((item) => item.path === cookie.path) ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : void 0);
-				const thirdParty = isThirdPartyCookie(pageHostname, cookie.domain);
-				const partitioned = cookie.partitionKey != null;
-				const expiresAt = cookie.session || cookie.expirationDate == null || cookie.expirationDate <= 0 ? null : Math.round(cookie.expirationDate) * 1e3;
-				return {
-					name: cookie.name,
-					domain: cookie.domain,
-					domainAttributePresent: setByJs === null ? null : headerMatch?.domainAttributePresent ?? false,
-					path: cookie.path,
-					secure: cookie.secure,
-					httpOnly: cookie.httpOnly,
-					sameSite: mapSameSite(cookie.sameSite),
-					session: cookie.session,
-					expiresAt,
-					partitioned,
-					setByJs,
-					isThirdParty: thirdParty
-				};
-			}),
-			findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl)
+			records: [...records, ...thirdPartyRecordsFromHeaders].slice(0, 100),
+			findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl, hopUrl)
 		};
 	})();
 	if (inFlightCorrelations.size < MAX_IN_FLIGHT_CORRELATIONS) inFlightCorrelations.set(dedupKey, correlationPromise);
@@ -3154,12 +3222,13 @@ function getSensitiveAuthCookies(cookies, alwaysSensitive = [], alwaysIgnore = [
 	});
 }
 /**
-* Computes a deterministic signature of sensitive cookie metadata (names, flags, expiry).
+* Computes a deterministic signature of sensitive cookie metadata (names, flags, session vs persistent).
+* Uses session vs persistent rather than raw expiresAt timestamp to prevent sliding-expiry session spam.
 * Allows detecting token rotation, flag upgrades/downgrades, or new tokens even when
 * a session cookie was already present.
 */
 function computeSensitiveCookiesSignature(cookies, alwaysSensitive = [], alwaysIgnore = []) {
-	return getSensitiveAuthCookies(cookies, alwaysSensitive, alwaysIgnore).map((c) => `${c.name}|${c.httpOnly}|${c.secure}|${c.sameSite}|${c.partitioned}|${c.expiresAt ?? "session"}`).sort().join(";;");
+	return getSensitiveAuthCookies(cookies, alwaysSensitive, alwaysIgnore).map((c) => `${c.name}|${c.httpOnly}|${c.secure}|${c.sameSite}|${c.partitioned}|${c.session ? "session" : "persistent"}`).sort().join(";;");
 }
 /**
 * Computes which findings were added, removed, or modified between pre-auth and post-auth states.
@@ -3196,10 +3265,11 @@ function computeFindingChanges(pre, post) {
 * Evaluates whether an origin/tab transition represents a login event.
 * Detects:
 * 1. Transition from pre-auth (no sensitive session cookie) to post-auth (sensitive session cookie).
-* 2. Sensitive cookie reissued via Set-Cookie on main-frame hop after non-GET request.
-* 3. Sensitive cookie rotation or flag/expiry changes when already in session.
+* 2. Sensitive cookie reissued via Set-Cookie on main-frame hop after non-GET request (subject to cooldown & change check).
+* 3. Sensitive cookie rotation or flag changes when already in session (subject to cooldown).
 */
 function checkAuthTransition(origin, baseline, currentCookies, currentFindings, currentScore, currentGrade, alwaysSensitive = [], alwaysIgnore = [], context) {
+	const now = Date.now();
 	const authCookie = detectSensitiveAuthCookie(currentCookies, alwaysSensitive, alwaysIgnore);
 	const hasAuthNow = authCookie !== null;
 	const currentSig = computeSensitiveCookiesSignature(currentCookies, alwaysSensitive, alwaysIgnore);
@@ -3212,30 +3282,40 @@ function checkAuthTransition(origin, baseline, currentCookies, currentFindings, 
 		findings: compactCurrentFindings,
 		score: currentScore,
 		grade: currentGrade,
-		timestamp: Date.now(),
+		timestamp: now,
 		hasSensitiveCookie: hasAuthNow,
-		sensitiveCookieSignature: currentSig
+		sensitiveCookieSignature: currentSig,
+		lastAuthEventTimestamp: baseline?.lastAuthEventTimestamp
 	};
 	if (!baseline) return {
 		isAuthEvent: false,
 		record: null,
 		newBaseline: currentBaseline
 	};
+	const isWithinCooldown = baseline.lastAuthEventTimestamp !== void 0 && now - baseline.lastAuthEventTimestamp < 6e4;
+	const baselineSensitiveCookies = getSensitiveAuthCookies(baseline.cookies, alwaysSensitive, alwaysIgnore);
+	const baselineSensitiveNames = new Set(baselineSensitiveCookies.map((c) => c.name));
+	const hasNewSensitiveCookie = getSensitiveAuthCookies(currentCookies, alwaysSensitive, alwaysIgnore).some((c) => !baselineSensitiveNames.has(c.name));
+	const signatureChanged = baseline.sensitiveCookieSignature !== void 0 && currentSig !== "" && baseline.sensitiveCookieSignature !== currentSig;
+	const isNewlyIssuedOrChanged = hasNewSensitiveCookie || signatureChanged;
 	let isAuthEvent = false;
 	let triggerReason;
 	if (!baseline.hasSensitiveCookie && hasAuthNow) {
 		isAuthEvent = true;
 		triggerReason = "new_session_cookie";
 	} else if (baseline.hasSensitiveCookie && hasAuthNow) {
-		if (context?.hasNonGetSetCookie === true) {
-			isAuthEvent = true;
-			triggerReason = "post_request_session_cookie_issued";
-		} else if (baseline.sensitiveCookieSignature !== void 0 && currentSig !== "" && baseline.sensitiveCookieSignature !== currentSig) {
-			isAuthEvent = true;
-			triggerReason = "session_cookie_rotated_or_modified";
+		if (!isWithinCooldown && isNewlyIssuedOrChanged) {
+			if (context?.hasNonGetSetCookie === true) {
+				isAuthEvent = true;
+				triggerReason = "post_request_session_cookie_issued";
+			} else if (signatureChanged) {
+				isAuthEvent = true;
+				triggerReason = "session_cookie_rotated_or_modified";
+			}
 		}
 	}
 	if (isAuthEvent && authCookie !== null) {
+		currentBaseline.lastAuthEventTimestamp = now;
 		const preScore = baseline.score;
 		const postScore = currentScore;
 		const scoreDelta = postScore - preScore;
@@ -3245,7 +3325,7 @@ function checkAuthTransition(origin, baseline, currentCookies, currentFindings, 
 			record: {
 				origin,
 				tabId: context?.tabId ?? baseline.tabId,
-				timestamp: Date.now(),
+				timestamp: now,
 				triggeredByCookie: authCookie.name,
 				triggerReason,
 				preAuthScore: preScore,
@@ -3279,8 +3359,9 @@ function checkAuthTransition(origin, baseline, currentCookies, currentFindings, 
 			findings: compactCurrentFindings,
 			score: currentScore,
 			grade: currentGrade,
-			timestamp: Date.now(),
-			sensitiveCookieSignature: currentSig
+			timestamp: now,
+			sensitiveCookieSignature: currentSig,
+			lastAuthEventTimestamp: baseline.lastAuthEventTimestamp
 		}
 	};
 }
@@ -3770,14 +3851,15 @@ function recomputeTabState(tabId, state) {
 			score: state.score,
 			grade: state.grade
 		});
-		const baseline = originAuthBaselines.get(state.origin);
+		const baselineKey = SessionStorage.getAuthBaselineKey(state.origin, tabId);
+		const baseline = originAuthBaselines.get(baselineKey);
 		const { isAuthEvent, record, newBaseline } = checkAuthTransition(state.origin, baseline, state.cookies, state.findings, state.score, state.grade, currentSettings.sensitiveCookieNames, currentSettings.ignoredCookieNames, {
 			tabId,
 			url: state.url,
 			hasNonGetSetCookie: state.hops.some((h) => h.status !== 0 && h.rawHeaders.some((r) => r.name.toLowerCase() === "set-cookie"))
 		});
-		originAuthBaselines.set(state.origin, newBaseline);
-		if (!isAuthBaselineEquivalent(baseline, newBaseline)) SessionStorage.setAuthBaseline(state.origin, newBaseline);
+		originAuthBaselines.set(baselineKey, newBaseline);
+		if (!isAuthBaselineEquivalent(baseline, newBaseline)) SessionStorage.setAuthBaseline(state.origin, newBaseline, tabId);
 		if (isAuthEvent && record !== null) LocalStorage.recordAuthDiff(state.origin, record);
 		try {
 			const hostname = new URL(state.origin).hostname;
@@ -4042,11 +4124,18 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 	writeBatcher.flushNow(tabId);
 	tabGenerations.delete(tabId);
 	tabActionQueue.clearTab(tabId);
+	const tabOrigin = tabStates.get(tabId)?.origin;
 	tabStates.delete(tabId);
 	pendingServiceWorkerReports.delete(tabId);
 	pendingMetaCspReports.delete(tabId);
 	portRegistry.unregisterTab(tabId);
 	badgeTrackedTabs.delete(tabId);
+	if (tabOrigin !== void 0 && tabOrigin.length > 0) {
+		const baselineKey = SessionStorage.getAuthBaselineKey(tabOrigin, tabId);
+		originAuthBaselines.delete(baselineKey);
+		SessionStorage.removeAuthBaseline(tabOrigin, tabId).catch(() => void 0);
+	}
+	for (const [key] of originAuthBaselines) if (key.endsWith(`#tab:${tabId}`)) originAuthBaselines.delete(key);
 	for (const [requestId, partial] of captureMap.entries()) if (partial.tabId === tabId) captureMap.delete(requestId);
 	SessionStorage.removeTabState(tabId).catch(() => void 0);
 	broadcastCoalescer.clear(tabId);
@@ -4549,4 +4638,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, getTabGeneration, incrementTabGeneration, isDuplicateEvent, pruneTransientStructures, sessionHydrationReady, settingsReady, startupReady, tabActionQueue, tabGenerations };
 
-//# sourceMappingURL=index.ts-CSq3VS5F.js.map
+//# sourceMappingURL=index.ts-ByoIdtB3.js.map

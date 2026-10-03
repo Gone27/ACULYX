@@ -92,4 +92,68 @@ describe('Set-Cookie jar correlation diagnostics', () => {
     );
     expect(findings).toHaveLength(0);
   });
+
+  it('does not report third-party cookies from third-party hop responses as COOKIE-REJECTED (M9)', () => {
+    const findings = findUnobservedCookieFindings(
+      ['tracker_id=123; Domain=tracker.org; Path=/; Secure; SameSite=None'],
+      [],
+      'https://app.example.com/',
+      'https://api.tracker.org/event',
+    );
+    expect(findings).toHaveLength(0);
+  });
+
+  it('derives third-party cookie records from hop Set-Cookie headers (M9)', async () => {
+    const { correlateCookies } = await import('../../src/background/correlate');
+
+    const originalChrome = globalThis.chrome;
+    globalThis.chrome = {
+      cookies: {
+        getAll: () => Promise.resolve([
+          {
+            name: 'first_party_sess',
+            domain: 'app.example.com',
+            path: '/',
+            secure: true,
+            httpOnly: true,
+            sameSite: 'lax',
+            session: true,
+            hostOnly: true,
+            storeId: '0',
+            value: 'REDACTED',
+          },
+        ]),
+      },
+    } as unknown as typeof chrome;
+
+    try {
+      const result = await correlateCookies(
+        1,
+        'https://app.example.com/',
+        [
+          'first_party_sess=val; Path=/; Secure; HttpOnly',
+          'external_tracker=tid_999; Domain=analytics.net; Path=/; Secure; SameSite=None',
+        ],
+        1,
+        () => true,
+        'req-1',
+        'https://sub.analytics.net/collect',
+      );
+
+      const firstParty = result.records.find((r) => r.name === 'first_party_sess');
+      const thirdParty = result.records.find((r) => r.name === 'external_tracker');
+
+      expect(firstParty).toBeDefined();
+      expect(firstParty?.isThirdParty).toBe(false);
+
+      expect(thirdParty).toBeDefined();
+      expect(thirdParty?.isThirdParty).toBe(true);
+      expect(thirdParty?.domain).toBe('analytics.net');
+      expect(thirdParty?.sameSite).toBe('none');
+      expect(thirdParty?.secure).toBe(true);
+      expect((thirdParty as unknown as { value?: string }).value).toBeUndefined();
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
 });

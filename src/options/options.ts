@@ -152,16 +152,16 @@ async function loadAndPopulate(): Promise<void> {
   // ── History ──────────────────────────────────────────────────
   retainDaysInput.value = String(settings.retainHistoryDays);
   maxHistoryInput.value = String(settings.maxHistoryPerOrigin ?? 10);
-  alwaysSensitiveInput.value = (settings.sensitiveCookieNames ?? settings.alwaysSensitiveCookies ?? []).join(', ');
-  alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(', ');
-  proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
+  alwaysSensitiveInput.value = settings.sensitiveCookieNames.join(', ');
+  alwaysIgnoreInput.value = settings.ignoredCookieNames.join(', ');
+  proModeToggle.checked = Boolean(settings.evaluationMode);
 
   // ── Allowlist: load authoritative granted origins from chrome.permissions ──
   try {
     const granted = await PermissionsService.getAllGrantedOrigins();
     workingOrigins = granted;
   } catch {
-    workingOrigins = [...(settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? [])];
+    workingOrigins = [];
   }
   renderAllowlist();
   await checkAndRenderBroadConflict();
@@ -332,6 +332,7 @@ function buildAllowlistItem(origin: string): HTMLLIElement {
   purgeBtn.className = 'btn-purge';
   purgeBtn.textContent = 'Delete stored data';
   purgeBtn.title = `Delete stored audit history and graph data for ${origin}`;
+  purgeBtn.setAttribute('aria-label', `Delete stored audit history and graph data for ${origin}`);
   purgeBtn.addEventListener('click', () => {
     void purgeOrigin(origin);
   });
@@ -341,6 +342,7 @@ function buildAllowlistItem(origin: string): HTMLLIElement {
   removeBtn.className = 'btn-remove';
   removeBtn.textContent = 'Remove';
   removeBtn.title = `Revoke browser host permission for ${origin}`;
+  removeBtn.setAttribute('aria-label', `Revoke browser host permission for ${origin}`);
   removeBtn.addEventListener('click', () => {
     removeOrigin(origin);
   });

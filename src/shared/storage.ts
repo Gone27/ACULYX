@@ -295,17 +295,31 @@ export const SessionStorage = {
     return results;
   },
 
-  async getAuthBaseline(origin: string): Promise<import('./types').AuthBaseline | null> {
+  getAuthBaselineKey(origin: string, tabId?: number): string {
+    if (typeof tabId === 'number' && Number.isInteger(tabId) && tabId >= 0) {
+      return `${origin}#tab:${tabId}`;
+    }
+    return origin;
+  },
+
+  async getAuthBaseline(origin: string, tabId?: number): Promise<import('./types').AuthBaseline | null> {
     if (!origin) return null;
-    const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+    const baselineKey = this.getAuthBaselineKey(origin, tabId);
+    const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
     const result = await chrome.storage.session.get(key);
     return (result[key] as import('./types').AuthBaseline | undefined) ?? null;
   },
 
-  async setAuthBaseline(origin: string, baseline: import('./types').AuthBaseline): Promise<void> {
+  async setAuthBaseline(
+    origin: string,
+    baseline: import('./types').AuthBaseline,
+    tabId?: number,
+  ): Promise<void> {
     if (!origin) return;
-    return storageMutex.runExclusive(`auth_baseline:${origin}`, async () => {
-      const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+    const resolvedTabId = tabId ?? baseline.tabId;
+    const baselineKey = this.getAuthBaselineKey(origin, resolvedTabId);
+    return storageMutex.runExclusive(`auth_baseline:${baselineKey}`, async () => {
+      const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
       try {
         await chrome.storage.session.set({ [key]: baseline });
       } catch (err) {
@@ -315,13 +329,25 @@ export const SessionStorage = {
     });
   },
 
+  async removeAuthBaseline(origin: string, tabId?: number): Promise<void> {
+    if (!origin) return;
+    const baselineKey = this.getAuthBaselineKey(origin, tabId);
+    const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
+    try {
+      await chrome.storage.session.remove(key);
+    } catch (err) {
+      recordStorageFailure(err);
+      throw err;
+    }
+  },
+
   async getAllAuthBaselines(): Promise<Map<string, import('./types').AuthBaseline>> {
     const all = await chrome.storage.session.get(null);
     const map = new Map<string, import('./types').AuthBaseline>();
     for (const [k, v] of Object.entries(all)) {
       if (k.startsWith(STORAGE_KEYS.AUTH_BASELINE_PREFIX)) {
-        const origin = k.slice(STORAGE_KEYS.AUTH_BASELINE_PREFIX.length);
-        map.set(origin, v as import('./types').AuthBaseline);
+        const baselineKey = k.slice(STORAGE_KEYS.AUTH_BASELINE_PREFIX.length);
+        map.set(baselineKey, v as import('./types').AuthBaseline);
       }
     }
     return map;
@@ -563,7 +589,18 @@ export const LocalStorage = {
 
         await chrome.storage.local.remove(keysToRemove);
         if (typeof chrome !== 'undefined' && chrome.storage?.session !== undefined) {
-          await chrome.storage.session.remove(`${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`).catch(() => {});
+          try {
+            const allSession = await chrome.storage.session.get(null);
+            const baselinePrefix = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
+            const sessionKeysToRemove = Object.keys(allSession).filter(
+              (k) => k === baselinePrefix || k.startsWith(`${baselinePrefix}#tab:`),
+            );
+            if (sessionKeysToRemove.length > 0) {
+              await chrome.storage.session.remove(sessionKeysToRemove);
+            }
+          } catch {
+            // Ignore session storage removal errors
+          }
         }
       } catch (err) {
         recordStorageFailure(err);

@@ -336,8 +336,9 @@ function recomputeTabState(tabId: number, state: TabState): void {
       grade: state.grade,
     });
 
-    // Pre-login vs. post-login posture diff
-    const baseline = originAuthBaselines.get(state.origin);
+    // Pre-login vs. post-login posture diff (isolated per origin + tab)
+    const baselineKey = SessionStorage.getAuthBaselineKey(state.origin, tabId);
+    const baseline = originAuthBaselines.get(baselineKey);
     const { isAuthEvent, record, newBaseline } = checkAuthTransition(
       state.origin,
       baseline,
@@ -355,9 +356,9 @@ function recomputeTabState(tabId: number, state: TabState): void {
         ),
       },
     );
-    originAuthBaselines.set(state.origin, newBaseline);
+    originAuthBaselines.set(baselineKey, newBaseline);
     if (!isAuthBaselineEquivalent(baseline, newBaseline)) {
-      void SessionStorage.setAuthBaseline(state.origin, newBaseline);
+      void SessionStorage.setAuthBaseline(state.origin, newBaseline, tabId);
     }
 
     if (isAuthEvent && record !== null) {
@@ -777,11 +778,24 @@ chrome.tabs.onRemoved.addListener((tabId: number): void => {
   writeBatcher.flushNow(tabId);
   tabGenerations.delete(tabId);
   tabActionQueue.clearTab(tabId);
+  const tabOrigin = tabStates.get(tabId)?.origin;
   tabStates.delete(tabId);
   pendingServiceWorkerReports.delete(tabId);
   pendingMetaCspReports.delete(tabId);
   portRegistry.unregisterTab(tabId);
   badgeTrackedTabs.delete(tabId);
+
+  // Clean up tab-specific baseline in memory and session storage
+  if (tabOrigin !== undefined && tabOrigin.length > 0) {
+    const baselineKey = SessionStorage.getAuthBaselineKey(tabOrigin, tabId);
+    originAuthBaselines.delete(baselineKey);
+    void SessionStorage.removeAuthBaseline(tabOrigin, tabId).catch(() => undefined);
+  }
+  for (const [key] of originAuthBaselines) {
+    if (key.endsWith(`#tab:${tabId}`)) {
+      originAuthBaselines.delete(key);
+    }
+  }
 
   for (const [requestId, partial] of captureMap.entries()) {
     if (partial.tabId === tabId) {

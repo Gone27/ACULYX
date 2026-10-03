@@ -1,5 +1,5 @@
 import { T as SEVERITY_ORDER, r as sendToBackground } from "./messaging-BQwzB0xT.js";
-import { E as resolveCookieOverlaps, S as LocalStorage, T as normalizeCookieList, s as PermissionsService, w as SettingsService } from "./capture-DnbUjg5i.js";
+import { E as resolveCookieOverlaps, S as LocalStorage, T as normalizeCookieList, s as PermissionsService, w as SettingsService } from "./capture-Bm5xZSus.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 /* empty css                       */
 //#region src/options/options.ts
@@ -113,13 +113,13 @@ async function loadAndPopulate() {
 	for (const cb of severityCheckboxes) cb.checked = filterSet.has(cb.value);
 	retainDaysInput.value = String(settings.retainHistoryDays);
 	maxHistoryInput.value = String(settings.maxHistoryPerOrigin ?? 10);
-	alwaysSensitiveInput.value = (settings.sensitiveCookieNames ?? settings.alwaysSensitiveCookies ?? []).join(", ");
-	alwaysIgnoreInput.value = (settings.ignoredCookieNames ?? settings.alwaysIgnoreCookies ?? []).join(", ");
-	proModeToggle.checked = Boolean(settings.evaluationMode ?? settings.isPro);
+	alwaysSensitiveInput.value = settings.sensitiveCookieNames.join(", ");
+	alwaysIgnoreInput.value = settings.ignoredCookieNames.join(", ");
+	proModeToggle.checked = Boolean(settings.evaluationMode);
 	try {
 		workingOrigins = await PermissionsService.getAllGrantedOrigins();
 	} catch {
-		workingOrigins = [...settings.legacyAllowedOrigins ?? settings.allowedOrigins ?? []];
+		workingOrigins = [];
 	}
 	renderAllowlist();
 	await checkAndRenderBroadConflict();
@@ -227,6 +227,7 @@ function buildAllowlistItem(origin) {
 	purgeBtn.className = "btn-purge";
 	purgeBtn.textContent = "Delete stored data";
 	purgeBtn.title = `Delete stored audit history and graph data for ${origin}`;
+	purgeBtn.setAttribute("aria-label", `Delete stored audit history and graph data for ${origin}`);
 	purgeBtn.addEventListener("click", () => {
 		purgeOrigin(origin);
 	});
@@ -235,6 +236,7 @@ function buildAllowlistItem(origin) {
 	removeBtn.className = "btn-remove";
 	removeBtn.textContent = "Remove";
 	removeBtn.title = `Revoke browser host permission for ${origin}`;
+	removeBtn.setAttribute("aria-label", `Revoke browser host permission for ${origin}`);
 	removeBtn.addEventListener("click", () => {
 		removeOrigin(origin);
 	});
@@ -397,4 +399,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-By5KZX8L.js.map
+//# sourceMappingURL=options.html-O4NJjn68.js.map

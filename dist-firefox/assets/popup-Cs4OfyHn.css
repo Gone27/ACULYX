@@ -46,12 +46,12 @@
   outline-offset: 2px;
 }
 
-.grade-a { background-color: var(--sc-grade-a); color: #fff; }
-.grade-b { background-color: var(--sc-grade-b); color: #fff; }
-.grade-c { background-color: var(--sc-grade-c); color: #000; }
-.grade-d { background-color: var(--sc-grade-d); color: #fff; }
-.grade-f { background-color: var(--sc-grade-f); color: #fff; }
-.grade-unknown { background-color: var(--sc-grade-unknown); color: #fff; }
+.grade-a { background-color: var(--sc-grade-a); color: var(--sc-grade-text-light); }
+.grade-b { background-color: var(--sc-grade-b); color: var(--sc-grade-text-light); }
+.grade-c { background-color: var(--sc-grade-c); color: var(--sc-grade-c-text); }
+.grade-d { background-color: var(--sc-grade-d); color: var(--sc-grade-text-light); }
+.grade-f { background-color: var(--sc-grade-f); color: var(--sc-grade-text-light); }
+.grade-unknown { background-color: var(--sc-grade-unknown); color: var(--sc-grade-text-light); }
 
 .finding-item[data-severity='critical'] { border-left-color: var(--sc-critical); }
 .finding-item[data-severity='high']     { border-left-color: var(--sc-high); }
@@ -194,7 +194,7 @@ body {
 }
 
 .shield-outline {
-  fill: rgba(61, 217, 199, 0.04);
+  fill: var(--sc-accent-subtle);
   stroke: currentColor;
   stroke-width: 2.5;
   stroke-linejoin: round;
@@ -363,8 +363,8 @@ body {
 
 .btn-primary:hover,
 .btn-primary:focus {
-  background: #63e6d7;
-  box-shadow: 0 0 0 3px rgba(61, 217, 199, 0.2);
+  background: var(--sc-accent-hover);
+  box-shadow: 0 0 0 3px var(--sc-accent-focus-ring);
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -412,8 +412,8 @@ body {
 .findings-filter-notice {
   font-size: 11px;
   color: var(--color-medium);
-  background: rgba(243, 156, 18, 0.1);
-  border: 1px solid rgba(243, 156, 18, 0.3);
+  background: var(--sc-warn-bg);
+  border: 1px solid var(--sc-warn-border);
   border-radius: var(--radius);
   padding: 5px 8px;
   margin-bottom: 8px;
@@ -436,7 +436,7 @@ body {
 
 .btn-filter-override:hover,
 .btn-filter-override:focus {
-  color: #fff;
+  color: var(--sc-text-on-pill);
 }
 
 .btn-filter-override[hidden] {
@@ -487,12 +487,12 @@ body {
 }
 
 /* Severity badge background colours */
-.severity-critical .finding-severity { background: var(--color-critical); color: #fff; }
-.severity-high     .finding-severity { background: var(--color-high);     color: #fff; }
-.severity-medium   .finding-severity { background: var(--color-medium);   color: #fff; }
-.severity-low      .finding-severity { background: var(--color-low);      color: #fff; }
-.severity-info     .finding-severity { background: var(--color-info);     color: #fff; }
-.severity-pass     .finding-severity { background: var(--color-pass);     color: #fff; }
+.severity-critical .finding-severity { background: var(--color-critical); color: var(--sc-text-on-pill); }
+.severity-high     .finding-severity { background: var(--color-high);     color: var(--sc-text-on-pill); }
+.severity-medium   .finding-severity { background: var(--color-medium);   color: var(--sc-text-on-pill-dark); }
+.severity-low      .finding-severity { background: var(--color-low);      color: var(--sc-text-on-pill); }
+.severity-info     .finding-severity { background: var(--color-info);     color: var(--sc-text-on-pill); }
+.severity-pass     .finding-severity { background: var(--color-pass);     color: var(--sc-text-on-pill); }
 
 .finding-body {
   display: flex;
@@ -541,7 +541,7 @@ body {
   font-size: 11px;
   line-height: 1.35;
   color: var(--accent);
-  background: rgba(61, 217, 199, 0.06);
+  background: var(--sc-accent-subtle);
   border-left: 2px solid var(--accent);
   padding: 3px 6px;
   border-radius: 0 3px 3px 0;
@@ -733,17 +733,17 @@ details[open] > .auth-diff-summary::before {
 
 .auth-diff-delta.positive {
   color: var(--color-pass);
-  background: rgba(39, 174, 96, 0.15);
+  background: var(--sc-success-bg);
 }
 
 .auth-diff-delta.negative {
   color: var(--color-critical);
-  background: rgba(192, 57, 43, 0.15);
+  background: var(--sc-danger-bg);
 }
 
 .auth-diff-delta.neutral {
   color: var(--text-muted);
-  background: rgba(127, 140, 141, 0.15);
+  background: var(--sc-overlay-medium);
 }
 
 .auth-diff-content {
@@ -769,7 +769,7 @@ details[open] > .auth-diff-summary::before {
   align-items: flex-start;
   gap: 6px;
   padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--sc-divider-subtle);
 }
 
 .auth-diff-item:last-child {
@@ -786,12 +786,12 @@ details[open] > .auth-diff-summary::before {
 
 .auth-diff-badge.added {
   color: var(--color-critical);
-  background: rgba(192, 57, 43, 0.2);
+  background: var(--sc-danger-bg);
 }
 
 .auth-diff-badge.removed {
   color: var(--color-pass);
-  background: rgba(39, 174, 96, 0.2);
+  background: var(--sc-success-bg);
 }
 
 .auth-diff-rule {
@@ -806,7 +806,7 @@ details[open] > .auth-diff-summary::before {
 }
 
 .sandbox-poc-btn {
-  background: rgba(41, 128, 185, 0.15);
+  background: var(--sc-info-bg);
   border: 1px solid var(--color-low);
   color: var(--color-low);
   border-radius: 4px;
@@ -819,7 +819,7 @@ details[open] > .auth-diff-summary::before {
 
 .sandbox-poc-btn:hover {
   background: var(--color-low);
-  color: #fff;
+  color: var(--sc-text-on-pill);
 }
 
 .open-graph-btn {
@@ -827,7 +827,7 @@ details[open] > .auth-diff-summary::before {
   width: calc(100% - 24px);
   margin: 10px 12px 12px;
   padding: 6px 10px;
-  background: rgba(41, 128, 185, 0.15);
+  background: var(--sc-info-bg);
   border: 1px solid var(--color-low);
   color: var(--color-low);
   border-radius: var(--radius);
@@ -840,7 +840,7 @@ details[open] > .auth-diff-summary::before {
 
 .open-graph-btn:hover {
   background: var(--color-low);
-  color: #fff;
+  color: var(--sc-text-on-pill);
 }
 
 /* ── D: Export button ──────────────────────────────────────── */
@@ -917,12 +917,12 @@ details[open] > .subdomain-summary::before {
 
 .subdomain-badge.has-path {
   background: var(--color-critical);
-  color: #fff;
+  color: var(--sc-text-on-pill);
 }
 
 .subdomain-badge.no-path {
   background: var(--color-pass);
-  color: #fff;
+  color: var(--sc-text-on-pill);
 }
 
 .trust-graph {
@@ -959,12 +959,12 @@ details[open] > .subdomain-summary::before {
 
 .trust-node.present-true .trust-node-circle {
   stroke: var(--color-high);
-  fill: rgba(231, 76, 60, 0.16);
+  fill: var(--sc-danger-bg);
 }
 
 .trust-node.present-false .trust-node-circle {
   stroke: var(--color-pass);
-  fill: rgba(39, 174, 96, 0.14);
+  fill: var(--sc-success-bg);
 }
 
 .trust-node.present-null .trust-node-circle {
@@ -1072,7 +1072,7 @@ details[open] > .subdomain-summary::before {
   border: 1px solid var(--border);
   border-top: 2px solid var(--accent);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--sc-shadow-floating);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1091,7 +1091,7 @@ details[open] > .subdomain-summary::before {
 .onboarding-title {
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--sc-text);
 }
 
 .onboarding-close-btn {
@@ -1106,13 +1106,13 @@ details[open] > .subdomain-summary::before {
 }
 
 .onboarding-close-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--sc-text);
+  background: var(--sc-overlay-medium);
 }
 
 .onboarding-text {
   font-size: 11px;
-  color: #c0c6cf;
+  color: var(--sc-text-muted);
   line-height: 1.4;
 }
 
@@ -1126,9 +1126,9 @@ details[open] > .subdomain-summary::before {
   font-size: 10px;
   font-weight: 600;
   padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--sc-overlay-light);
   border-radius: 12px;
-  color: #a0aec0;
+  color: var(--sc-text-muted);
 }
 
 .onboarding-action-btn {
@@ -1146,7 +1146,7 @@ details[open] > .subdomain-summary::before {
 }
 
 .onboarding-action-btn:hover {
-  background: #63e6d7;
+  background: var(--sc-accent-hover);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1159,7 +1159,7 @@ details[open] > .subdomain-summary::before {
   font-size: 11px;
   line-height: 1.4;
   border-left: 3px solid var(--accent);
-  background: rgba(61, 217, 199, 0.08);
+  background: var(--sc-accent-subtle);
   color: var(--text);
 }
 
@@ -1169,14 +1169,14 @@ details[open] > .subdomain-summary::before {
 
 .special-notice.notice-warning {
   border-left-color: var(--color-medium);
-  background: rgba(243, 156, 18, 0.1);
-  color: #fce1b5;
+  background: var(--sc-warn-bg);
+  color: var(--sc-warn-text);
 }
 
 .special-notice.notice-success {
   border-left-color: var(--color-pass);
-  background: rgba(39, 174, 96, 0.1);
-  color: #c9eed7;
+  background: var(--sc-success-bg);
+  color: var(--sc-success-text);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1206,18 +1206,18 @@ details[open] > .subdomain-summary::before {
 }
 
 .trend-improved {
-  color: #2ecc71;
-  background: rgba(46, 204, 113, 0.12);
+  color: var(--sc-success-text);
+  background: var(--sc-success-bg);
 }
 
 .trend-regressed {
-  color: #e74c3c;
-  background: rgba(231, 76, 60, 0.12);
+  color: var(--sc-danger-text);
+  background: var(--sc-danger-bg);
 }
 
 .trend-stable {
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--sc-overlay-subtle);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1251,7 +1251,7 @@ details[open] > .subdomain-summary::before {
 button:focus-visible,
 a:focus-visible,
 summary:focus-visible {
-  box-shadow: 0 0 0 2px rgba(61, 217, 199, 0.3);
+  box-shadow: 0 0 0 2px var(--sc-accent-focus-ring);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1291,9 +1291,9 @@ summary:focus-visible {
 }
 
 .api-endpoints-badge.has-findings {
-  background: rgba(243, 156, 18, 0.15);
+  background: var(--sc-warn-bg);
   border-color: var(--color-medium);
-  color: #fce1b5;
+  color: var(--sc-warn-text);
 }
 
 .api-endpoints-disclaimer {
@@ -1353,7 +1353,7 @@ summary:focus-visible {
   padding: 1px 4px;
   border-radius: 3px;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--sc-overlay-subtle);
 }
 
 .api-endpoint-findings {

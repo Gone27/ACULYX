@@ -60,8 +60,11 @@ export function getSensitiveAuthCookies(
   });
 }
 
+export const AUTH_DIFF_COOLDOWN_MS = 60_000;
+
 /**
- * Computes a deterministic signature of sensitive cookie metadata (names, flags, expiry).
+ * Computes a deterministic signature of sensitive cookie metadata (names, flags, session vs persistent).
+ * Uses session vs persistent rather than raw expiresAt timestamp to prevent sliding-expiry session spam.
  * Allows detecting token rotation, flag upgrades/downgrades, or new tokens even when
  * a session cookie was already present.
  */
@@ -72,7 +75,7 @@ export function computeSensitiveCookiesSignature(
 ): string {
   const sensitiveCookies = getSensitiveAuthCookies(cookies, alwaysSensitive, alwaysIgnore);
   return sensitiveCookies
-    .map((c) => `${c.name}|${c.httpOnly}|${c.secure}|${c.sameSite}|${c.partitioned}|${c.expiresAt ?? 'session'}`)
+    .map((c) => `${c.name}|${c.httpOnly}|${c.secure}|${c.sameSite}|${c.partitioned}|${c.session ? 'session' : 'persistent'}`)
     .sort()
     .join(';;');
 }
@@ -134,8 +137,8 @@ export interface AuthTransitionContext {
  * Evaluates whether an origin/tab transition represents a login event.
  * Detects:
  * 1. Transition from pre-auth (no sensitive session cookie) to post-auth (sensitive session cookie).
- * 2. Sensitive cookie reissued via Set-Cookie on main-frame hop after non-GET request.
- * 3. Sensitive cookie rotation or flag/expiry changes when already in session.
+ * 2. Sensitive cookie reissued via Set-Cookie on main-frame hop after non-GET request (subject to cooldown & change check).
+ * 3. Sensitive cookie rotation or flag changes when already in session (subject to cooldown).
  */
 export function checkAuthTransition(
   origin: string,
@@ -148,6 +151,7 @@ export function checkAuthTransition(
   alwaysIgnore: string[] = [],
   context?: AuthTransitionContext,
 ): { isAuthEvent: boolean; record: AuthDiffRecord | null; newBaseline: AuthBaseline } {
+  const now = Date.now();
   const authCookie = detectSensitiveAuthCookie(currentCookies, alwaysSensitive, alwaysIgnore);
   const hasAuthNow = authCookie !== null;
   const currentSig = computeSensitiveCookiesSignature(currentCookies, alwaysSensitive, alwaysIgnore);
@@ -161,15 +165,30 @@ export function checkAuthTransition(
     findings: compactCurrentFindings,
     score: currentScore,
     grade: currentGrade,
-    timestamp: Date.now(),
+    timestamp: now,
     hasSensitiveCookie: hasAuthNow,
     sensitiveCookieSignature: currentSig,
+    lastAuthEventTimestamp: baseline?.lastAuthEventTimestamp,
   };
 
   // If there was no previous baseline, establish this state as the initial baseline.
   if (!baseline) {
     return { isAuthEvent: false, record: null, newBaseline: currentBaseline };
   }
+
+  const isWithinCooldown =
+    baseline.lastAuthEventTimestamp !== undefined &&
+    now - baseline.lastAuthEventTimestamp < AUTH_DIFF_COOLDOWN_MS;
+
+  const baselineSensitiveCookies = getSensitiveAuthCookies(baseline.cookies, alwaysSensitive, alwaysIgnore);
+  const baselineSensitiveNames = new Set(baselineSensitiveCookies.map((c) => c.name));
+  const currentSensitiveCookies = getSensitiveAuthCookies(currentCookies, alwaysSensitive, alwaysIgnore);
+  const hasNewSensitiveCookie = currentSensitiveCookies.some((c) => !baselineSensitiveNames.has(c.name));
+  const signatureChanged =
+    baseline.sensitiveCookieSignature !== undefined &&
+    currentSig !== '' &&
+    baseline.sensitiveCookieSignature !== currentSig;
+  const isNewlyIssuedOrChanged = hasNewSensitiveCookie || signatureChanged;
 
   let isAuthEvent = false;
   let triggerReason: string | undefined;
@@ -179,22 +198,22 @@ export function checkAuthTransition(
     isAuthEvent = true;
     triggerReason = 'new_session_cookie';
   } else if (baseline.hasSensitiveCookie && hasAuthNow) {
-    // Case 2: Post-login re-authentication via non-GET Set-Cookie (e.g. POST form submission login)
-    if (context?.hasNonGetSetCookie === true) {
-      isAuthEvent = true;
-      triggerReason = 'post_request_session_cookie_issued';
-    } else if (
-      baseline.sensitiveCookieSignature !== undefined &&
-      currentSig !== '' &&
-      baseline.sensitiveCookieSignature !== currentSig
-    ) {
-      // Case 3: Sensitive cookie name, expiry or flags rotated/changed
-      isAuthEvent = true;
-      triggerReason = 'session_cookie_rotated_or_modified';
+    // Only fire during active session if cooldown has elapsed and cookie is newly issued or changed
+    if (!isWithinCooldown && isNewlyIssuedOrChanged) {
+      if (context?.hasNonGetSetCookie === true) {
+        // Case 2: Post-login re-authentication via non-GET Set-Cookie (e.g. POST form submission login)
+        isAuthEvent = true;
+        triggerReason = 'post_request_session_cookie_issued';
+      } else if (signatureChanged) {
+        // Case 3: Sensitive cookie name, lifetime (session vs persistent) or flags rotated/changed
+        isAuthEvent = true;
+        triggerReason = 'session_cookie_rotated_or_modified';
+      }
     }
   }
 
   if (isAuthEvent && authCookie !== null) {
+    currentBaseline.lastAuthEventTimestamp = now;
     const preScore = baseline.score;
     const postScore = currentScore;
     const scoreDelta = postScore - preScore;
@@ -203,7 +222,7 @@ export function checkAuthTransition(
     const record: AuthDiffRecord = {
       origin,
       tabId: context?.tabId ?? baseline.tabId,
-      timestamp: Date.now(),
+      timestamp: now,
       triggeredByCookie: authCookie.name,
       triggerReason,
       preAuthScore: preScore,
@@ -240,8 +259,9 @@ export function checkAuthTransition(
       findings: compactCurrentFindings,
       score: currentScore,
       grade: currentGrade,
-      timestamp: Date.now(),
+      timestamp: now,
       sensitiveCookieSignature: currentSig,
+      lastAuthEventTimestamp: baseline.lastAuthEventTimestamp,
     },
   };
 }

@@ -121,7 +121,8 @@ Monitored web pages frequently trigger cross-origin subresources (e.g. API reque
 
 3. **Third-Party Cookie Correlation Rules:**
    - Cookies observed in the context of a tab:
-     * A cookie is flagged as third-party (`isThirdParty: true`) if its domain does not match the apex domain (eTLD+1) of the top-level document URL.
+     * Third-party status is derived directly from hop `Set-Cookie` headers: the setting host (from the response URL) or the `Domain` attribute is compared against the page's registrable domain (eTLD+1). When a third-party cookie is set by a subresource/hop, it is recorded as a third-party `CookieRecord` from the header metadata even though Chrome's URL-scoped cookie query (`chrome.cookies.getAll({ url: tabUrl })`) restricts live results to the page origin.
+     * For cookies present in the live store, a cookie is flagged as third-party (`isThirdParty: true`) if its domain does not match the apex/registrable domain (eTLD+1) of the top-level document URL.
      * Partitioned cookies (CHIPS / Cookies Having Independent Partitioned State) are evaluated based on partition keys and attributes (`Partitioned`, `SameSite=None`, `Secure`).
      * Third-party cookies are represented in findings and attack-surface trust graphs to identify cross-site tracking and authentication exposure.
      * **Zero Secret Value Retention:** Consistent with Invariant 1, third-party cookie values are never inspected, stored, or transmitted; only cookie name, domain, path, expiry, security attributes (`Secure`, `HttpOnly`, `SameSite`, `Partitioned`), and third-party flags are correlated.
