@@ -75,8 +75,14 @@ export function computeScore(findings: Finding[], fromCache = false): ScoreResul
   const findingsByRule = new Map<string, Finding[]>();
 
   for (const finding of findings) {
-    // Info and pass severities are informational only — they do not penalise.
-    if (finding.severity === 'pass' || finding.severity === 'info') {
+    // Info and pass severities as well as pass/not-observed/not-applicable outcomes do not penalise.
+    if (
+      finding.severity === 'pass' ||
+      finding.severity === 'info' ||
+      finding.outcome === 'pass' ||
+      finding.outcome === 'not-observed' ||
+      finding.outcome === 'not-applicable'
+    ) {
       continue;
     }
     const list = findingsByRule.get(finding.ruleId) ?? [];

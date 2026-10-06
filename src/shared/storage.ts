@@ -37,6 +37,83 @@ export class KeyedAsyncMutex {
 
 export const storageMutex = new KeyedAsyncMutex();
 
+// ─── Storage Write Barrier & Reset Epoch ────────────────────────────────────
+// Linearizes all in-flight and future storage mutations against full reset.
+// Ensures that pre-reset writes cannot finish after storage clear and recreate data.
+
+export class StorageWriteBarrier {
+  private activeWrites = new Set<Promise<unknown>>();
+  private barrierPromise: Promise<void> | null = null;
+  private releaseBarrier: (() => void) | null = null;
+
+  async enter(): Promise<void> {
+    if (this.barrierPromise !== null) {
+      await this.barrierPromise;
+    }
+  }
+
+  track<T>(promise: Promise<T>): Promise<T> {
+    this.activeWrites.add(promise);
+    const cleanup = () => {
+      this.activeWrites.delete(promise);
+    };
+    promise.then(cleanup, cleanup);
+    return promise;
+  }
+
+  async closeBarrierAndDrain(): Promise<void> {
+    if (this.barrierPromise === null) {
+      let release!: () => void;
+      this.barrierPromise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      this.releaseBarrier = release;
+    }
+    while (this.activeWrites.size > 0) {
+      await Promise.allSettled(Array.from(this.activeWrites));
+    }
+  }
+
+  openBarrier(): void {
+    if (this.releaseBarrier !== null) {
+      const release = this.releaseBarrier;
+      this.releaseBarrier = null;
+      this.barrierPromise = null;
+      release();
+    }
+  }
+
+  isClosed(): boolean {
+    return this.barrierPromise !== null;
+  }
+
+  getActiveCount(): number {
+    return this.activeWrites.size;
+  }
+}
+
+export const storageWriteBarrier = new StorageWriteBarrier();
+
+let storageResetEpoch = 0;
+
+export function getStorageResetEpoch(): number {
+  return storageResetEpoch;
+}
+
+export function setStorageResetEpoch(epoch: number): void {
+  storageResetEpoch = epoch;
+}
+
+export function incrementStorageResetEpoch(): number {
+  storageResetEpoch++;
+  return storageResetEpoch;
+}
+
+export function isStorageEpochStale(epoch?: number): boolean {
+  if (epoch === undefined) return false;
+  return epoch !== storageResetEpoch;
+}
+
 // ─── Storage Health & Degraded State Tracking ────────────────────────────────
 
 export interface StorageHealth {
@@ -172,12 +249,17 @@ export function assertNoSensitiveSecrets(state: TabState): void {
                        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(seg);
         const isJwt = /^eyJ/.test(seg) || /^eyJ/.test(stem);
         const isLongOpaque = seg.length >= 20 || stem.length >= 20 || /^[0-9a-f]{16,}$/i.test(stem);
+        const isEmail = /@/.test(seg);
 
-        if (isUuid || isJwt || isLongOpaque) {
+        if (isUuid || isJwt || isLongOpaque || isEmail) {
           throw new Error(`[SecCheck] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
         }
       }
     };
+
+    if (urlStr.includes('#')) {
+      throw new Error(`[SecCheck] Unredacted URL fragment detected in ${context} — storage aborted.`);
+    }
 
     const tokens = urlStr.split(/[\s;]+/).filter(Boolean);
     for (const token of tokens) {
@@ -195,11 +277,19 @@ export function assertNoSensitiveSecrets(state: TabState): void {
     }
   };
 
+  // Guard state top-level URL
+  checkUrlStr(state.url, 'state.url');
+
   if (state.coverage !== undefined && state.coverage !== null) {
     checkUrlStr(state.coverage.serviceWorkerUrl, 'serviceWorkerUrl');
     if (Array.isArray(state.coverage.metaCspPolicies)) {
       for (const policy of state.coverage.metaCspPolicies) {
         checkUrlStr(policy, 'metaCspPolicies');
+      }
+    }
+    if (Array.isArray(state.coverage.ledger)) {
+      for (const entry of state.coverage.ledger) {
+        checkUrlStr(entry.url, `ledger.url (${entry.type})`);
       }
     }
   }
@@ -245,6 +335,7 @@ export function assertNoSensitiveSecrets(state: TabState): void {
     for (let i = 0; i < state.hops.length; i++) {
       const hop = state.hops[i];
       if (hop) {
+        checkUrlStr(hop.url, `hop[${i}].url`);
         checkHeaders(hop.headers, hop.rawHeaders, `hop[${i}]`);
       }
     }
@@ -253,7 +344,19 @@ export function assertNoSensitiveSecrets(state: TabState): void {
   // 3. Guard API endpoints
   if (state.apiEndpoints instanceof Map) {
     for (const [path, endpoint] of state.apiEndpoints.entries()) {
+      checkUrlStr(path, `apiEndpoint[${path}].path`);
+      checkUrlStr(endpoint.normalizedPath, `apiEndpoint[${path}].normalizedPath`);
+      checkUrlStr(endpoint.lastHop.url, `apiEndpoint[${path}].lastHop.url`);
       checkHeaders(endpoint.lastHop.headers, endpoint.lastHop.rawHeaders, `apiEndpoint[${path}]`);
+    }
+  }
+
+  // 4. Guard finding source URLs
+  if (Array.isArray(state.findings)) {
+    for (const f of state.findings) {
+      if (f.sourceUrl !== undefined && f.sourceUrl !== '') {
+        checkUrlStr(f.sourceUrl, `finding.sourceUrl (${f.ruleId})`);
+      }
     }
   }
 }
@@ -267,30 +370,50 @@ export const SessionStorage = {
     return deserializeTabState(raw);
   },
 
-  async setTabState(state: TabState): Promise<void> {
+  async setTabState(state: TabState, epoch?: number): Promise<void> {
     assertNoSensitiveSecrets(state);
-    return storageMutex.runExclusive(`tab:${state.tabId}`, async () => {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
+    const opPromise = storageMutex.runExclusive(`tab:${state.tabId}`, async () => {
+      if (isStorageEpochStale(opEpoch)) return;
       const serialized = serializeTabState(state);
       const key = `${STORAGE_KEYS.TAB_PREFIX}${state.tabId}`;
       try {
-        await chrome.storage.session.set({ [key]: serialized });
+        if (isStorageEpochStale(opEpoch)) return;
+        const writePromise = chrome.storage.session.set({ [key]: serialized });
+        await storageWriteBarrier.track(writePromise);
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
-  async removeTabState(tabId: number): Promise<void> {
-    return storageMutex.runExclusive(`tab:${tabId}`, async () => {
+  async removeTabState(tabId: number, epoch?: number): Promise<void> {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
+    const opPromise = storageMutex.runExclusive(`tab:${tabId}`, async () => {
+      if (isStorageEpochStale(opEpoch)) return;
       const key = `${STORAGE_KEYS.TAB_PREFIX}${tabId}`;
       try {
-        await chrome.storage.session.remove(key);
+        if (isStorageEpochStale(opEpoch)) return;
+        const removePromise = chrome.storage.session.remove(key);
+        await storageWriteBarrier.track(removePromise);
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
   async clearAllTabStates(): Promise<void> {
@@ -301,11 +424,13 @@ export const SessionStorage = {
     ) {
       return;
     }
+    await storageWriteBarrier.enter();
     try {
       const all = await chrome.storage.session.get(null);
       const tabKeys = Object.keys(all).filter((k) => k.startsWith(STORAGE_KEYS.TAB_PREFIX));
       if (tabKeys.length > 0) {
-        await chrome.storage.session.remove(tabKeys);
+        const removePromise = chrome.storage.session.remove(tabKeys);
+        await storageWriteBarrier.track(removePromise);
       }
     } catch (err) {
       recordStorageFailure(err);
@@ -347,27 +472,45 @@ export const SessionStorage = {
     origin: string,
     baseline: import('./types').AuthBaseline,
     tabId?: number,
+    epoch?: number,
   ): Promise<void> {
     if (!origin) return;
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
     const resolvedTabId = tabId ?? baseline.tabId;
     const baselineKey = this.getAuthBaselineKey(origin, resolvedTabId);
-    return storageMutex.runExclusive(`auth_baseline:${baselineKey}`, async () => {
+    const opPromise = storageMutex.runExclusive(`auth_baseline:${baselineKey}`, async () => {
+      if (isStorageEpochStale(opEpoch)) return;
       const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
       try {
-        await chrome.storage.session.set({ [key]: baseline });
+        if (isStorageEpochStale(opEpoch)) return;
+        const writePromise = chrome.storage.session.set({ [key]: baseline });
+        await storageWriteBarrier.track(writePromise);
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
-  async removeAuthBaseline(origin: string, tabId?: number): Promise<void> {
+  async removeAuthBaseline(origin: string, tabId?: number, epoch?: number): Promise<void> {
     if (!origin) return;
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
     const baselineKey = this.getAuthBaselineKey(origin, tabId);
     const key = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${baselineKey}`;
     try {
-      await chrome.storage.session.remove(key);
+      if (isStorageEpochStale(opEpoch)) return;
+      const removePromise = chrome.storage.session.remove(key);
+      await storageWriteBarrier.track(removePromise);
     } catch (err) {
       recordStorageFailure(err);
       throw err;
@@ -474,17 +617,25 @@ export const LocalStorage = {
     return (result[key] as OriginHistoryItem[] | undefined) ?? [];
   },
 
-  async recordOriginHistory(origin: string, item: OriginHistoryItem): Promise<void> {
+  async recordOriginHistory(origin: string, item: OriginHistoryItem, epoch?: number): Promise<void> {
     if (!origin) return;
-    return storageMutex.runExclusive(`origin:${origin}`, async () => {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
+    const opPromise = storageMutex.runExclusive(`origin:${origin}`, async () => {
       try {
+        if (isStorageEpochStale(opEpoch)) return;
         const history = await this.getOriginHistory(origin);
+        if (isStorageEpochStale(opEpoch)) return;
         // Avoid spamming history if the score and grade haven't changed in the last 60 seconds
         const last = history[history.length - 1];
         if (last && last.score === item.score && last.grade === item.grade && (item.timestamp - last.timestamp) < 60_000) {
           return;
         }
         const settings = await this.getSettings();
+        if (isStorageEpochStale(opEpoch)) return;
         const updated = pruneHistoryItems(
           [...history, item],
           item.timestamp,
@@ -492,21 +643,32 @@ export const LocalStorage = {
           settings.maxHistoryPerOrigin,
         );
         const key = `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`;
-        await chrome.storage.local.set({ [key]: updated });
+        if (isStorageEpochStale(opEpoch)) return;
+        const writePromise = chrome.storage.local.set({ [key]: updated });
+        await storageWriteBarrier.track(writePromise);
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
-  async pruneAllHistory(now: number = Date.now(), settings?: SettingsV2): Promise<void> {
+  async pruneAllHistory(now: number = Date.now(), settings?: SettingsV2, epoch?: number): Promise<void> {
     if (typeof chrome === 'undefined' || chrome.storage?.local === undefined) {
       return;
     }
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
     try {
       const currentSettings = settings ?? (await this.getSettings());
+      if (isStorageEpochStale(opEpoch)) return;
       const all = await chrome.storage.local.get(null);
+      if (isStorageEpochStale(opEpoch)) return;
       const updates: Record<string, unknown> = {};
       const toRemove: string[] = [];
 
@@ -567,11 +729,14 @@ export const LocalStorage = {
         }
       }
 
+      if (isStorageEpochStale(opEpoch)) return;
       if (Object.keys(updates).length > 0) {
-        await chrome.storage.local.set(updates);
+        const p1 = chrome.storage.local.set(updates);
+        await storageWriteBarrier.track(p1);
       }
       if (toRemove.length > 0) {
-        await chrome.storage.local.remove(toRemove);
+        const p2 = chrome.storage.local.remove(toRemove);
+        await storageWriteBarrier.track(p2);
       }
     } catch (err) {
       recordStorageFailure(err);
@@ -579,10 +744,16 @@ export const LocalStorage = {
     }
   },
 
-  async purgeOriginData(origin: string): Promise<void> {
+  async purgeOriginData(origin: string, epoch?: number): Promise<void> {
     if (!origin || typeof chrome === 'undefined' || chrome.storage?.local === undefined) return;
-    return storageMutex.runExclusive(`origin:${origin}`, async () => {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
+    const opPromise = storageMutex.runExclusive(`origin:${origin}`, async () => {
       try {
+        if (isStorageEpochStale(opEpoch)) return;
         const keysToRemove = [
           `${STORAGE_KEYS.HISTORY_PREFIX}${origin}`,
           `history:${origin}`,
@@ -604,13 +775,14 @@ export const LocalStorage = {
             keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
           } else {
             const graph = await this.getGraph(apex);
+            if (isStorageEpochStale(opEpoch)) return;
             if (graph) {
               graph.nodes = graph.nodes.filter((n) => n.hostname !== hostname);
               graph.edges = graph.edges.filter((e) => e.source !== hostname && e.target !== hostname);
               if (graph.nodes.length <= 1 && graph.nodes.every((n) => n.isApex)) {
                 keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${apex}`);
               } else {
-                await this.saveGraph(graph);
+                await this.saveGraph(graph, opEpoch);
               }
             }
           }
@@ -620,16 +792,21 @@ export const LocalStorage = {
           keysToRemove.push(`${STORAGE_KEYS.GRAPH_PREFIX}${hostname}`);
         }
 
-        await chrome.storage.local.remove(keysToRemove);
+        if (isStorageEpochStale(opEpoch)) return;
+        const p1 = chrome.storage.local.remove(keysToRemove);
+        await storageWriteBarrier.track(p1);
+
         if (typeof chrome !== 'undefined' && chrome.storage?.session !== undefined) {
           try {
             const allSession = await chrome.storage.session.get(null);
+            if (isStorageEpochStale(opEpoch)) return;
             const baselinePrefix = `${STORAGE_KEYS.AUTH_BASELINE_PREFIX}${origin}`;
             const sessionKeysToRemove = Object.keys(allSession).filter(
               (k) => k === baselinePrefix || k.startsWith(`${baselinePrefix}#tab:`),
             );
             if (sessionKeysToRemove.length > 0) {
-              await chrome.storage.session.remove(sessionKeysToRemove);
+              const p2 = chrome.storage.session.remove(sessionKeysToRemove);
+              await storageWriteBarrier.track(p2);
             }
           } catch {
             // Ignore session storage removal errors
@@ -640,6 +817,8 @@ export const LocalStorage = {
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
   async getAuthDiffHistory(origin: string): Promise<import('./types').AuthDiffRecord[]> {
@@ -654,12 +833,20 @@ export const LocalStorage = {
     return list.length > 0 ? (list[list.length - 1] ?? null) : null;
   },
 
-  async recordAuthDiff(origin: string, diff: import('./types').AuthDiffRecord): Promise<void> {
+  async recordAuthDiff(origin: string, diff: import('./types').AuthDiffRecord, epoch?: number): Promise<void> {
     if (!origin) return;
-    return storageMutex.runExclusive(`auth_diff:${origin}`, async () => {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
+    const opPromise = storageMutex.runExclusive(`auth_diff:${origin}`, async () => {
       try {
+        if (isStorageEpochStale(opEpoch)) return;
         const history = await this.getAuthDiffHistory(origin);
+        if (isStorageEpochStale(opEpoch)) return;
         const settings = await this.getSettings();
+        if (isStorageEpochStale(opEpoch)) return;
         const updated = pruneAuthDiffItems(
           [...history, diff],
           diff.timestamp || Date.now(),
@@ -667,12 +854,16 @@ export const LocalStorage = {
           settings.maxHistoryPerOrigin,
         );
         const key = `${STORAGE_KEYS.AUTH_DIFF_PREFIX}${origin}`;
-        await chrome.storage.local.set({ [key]: updated });
+        if (isStorageEpochStale(opEpoch)) return;
+        const writePromise = chrome.storage.local.set({ [key]: updated });
+        await storageWriteBarrier.track(writePromise);
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
   async getGraph(apexDomain: string): Promise<import('./types').AttackSurfaceGraph | null> {
@@ -682,10 +873,16 @@ export const LocalStorage = {
     return (result[key] as import('./types').AttackSurfaceGraph | undefined) ?? null;
   },
 
-  async saveGraph(graph: import('./types').AttackSurfaceGraph): Promise<void> {
+  async saveGraph(graph: import('./types').AttackSurfaceGraph, epoch?: number): Promise<void> {
     if (!graph.apexDomain) return;
-    return storageMutex.runExclusive(`graph:${graph.apexDomain}`, async () => {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
+
+    const opPromise = storageMutex.runExclusive(`graph:${graph.apexDomain}`, async () => {
       try {
+        if (isStorageEpochStale(opEpoch)) return;
         const now = Date.now();
         const maxLastSeen = Math.max(0, ...graph.nodes.map((n) => n.lastSeen || 0));
         const refTime = maxLastSeen > 0 ? maxLastSeen : now;
@@ -711,12 +908,16 @@ export const LocalStorage = {
           lastUpdated: now,
         };
         const key = `${STORAGE_KEYS.GRAPH_PREFIX}${graph.apexDomain}`;
-        await chrome.storage.local.set({ [key]: boundedGraph });
+        if (isStorageEpochStale(opEpoch)) return;
+        const writePromise = chrome.storage.local.set({ [key]: boundedGraph });
+        await storageWriteBarrier.track(writePromise);
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
   /**
@@ -726,11 +927,19 @@ export const LocalStorage = {
   async mutateGraph(
     apexDomain: string,
     mutator: (current: import('./types').AttackSurfaceGraph | null) => import('./types').AttackSurfaceGraph,
+    epoch?: number,
   ): Promise<import('./types').AttackSurfaceGraph | null> {
     if (!apexDomain) return null;
-    return storageMutex.runExclusive(`graph:${apexDomain}`, async () => {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return null;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return null;
+
+    const opPromise = storageMutex.runExclusive(`graph:${apexDomain}`, async () => {
       try {
+        if (isStorageEpochStale(opEpoch)) return null;
         const current = await this.getGraph(apexDomain);
+        if (isStorageEpochStale(opEpoch)) return null;
         const updated = mutator(current);
         const now = Date.now();
         const maxLastSeen = Math.max(0, ...updated.nodes.map((n) => n.lastSeen || 0));
@@ -757,13 +966,17 @@ export const LocalStorage = {
           lastUpdated: now,
         };
         const key = `${STORAGE_KEYS.GRAPH_PREFIX}${apexDomain}`;
-        await chrome.storage.local.set({ [key]: boundedGraph });
+        if (isStorageEpochStale(opEpoch)) return null;
+        const writePromise = chrome.storage.local.set({ [key]: boundedGraph });
+        await storageWriteBarrier.track(writePromise);
         return boundedGraph;
       } catch (err) {
         recordStorageFailure(err);
         throw err;
       }
     });
+
+    return storageWriteBarrier.track(opPromise);
   },
 
   async isOnboardingDismissed(): Promise<boolean> {
@@ -779,12 +992,18 @@ export const LocalStorage = {
     await this.purgeOriginData(origin);
   },
 
-  async deleteAllHistory(): Promise<void> {
+  async deleteAllHistory(epoch?: number): Promise<void> {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
     try {
       const all = await chrome.storage.local.get(null);
+      if (isStorageEpochStale(opEpoch)) return;
       const histKeys = Object.keys(all).filter(k => k.startsWith(STORAGE_KEYS.HISTORY_PREFIX) || k.startsWith('history:'));
       if (histKeys.length > 0) {
-        await chrome.storage.local.remove(histKeys);
+        const p = chrome.storage.local.remove(histKeys);
+        await storageWriteBarrier.track(p);
       }
     } catch (err) {
       recordStorageFailure(err);
@@ -792,14 +1011,20 @@ export const LocalStorage = {
     }
   },
 
-  async deletePrivateRecords(): Promise<void> {
+  async deletePrivateRecords(epoch?: number): Promise<void> {
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) return;
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) return;
     try {
       const all = await chrome.storage.session.get(null);
+      if (isStorageEpochStale(opEpoch)) return;
       const toRemove = Object.entries(all)
         .filter(([k, v]) => k.startsWith(STORAGE_KEYS.TAB_PREFIX) && typeof v === 'object' && v !== null && (v as { isIncognito?: boolean }).isIncognito === true)
         .map(([k]) => k);
       if (toRemove.length > 0) {
-        await chrome.storage.session.remove(toRemove);
+        const p = chrome.storage.session.remove(toRemove);
+        await storageWriteBarrier.track(p);
       }
     } catch (err) {
       recordStorageFailure(err);
@@ -808,6 +1033,8 @@ export const LocalStorage = {
   },
 
   async resetAllData(): Promise<void> {
+    incrementStorageResetEpoch();
+    await storageWriteBarrier.closeBarrierAndDrain();
     try {
       await chrome.storage.local.clear();
       if (typeof chrome.storage.session !== 'undefined') {
@@ -816,15 +1043,21 @@ export const LocalStorage = {
     } catch (err) {
       recordStorageFailure(err);
       throw err;
+    } finally {
+      storageWriteBarrier.openBarrier();
     }
   },
 
   async clearAll(): Promise<void> {
+    incrementStorageResetEpoch();
+    await storageWriteBarrier.closeBarrierAndDrain();
     try {
       await chrome.storage.local.clear();
     } catch (err) {
       recordStorageFailure(err);
       throw err;
+    } finally {
+      storageWriteBarrier.openBarrier();
     }
   },
 };

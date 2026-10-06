@@ -1,10 +1,11 @@
 /**
- * options.ts — SecCheck options page logic
+ * options.ts — SecCheck options page logic (Phase 3 redesign)
  *
  * Rules enforced here:
  *  - ZERO innerHTML / outerHTML / insertAdjacentHTML
  *  - All DOM manipulation via createElement / textContent / appendChild
  *  - Only chrome.* APIs (no fetch / XHR)
+ *  - Section router: JS-driven, no page reloads
  */
 
 import type { Settings, Severity } from '../shared/types';
@@ -12,12 +13,13 @@ import { SettingsService, normalizeCookieList, resolveCookieOverlaps } from '../
 import { PermissionsService } from '../background/permissions';
 import { LocalStorage } from '../shared/storage';
 import { sendToBackground } from '../shared/messaging';
-import { SEVERITY_ORDER } from '../shared/constants';
+import { SEVERITY_ORDER, DEFAULT_SETTINGS } from '../shared/constants';
+import { applyAppearance } from '../shared/appearance';
 
-/* ── Canonical severity values (used for form serialisation) ── */
+/* ── Canonical severity values ───────────────────────────────────── */
 const ALL_SEVERITIES: Severity[] = [...SEVERITY_ORDER];
 
-/* ── DOM references ───────────────────────────────────────────── */
+/* ── DOM references ──────────────────────────────────────────────── */
 let modeRadios: NodeListOf<HTMLInputElement>;
 let severityCheckboxes: NodeListOf<HTMLInputElement>;
 let retainDaysInput: HTMLInputElement;
@@ -27,27 +29,29 @@ let alwaysIgnoreInput: HTMLTextAreaElement;
 let allowlistEl: HTMLUListElement;
 let allowlistEmptyMsg: HTMLParagraphElement;
 let saveBtn: HTMLButtonElement;
+let discardBtn: HTMLButtonElement;
 let saveStatus: HTMLSpanElement;
 let sectionAllowlist: HTMLElement;
-let proModeToggle: HTMLInputElement;
+let evalModeToggle: HTMLInputElement;
 let modeConflictBanner: HTMLElement;
 let btnRemoveBroadAccess: HTMLButtonElement;
 let btnSwitchToAllSites: HTMLButtonElement;
+let navDirtyBadge: HTMLElement;
+let unsavedDialog: HTMLDialogElement;
 let currentMode: Settings['monitoringMode'] = 'per-site';
+let pendingNavSection: string | null = null;
 
-/**
- * In-memory working copy of the allowedOrigins array.
- * Mutated by remove buttons; committed to storage on Save.
- */
+/** In-memory working copy of the allowedOrigins array. */
 let workingOrigins: string[] = [];
 let initialSettingsSnapshot: string = '';
+let isDirty = false;
 
 /* ================================================================
    Boot
    ================================================================ */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Bind all DOM references — throw early if markup diverges.
+  // Bind DOM references
   modeRadios           = document.querySelectorAll<HTMLInputElement>('input[name="monitoringMode"]');
   severityCheckboxes   = document.querySelectorAll<HTMLInputElement>('input[name="severity"]');
   retainDaysInput      = getEl<HTMLInputElement>('retain-history-days');
@@ -57,70 +61,207 @@ document.addEventListener('DOMContentLoaded', () => {
   allowlistEl          = getEl<HTMLUListElement>('allowlist');
   allowlistEmptyMsg    = getEl<HTMLParagraphElement>('allowlist-empty');
   saveBtn              = getEl<HTMLButtonElement>('save-btn');
+  discardBtn           = getEl<HTMLButtonElement>('btn-discard');
   saveStatus           = getEl<HTMLSpanElement>('save-status');
   sectionAllowlist     = getEl<HTMLElement>('section-allowlist');
-  proModeToggle        = getEl<HTMLInputElement>('pro-mode-toggle');
+  evalModeToggle       = getEl<HTMLInputElement>('eval-mode-toggle');
   modeConflictBanner   = getEl<HTMLElement>('mode-conflict-banner');
   btnRemoveBroadAccess = getEl<HTMLButtonElement>('btn-remove-broad-access');
   btnSwitchToAllSites  = getEl<HTMLButtonElement>('btn-switch-to-all-sites');
+  navDirtyBadge        = getEl<HTMLElement>('nav-dirty-badge');
+  unsavedDialog        = getEl<HTMLDialogElement>('unsaved-dialog');
 
+  wireNav();
+  wireNavCards();
   wireModeRadios();
   wireConflictBanner();
   wireSaveButton();
+  wireDiscardButton();
   wireDirtyTracking();
   wireDataManagement();
+  wireAppearanceLivePreview();
+  wireUnsavedDialog();
+
+  // Version badge
+  if (typeof chrome !== 'undefined' && typeof chrome.runtime !== 'undefined') {
+    const manifest = chrome.runtime.getManifest();
+    const versionEl = document.getElementById('home-version-badge');
+    if (versionEl) versionEl.textContent = `SecCheck v${manifest.version}`;
+    const aboutEl = document.getElementById('about-version');
+    if (aboutEl) aboutEl.textContent = manifest.version;
+  }
+
   void loadAndPopulate();
 });
 
 /* ================================================================
-   Data Management
+   Section router
    ================================================================ */
 
-function wireDataManagement(): void {
-  const deleteOriginInput = getEl<HTMLInputElement>('delete-origin-input');
-  const btnDeleteOrigin = getEl<HTMLButtonElement>('btn-delete-origin');
-  const btnClearHistory = getEl<HTMLButtonElement>('btn-clear-history');
-  const btnClearPrivate = getEl<HTMLButtonElement>('btn-clear-private');
-  const btnClearAll = getEl<HTMLButtonElement>('btn-clear-all');
-  const dataMgmtStatus = getEl<HTMLDivElement>('data-mgmt-status');
+const SECTION_IDS = ['home', 'monitoring', 'findings', 'cookies', 'history', 'appearance', 'advanced', 'about'];
 
-  function showDataStatus(msg: string, isError = false): void {
-    dataMgmtStatus.textContent = msg;
-    dataMgmtStatus.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
-    setTimeout(() => { dataMgmtStatus.textContent = ''; dataMgmtStatus.className = 'status-message'; }, 4000);
+function navigateToSection(target: string): void {
+  if (isDirty) {
+    pendingNavSection = target;
+    showUnsavedDialog();
+  } else {
+    activateSection(target);
+  }
+}
+
+function wireNav(): void {
+  const navItems = document.querySelectorAll<HTMLButtonElement>('.nav-item[data-section]');
+  navItems.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset['section'] ?? 'home';
+      navigateToSection(target);
+    });
+  });
+}
+
+function wireNavCards(): void {
+  const cards = document.querySelectorAll<HTMLButtonElement>('.home-nav-card[data-goto]');
+  cards.forEach((card) => {
+    card.addEventListener('click', () => {
+      const target = card.dataset['goto'] ?? 'home';
+      navigateToSection(target);
+    });
+  });
+
+  // Home callout action button
+  const calloutAction = document.getElementById('home-callout-action');
+  if (calloutAction) {
+    calloutAction.addEventListener('click', () => {
+      navigateToSection('monitoring');
+    });
+  }
+}
+
+function activateSection(sectionId: string): void {
+  const target = SECTION_IDS.includes(sectionId) ? sectionId : 'home';
+
+  // Show/hide sections
+  SECTION_IDS.forEach((id) => {
+    const section = document.getElementById(`section-${id}`);
+    if (!section) return;
+    if (id === target) {
+      section.removeAttribute('hidden');
+      section.classList.add('active');
+    } else {
+      section.setAttribute('hidden', '');
+      section.classList.remove('active');
+    }
+  });
+
+  // Update nav item active states
+  const navItems = document.querySelectorAll<HTMLButtonElement>('.nav-item[data-section]');
+  navItems.forEach((btn) => {
+    const isActive = btn.dataset['section'] === target;
+    btn.classList.toggle('active', isActive);
+    if (isActive) {
+      btn.setAttribute('aria-current', 'page');
+    } else {
+      btn.removeAttribute('aria-current');
+    }
+  });
+
+  // Refresh home view data when navigating to it
+  if (target === 'home') {
+    void refreshHomeView();
+  }
+}
+
+/* ================================================================
+   Home / Overview view
+   ================================================================ */
+
+async function refreshHomeView(): Promise<void> {
+  const modeEl = document.getElementById('home-mode-value');
+  const permsEl = document.getElementById('home-perms-value');
+  const callout = document.getElementById('home-callout');
+  const calloutTitle = document.getElementById('home-callout-title');
+  const calloutDesc = document.getElementById('home-callout-desc');
+  const calloutAction = document.getElementById('home-callout-action') as HTMLButtonElement | null;
+
+  if (!modeEl || !permsEl || !callout || !calloutTitle || !calloutDesc) return;
+
+  // Load current settings and permissions state
+  let settings: Settings;
+  try {
+    settings = await SettingsService.getSettings();
+  } catch {
+    modeEl.textContent = 'Unknown';
+    return;
   }
 
-  btnDeleteOrigin.addEventListener('click', () => {
-    const origin = deleteOriginInput.value.trim();
-    if (!origin) { showDataStatus('Enter an origin first.', true); return; }
-    try { new URL(origin); } catch { showDataStatus('Invalid origin URL.', true); return; }
-    void LocalStorage.deleteOriginData(origin)
-      .then(() => { showDataStatus(`Deleted data for ${origin}.`); deleteOriginInput.value = ''; })
-      .catch((err: unknown) => { showDataStatus(`Failed: ${String(err)}`, true); });
-  });
+  const modeLabels: Record<string, string> = {
+    'per-site': 'Per-site opt-in',
+    'all-sites': 'All sites',
+    'off': 'Off',
+  };
+  modeEl.textContent = modeLabels[settings.monitoringMode] ?? settings.monitoringMode;
 
-  btnClearHistory.addEventListener('click', () => {
-    if (!confirm('Clear ALL history? This cannot be undone.')) return;
-    void LocalStorage.deleteAllHistory()
-      .then(() => showDataStatus('All history cleared.'))
-      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
-  });
+  // Permissions coverage
+  let permText = '—';
+  let needsAction = false;
+  let actionText = '';
+  let actionDesc = '';
 
-  btnClearPrivate.addEventListener('click', () => {
-    void LocalStorage.deletePrivateRecords()
-      .then(() => showDataStatus('Private records cleared.'))
-      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
-  });
+  if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
+    try {
+      const granted = await PermissionsService.getAllGrantedOrigins();
+      const hasComplete = await PermissionsService.hasCompleteBroadGrant();
+      const hasBroad = await PermissionsService.isBroadGrantPresent();
 
-  btnClearAll.addEventListener('click', () => {
-    if (!confirm('Clear ALL local SecCheck data? This cannot be undone.')) return;
-    void sendToBackground({ type: 'RESET_ALL_DATA' })
-      .then(() => {
-        showDataStatus('All data cleared. Reloading...');
-        setTimeout(() => window.location.reload(), 1500);
-      })
-      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
-  });
+      if (settings.monitoringMode === 'off') {
+        permText = 'Capture disabled';
+      } else if (settings.monitoringMode === 'all-sites') {
+        if (hasComplete) {
+          permText = 'All sites (complete)';
+        } else if (hasBroad) {
+          permText = '⚠ Incomplete broad access';
+          needsAction = true;
+          actionText = 'Fix permissions';
+          actionDesc = 'All-sites mode requires complete HTTP + HTTPS broad access. Capture is paused.';
+        } else {
+          permText = '⚠ No broad access granted';
+          needsAction = true;
+          actionText = 'Grant access';
+          actionDesc = 'All-sites mode requires broad host permission. Go to Monitoring to grant it.';
+        }
+      } else {
+        // per-site
+        if (hasBroad) {
+          permText = '⚠ Conflict: broad access active';
+          needsAction = true;
+          actionText = 'Resolve conflict';
+          actionDesc = 'Per-site mode is active but broad access is also granted. Capture is paused.';
+        } else if (granted.length === 0) {
+          permText = 'No origins granted yet';
+        } else {
+          permText = `${granted.length} origin${granted.length !== 1 ? 's' : ''} granted`;
+        }
+      }
+    } catch {
+      permText = 'Unable to read permissions';
+    }
+  } else {
+    permText = 'Permissions API unavailable';
+  }
+
+  permsEl.textContent = permText;
+
+  if (needsAction) {
+    callout.removeAttribute('hidden');
+    calloutTitle.textContent = actionText;
+    calloutDesc.textContent = actionDesc;
+    if (calloutAction) {
+      calloutAction.removeAttribute('hidden');
+      calloutAction.textContent = 'Go to Monitoring';
+    }
+  } else {
+    callout.setAttribute('hidden', '');
+  }
 }
 
 /* ================================================================
@@ -136,27 +277,35 @@ async function loadAndPopulate(): Promise<void> {
     return;
   }
 
-  // ── Monitoring mode ──────────────────────────────────────────
+  // Monitoring mode
   currentMode = settings.monitoringMode;
   for (const radio of modeRadios) {
     radio.checked = radio.value === settings.monitoringMode;
   }
   updateAllowlistVisibility(settings.monitoringMode);
 
-  // ── Severity filter ──────────────────────────────────────────
+  // Severity filter
   const filterSet = new Set<string>(settings.severityFilter);
   for (const cb of severityCheckboxes) {
     cb.checked = filterSet.has(cb.value);
   }
 
-  // ── History ──────────────────────────────────────────────────
+  // History
   retainDaysInput.value = String(settings.retainHistoryDays);
-  maxHistoryInput.value = String(settings.maxHistoryPerOrigin ?? 10);
+  maxHistoryInput.value = String(settings.maxHistoryPerOrigin ?? DEFAULT_SETTINGS.maxHistoryPerOrigin);
   alwaysSensitiveInput.value = settings.sensitiveCookieNames.join(', ');
   alwaysIgnoreInput.value = settings.ignoredCookieNames.join(', ');
-  proModeToggle.checked = Boolean(settings.evaluationMode);
+  evalModeToggle.checked = Boolean(settings.evaluationMode);
 
-  // ── Allowlist: load authoritative granted origins from chrome.permissions ──
+  // Appearance
+  applyThemeRadio(settings.theme ?? DEFAULT_SETTINGS.theme ?? 'system');
+  applyDensityRadio(settings.density ?? DEFAULT_SETTINGS.density ?? 'comfortable');
+  applyMotionRadio(settings.reducedMotion ?? DEFAULT_SETTINGS.reducedMotion ?? 'system');
+  applyTheme(settings.theme ?? 'system');
+  applyDensity(settings.density ?? 'comfortable');
+  applyMotion(settings.reducedMotion ?? 'system');
+
+  // Allowlist
   try {
     const granted = await PermissionsService.getAllGrantedOrigins();
     workingOrigins = granted;
@@ -166,9 +315,67 @@ async function loadAndPopulate(): Promise<void> {
   renderAllowlist();
   await checkAndRenderBroadConflict();
 
-  // Snapshot after full population for dirty state checking
+  // Populate home view
+  await refreshHomeView();
+
+  // Snapshot for dirty tracking
   initialSettingsSnapshot = getFormStateString();
-  updateDirtyState();
+  isDirty = false;
+  updateDirtyUI();
+}
+
+function applyThemeRadio(value: string): void {
+  const radios = document.querySelectorAll<HTMLInputElement>('input[name="theme"]');
+  radios.forEach((r) => { r.checked = r.value === value; });
+}
+
+function applyDensityRadio(value: string): void {
+  const radios = document.querySelectorAll<HTMLInputElement>('input[name="density"]');
+  radios.forEach((r) => { r.checked = r.value === value; });
+}
+
+function applyMotionRadio(value: string): void {
+  const radios = document.querySelectorAll<HTMLInputElement>('input[name="reducedMotion"]');
+  radios.forEach((r) => { r.checked = r.value === value; });
+}
+
+/* ================================================================
+   Appearance — live preview (applied immediately on change)
+   ================================================================ */
+
+function wireAppearanceLivePreview(): void {
+  const themeRadios = document.querySelectorAll<HTMLInputElement>('input[name="theme"]');
+  themeRadios.forEach((r) => {
+    r.addEventListener('change', () => {
+      if (r.checked) applyTheme(r.value);
+    });
+  });
+
+  const densityRadios = document.querySelectorAll<HTMLInputElement>('input[name="density"]');
+  densityRadios.forEach((r) => {
+    r.addEventListener('change', () => {
+      if (r.checked) applyDensity(r.value);
+    });
+  });
+
+  const motionRadios = document.querySelectorAll<HTMLInputElement>('input[name="reducedMotion"]');
+  motionRadios.forEach((r) => {
+    r.addEventListener('change', () => {
+      if (r.checked) applyMotion(r.value);
+    });
+  });
+}
+
+function applyTheme(theme: string): void {
+  applyAppearance(theme as 'system' | 'dark' | 'light');
+}
+
+function applyDensity(density: string): void {
+  applyAppearance(undefined, density as 'comfortable' | 'compact');
+}
+
+function applyMotion(motion: string): void {
+  applyAppearance(undefined, undefined, motion as 'system' | 'always' | 'never');
 }
 
 /* ================================================================
@@ -176,9 +383,11 @@ async function loadAndPopulate(): Promise<void> {
    ================================================================ */
 
 function wireSaveButton(): void {
-  saveBtn.addEventListener('click', () => {
-    void handleSave();
-  });
+  saveBtn.addEventListener('click', () => { void handleSave(); });
+}
+
+function wireDiscardButton(): void {
+  discardBtn.addEventListener('click', () => { void loadAndPopulate(); });
 }
 
 async function handleSave(): Promise<void> {
@@ -186,14 +395,11 @@ async function handleSave(): Promise<void> {
 
   const settings = readFormValues();
 
-  // Basic validation
   if (settings.retainHistoryDays < 0 || settings.retainHistoryDays > 365) {
-    setStatus('Retain days must be between 0 and 365.', true);
-    return;
+    setStatus('Retain days must be between 0 and 365.', true); return;
   }
   if (settings.maxHistoryPerOrigin < 1 || settings.maxHistoryPerOrigin > 50) {
-    setStatus('Max history per origin must be between 1 and 50.', true);
-    return;
+    setStatus('Max history per origin must be between 1 and 50.', true); return;
   }
 
   saveBtn.disabled = true;
@@ -209,6 +415,8 @@ async function handleSave(): Promise<void> {
       throw new Error(resp.error ?? 'Failed to apply settings transition');
     }
     initialSettingsSnapshot = getFormStateString();
+    isDirty = false;
+    updateDirtyUI();
     setStatus('Settings saved ✓', false);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to save settings.';
@@ -218,11 +426,8 @@ async function handleSave(): Promise<void> {
     saveBtn.textContent = 'Save settings';
   }
 
-  // Auto-clear success message after 3 seconds.
   setTimeout(() => {
-    if (getFormStateString() === initialSettingsSnapshot) {
-      clearStatus();
-    }
+    if (getFormStateString() === initialSettingsSnapshot) clearStatus();
   }, 3000);
 }
 
@@ -231,11 +436,9 @@ async function handleSave(): Promise<void> {
    ================================================================ */
 
 function readFormValues(): Settings {
-  // Monitoring mode
   let monitoringMode: Settings['monitoringMode'] = 'per-site';
   for (const radio of modeRadios) {
     if (radio.checked) {
-      // Runtime validation — values match the union type.
       const val = radio.value;
       if (val === 'per-site' || val === 'all-sites' || val === 'off') {
         monitoringMode = val;
@@ -244,18 +447,14 @@ function readFormValues(): Settings {
     }
   }
 
-  // Severity filter — collect checked values that are valid Severity members.
   const severityFilter: Severity[] = [];
   for (const cb of severityCheckboxes) {
     if (cb.checked) {
       const val = cb.value as Severity;
-      if (ALL_SEVERITIES.includes(val)) {
-        severityFilter.push(val);
-      }
+      if (ALL_SEVERITIES.includes(val)) severityFilter.push(val);
     }
   }
 
-  // Retain history days
   const retainHistoryDays = Math.max(0, Math.min(365, parseInt(retainDaysInput.value, 10) || 0));
   const maxHistoryPerOrigin = Math.max(1, Math.min(50, parseInt(maxHistoryInput.value, 10) || 10));
   const rawSensitive = alwaysSensitiveInput.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -269,6 +468,19 @@ function readFormValues(): Settings {
     setStatus(`Notice: Cookie names in both lists are treated as ignored: ${overlaps.join(', ')}`, false);
   }
 
+  // Appearance
+  let theme: Settings['theme'] = 'system';
+  const themeRadios = document.querySelectorAll<HTMLInputElement>('input[name="theme"]');
+  themeRadios.forEach((r) => { if (r.checked && (r.value === 'system' || r.value === 'dark' || r.value === 'light')) theme = r.value; });
+
+  let density: Settings['density'] = 'comfortable';
+  const densityRadios = document.querySelectorAll<HTMLInputElement>('input[name="density"]');
+  densityRadios.forEach((r) => { if (r.checked && (r.value === 'comfortable' || r.value === 'compact')) density = r.value; });
+
+  let reducedMotion: Settings['reducedMotion'] = 'system';
+  const motionRadios = document.querySelectorAll<HTMLInputElement>('input[name="reducedMotion"]');
+  motionRadios.forEach((r) => { if (r.checked && (r.value === 'system' || r.value === 'always' || r.value === 'never')) reducedMotion = r.value; });
+
   return {
     schemaVersion: 2,
     monitoringMode,
@@ -278,7 +490,10 @@ function readFormValues(): Settings {
     maxHistoryPerOrigin,
     sensitiveCookieNames: sensitive,
     ignoredCookieNames: ignored,
-    evaluationMode: proModeToggle.checked,
+    evaluationMode: evalModeToggle.checked,
+    theme,
+    density,
+    reducedMotion,
   };
 }
 
@@ -286,12 +501,7 @@ function readFormValues(): Settings {
    Allowlist rendering (createElement only — no innerHTML)
    ================================================================ */
 
-/**
- * Rebuild the allowlist <ul> from workingOrigins.
- * Clears all child nodes first, then appends fresh <li> elements.
- */
 function renderAllowlist(): void {
-  // Clear existing items safely.
   while (allowlistEl.firstChild) {
     allowlistEl.removeChild(allowlistEl.firstChild);
   }
@@ -302,26 +512,18 @@ function renderAllowlist(): void {
   }
 
   allowlistEmptyMsg.hidden = true;
-
   for (const origin of workingOrigins) {
     allowlistEl.appendChild(buildAllowlistItem(origin));
   }
 }
 
-/**
- * Build a single allowlist <li> row:
- *   <li class="allowlist-item">
- *     <span class="allowlist-origin">{origin}</span>
- *     <button class="btn-remove">Remove</button>
- *   </li>
- */
 function buildAllowlistItem(origin: string): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'allowlist-item';
 
   const originSpan = document.createElement('span');
   originSpan.className = 'allowlist-origin';
-  originSpan.textContent = origin;     // origin is trusted but use textContent anyway
+  originSpan.textContent = origin;
   originSpan.title = origin;
 
   const actionsDiv = document.createElement('div');
@@ -333,9 +535,7 @@ function buildAllowlistItem(origin: string): HTMLLIElement {
   purgeBtn.textContent = 'Delete stored data';
   purgeBtn.title = `Delete stored audit history and graph data for ${origin}`;
   purgeBtn.setAttribute('aria-label', `Delete stored audit history and graph data for ${origin}`);
-  purgeBtn.addEventListener('click', () => {
-    void purgeOrigin(origin);
-  });
+  purgeBtn.addEventListener('click', () => { void purgeOrigin(origin); });
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
@@ -343,20 +543,15 @@ function buildAllowlistItem(origin: string): HTMLLIElement {
   removeBtn.textContent = 'Remove';
   removeBtn.title = `Revoke browser host permission for ${origin}`;
   removeBtn.setAttribute('aria-label', `Revoke browser host permission for ${origin}`);
-  removeBtn.addEventListener('click', () => {
-    removeOrigin(origin);
-  });
+  removeBtn.addEventListener('click', () => { removeOrigin(origin); });
 
   actionsDiv.appendChild(purgeBtn);
   actionsDiv.appendChild(removeBtn);
-
   li.appendChild(originSpan);
   li.appendChild(actionsDiv);
-
   return li;
 }
 
-/** Purge stored data for an origin without revoking permissions */
 async function purgeOrigin(origin: string): Promise<void> {
   try {
     await LocalStorage.purgeOriginData(origin);
@@ -366,7 +561,6 @@ async function purgeOrigin(origin: string): Promise<void> {
   }
 }
 
-/** Remove an origin from browser permissions and re-render the list. */
 function removeOrigin(origin: string): void {
   void (async () => {
     try {
@@ -396,9 +590,7 @@ function wireModeRadios(): void {
 
       if (targetMode === 'all-sites' && currentMode !== 'all-sites') {
         const revertToPriorMode = (): void => {
-          for (const r of modeRadios) {
-            r.checked = r.value === currentMode;
-          }
+          for (const r of modeRadios) { r.checked = r.value === currentMode; }
           updateAllowlistVisibility(currentMode);
           void checkAndRenderBroadConflict();
           setStatus('All-sites monitoring requires permission for all URLs. Kept previous mode.', true);
@@ -462,27 +654,71 @@ function wireConflictBanner(): void {
 
   btnSwitchToAllSites.addEventListener('click', () => {
     currentMode = 'all-sites';
-    for (const r of modeRadios) {
-      r.checked = r.value === 'all-sites';
-    }
+    for (const r of modeRadios) { r.checked = r.value === 'all-sites'; }
     updateAllowlistVisibility('all-sites');
     modeConflictBanner.setAttribute('hidden', '');
     void handleSave();
   });
 }
 
-/**
- * The allowlist section is only relevant when mode is 'per-site'.
- * We toggle aria-hidden and the CSS hidden attribute together.
- */
 function updateAllowlistVisibility(mode: string): void {
   const visible = mode === 'per-site';
-  // Use the hidden attribute — matched by CSS `[hidden] { display:none }` default.
   if (visible) {
     sectionAllowlist.removeAttribute('hidden');
   } else {
     sectionAllowlist.setAttribute('hidden', '');
   }
+}
+
+/* ================================================================
+   Data management
+   ================================================================ */
+
+function wireDataManagement(): void {
+  const deleteOriginInput = getEl<HTMLInputElement>('delete-origin-input');
+  const btnDeleteOrigin = getEl<HTMLButtonElement>('btn-delete-origin');
+  const btnClearHistory = getEl<HTMLButtonElement>('btn-clear-history');
+  const btnClearPrivate = getEl<HTMLButtonElement>('btn-clear-private');
+  const btnClearAll = getEl<HTMLButtonElement>('btn-clear-all');
+  const dataMgmtStatus = getEl<HTMLDivElement>('data-mgmt-status');
+
+  function showDataStatus(msg: string, isError = false): void {
+    dataMgmtStatus.textContent = msg;
+    dataMgmtStatus.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
+    setTimeout(() => { dataMgmtStatus.textContent = ''; dataMgmtStatus.className = 'status-message'; }, 4000);
+  }
+
+  btnDeleteOrigin.addEventListener('click', () => {
+    const origin = deleteOriginInput.value.trim();
+    if (!origin) { showDataStatus('Enter an origin first.', true); return; }
+    try { new URL(origin); } catch { showDataStatus('Invalid origin URL.', true); return; }
+    void LocalStorage.deleteOriginData(origin)
+      .then(() => { showDataStatus(`Deleted data for ${origin}.`); deleteOriginInput.value = ''; })
+      .catch((err: unknown) => { showDataStatus(`Failed: ${String(err)}`, true); });
+  });
+
+  btnClearHistory.addEventListener('click', () => {
+    if (!confirm('Clear ALL history? This cannot be undone.')) return;
+    void LocalStorage.deleteAllHistory()
+      .then(() => showDataStatus('All history cleared.'))
+      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
+  });
+
+  btnClearPrivate.addEventListener('click', () => {
+    void LocalStorage.deletePrivateRecords()
+      .then(() => showDataStatus('Private records cleared.'))
+      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
+  });
+
+  btnClearAll.addEventListener('click', () => {
+    if (!confirm('Reset ALL local SecCheck data? This cannot be undone.')) return;
+    void sendToBackground({ type: 'RESET_ALL_DATA' })
+      .then(() => {
+        showDataStatus('All data reset. Reloading…');
+        setTimeout(() => window.location.reload(), 1500);
+      })
+      .catch((err: unknown) => showDataStatus(`Failed: ${String(err)}`, true));
+  });
 }
 
 /* ================================================================
@@ -499,13 +735,22 @@ function getFormStateString(): string {
     sensitiveCookieNames: [...current.sensitiveCookieNames].sort(),
     ignoredCookieNames: [...current.ignoredCookieNames].sort(),
     evaluationMode: current.evaluationMode,
+    theme: current.theme ?? 'system',
+    density: current.density ?? 'comfortable',
+    reducedMotion: current.reducedMotion ?? 'system',
   });
 }
 
 function updateDirtyState(): void {
   if (!initialSettingsSnapshot) return;
-  const currentSnapshot = getFormStateString();
-  const isDirty = currentSnapshot !== initialSettingsSnapshot;
+  isDirty = getFormStateString() !== initialSettingsSnapshot;
+  updateDirtyUI();
+}
+
+function updateDirtyUI(): void {
+  navDirtyBadge.hidden = !isDirty;
+  navDirtyBadge.setAttribute('aria-hidden', String(!isDirty));
+  discardBtn.hidden = !isDirty;
   if (isDirty) {
     setStatus('Unsaved changes', false, true);
   } else if (saveStatus.classList.contains('dirty')) {
@@ -514,29 +759,73 @@ function updateDirtyState(): void {
 }
 
 function wireDirtyTracking(): void {
-  for (const radio of modeRadios) {
-    radio.addEventListener('change', updateDirtyState);
-  }
-  for (const cb of severityCheckboxes) {
-    cb.addEventListener('change', updateDirtyState);
-  }
+  for (const radio of modeRadios) { radio.addEventListener('change', updateDirtyState); }
+  for (const cb of severityCheckboxes) { cb.addEventListener('change', updateDirtyState); }
   retainDaysInput.addEventListener('input', updateDirtyState);
   maxHistoryInput.addEventListener('input', updateDirtyState);
   alwaysSensitiveInput.addEventListener('input', updateDirtyState);
   alwaysIgnoreInput.addEventListener('input', updateDirtyState);
-  proModeToggle.addEventListener('change', updateDirtyState);
+  evalModeToggle.addEventListener('change', updateDirtyState);
+
+  const allAppearanceRadios = document.querySelectorAll<HTMLInputElement>(
+    'input[name="theme"], input[name="density"], input[name="reducedMotion"]'
+  );
+  allAppearanceRadios.forEach((r) => r.addEventListener('change', updateDirtyState));
+}
+
+/* ================================================================
+   Unsaved changes dialog
+   ================================================================ */
+
+function wireUnsavedDialog(): void {
+  const dialogSave = getEl<HTMLButtonElement>('dialog-save');
+  const dialogDiscard = getEl<HTMLButtonElement>('dialog-discard');
+  const dialogCancel = getEl<HTMLButtonElement>('dialog-cancel');
+
+  dialogSave.addEventListener('click', () => {
+    unsavedDialog.close();
+    void handleSave().then(() => {
+      if (pendingNavSection !== null) {
+        const target = pendingNavSection;
+        pendingNavSection = null;
+        activateSection(target);
+      }
+    });
+  });
+
+  dialogDiscard.addEventListener('click', () => {
+    unsavedDialog.close();
+    void loadAndPopulate().then(() => {
+      if (pendingNavSection !== null) {
+        const target = pendingNavSection;
+        pendingNavSection = null;
+        activateSection(target);
+      }
+    });
+  });
+
+  dialogCancel.addEventListener('click', () => {
+    unsavedDialog.close();
+    pendingNavSection = null;
+  });
+}
+
+function showUnsavedDialog(): void {
+  if (typeof unsavedDialog.showModal === 'function') {
+    unsavedDialog.showModal();
+  }
 }
 
 /* ================================================================
    Status message helpers
    ================================================================ */
 
-function setStatus(msg: string, isError: boolean, isDirty: boolean = false): void {
+function setStatus(msg: string, isError: boolean, dirtyFlag: boolean = false): void {
   saveStatus.textContent = msg;
   saveStatus.className = 'save-status';
   if (isError) {
     saveStatus.classList.add('error');
-  } else if (isDirty) {
+  } else if (dirtyFlag) {
     saveStatus.classList.add('dirty');
   }
 }
@@ -550,13 +839,13 @@ function clearStatus(): void {
    Utility helpers
    ================================================================ */
 
-/** Returns a typed, non-null reference to a DOM element by ID. */
 function getEl<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing required element #${id}`);
   return el as T;
 }
 
+/* Permissions change listeners */
 if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
   if (typeof chrome.permissions.onRemoved !== 'undefined') {
     chrome.permissions.onRemoved.addListener(() => {
@@ -564,6 +853,7 @@ if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') 
         workingOrigins = origins;
         renderAllowlist();
         void checkAndRenderBroadConflict();
+        void refreshHomeView();
       });
     });
   }
@@ -573,9 +863,8 @@ if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') 
         workingOrigins = origins;
         renderAllowlist();
         void checkAndRenderBroadConflict();
+        void refreshHomeView();
       });
     });
   }
 }
-
-

@@ -271,5 +271,54 @@ describe('Privacy Lifecycle Production Integration', () => {
       );
       expect(leakedHistoryKeys).toHaveLength(0);
     });
+
+    it('never writes history, auth-diff, or graph to LocalStorage for an unknown tab whose tabs.get() rejects', async () => {
+      const unknownTabId = 999;
+      incognitoTabIds.delete(unknownTabId);
+      tabStates.delete(unknownTabId);
+      pendingPrivacyLookups.delete(unknownTabId);
+
+      (chrome.tabs.get as Mock).mockRejectedValue(new Error('Cannot find tab 999'));
+
+      const recordHistorySpy = vi.spyOn(LocalStorage, 'recordOriginHistory');
+      const recordAuthDiffSpy = vi.spyOn(LocalStorage, 'recordAuthDiff');
+      const mutateGraphSpy = vi.spyOn(LocalStorage, 'mutateGraph');
+
+      const testHop: Hop = {
+        requestId: 'unknown-tab-req-1',
+        url: 'https://bank.example.com/login',
+        status: 200,
+        headers: {
+          'content-type': 'text/html',
+          'set-cookie': 'session_token=secret_val; Secure; HttpOnly',
+        },
+        rawHeaders: [
+          { name: 'Content-Type', value: 'text/html' },
+          { name: 'Set-Cookie', value: 'session_token=secret_val; Secure; HttpOnly' },
+        ],
+        fromCache: false,
+        isHstsUpgrade: false,
+        capturedAt: 'onResponseStarted',
+        headersDiffer: false,
+        timestamp: Date.now(),
+        redirectCount: 0,
+      };
+
+      await onHopComplete(unknownTabId, testHop, undefined);
+
+      const state = tabStates.get(unknownTabId);
+      // Privacy is held as undefined (unresolved)
+      expect(state?.isIncognito).toBeUndefined();
+
+      // LocalStorage persistence sinks are NEVER touched
+      expect(recordHistorySpy).not.toHaveBeenCalled();
+      expect(recordAuthDiffSpy).not.toHaveBeenCalled();
+      expect(mutateGraphSpy).not.toHaveBeenCalled();
+
+      const leakedKeys = Object.keys(mockLocalStorageData).filter(
+        (k) => k.startsWith('history:') || k.startsWith('auth_diff:') || k.startsWith('graph:'),
+      );
+      expect(leakedKeys).toHaveLength(0);
+    });
   });
 });

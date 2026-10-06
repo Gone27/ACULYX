@@ -292,3 +292,140 @@ At the end of each workstream, report:
 6. **WS5 Visual UX refresh.** Apply the restrained cyber-futuristic design to a stable state and settings model.
 7. **WS6 Evidence and reports.** Provenance, coverage-aware findings, approved baselines and CLI refinement.
 8. **WS7 Release confidence.** Browser QA, artifact checks, docs and all release gates.
+
+
+## 2026-10-03T15:05:03Z
+
+# Teamwork Project Prompt — SecCheck Master Verification & Settings Redesign
+
+> Status: Launched  
+> Goal: Multi-agent execution across Phase 0 through Phase 5  
+> Requested team: Multi-agent team (Integration Owner + Functional, Privacy, Performance, Settings UX agents)
+
+You are the multi-agent teamwork coordinator and integration owner for SecCheck, a local-first Manifest V3 browser extension with Chrome and Firefox builds, a separate CLI, header/cookie/API analysis, page signals, history/authentication diffs, an attack-surface graph, popup, Options page, and side panel.
+
+Working directory: D:\Projects\header-cookie-security-checker
+Integrity mode: development
+
+---
+
+## Non-Negotiable Invariants & Work Rules
+
+1. **Confirm Environment First**: Begin by inspecting the current working directory, git branch, exact commit SHA, Node/npm versions, and package scripts. Do not rely on assumptions about previous commits, test counts, or bug lists. Re-verify every file path and behavior on the live checkout before editing.
+2. **Preserve Worktree & No Unauthorized Push**: Preserve any pre-existing uncommitted changes. Report final worktree status accurately. Do NOT commit, push, reset, or clean git working state unless explicitly authorized. Do not publish, release, or make external announcements.
+3. **Privacy Invariants**:
+   - Cookie values, authorization credentials, secret header values, request/response bodies, and sensitive URL path/query material must NEVER be persisted, logged, messaged, telemetered, or exported.
+   - All URL-valued coverage and CSP fields must be normalized through production path redactors.
+   - The extension is strictly passive in browser runtime (`connect-src 'none'`); it sends no outbound probes.
+   - Private/incognito records must never reach persistent history, graphs, auth baselines, diagnostics, or exports. Treat these as behaviors to verify against the live codebase before proposing changes.
+4. **Permissions Authority**:
+   - `chrome.permissions.getAll()` and browser permission events are the sole authority for host grants.
+   - In `all-sites` mode, missing or incomplete broad access must be displayed as paused/incomplete.
+   - In `per-site` mode, conflicting broad grants must pause capture until resolved.
+   - Transition to `off` immediately halts capture, analysis, and page signals, and clears badges.
+5. **Measurable Performance**: Define calibrated acceptance budgets instead of promising "zero lag" or "zero memory leaks". Measure and report actual memory bounds, coalesced broadcasts, and absence of sustained queue or memory growth across soak tests.
+6. **Self-Contained Report**: Conclude with the complete 11-section executive report detailed in Phase 5.
+
+---
+
+## Six-Phase Execution Plan
+
+### Phase 0 — Baseline & Feature Inventory
+1. Inspect the live checkout; record branch, commit SHA, git status, Node/npm versions, package scripts, and build targets.
+2. Run existing test scripts (`typecheck`, `lint`, `test`, `build`, `build:firefox`, `test:e2e`, `audit`) and record baseline counts and exit codes.
+3. Trace user-facing flows: browser event → permission/mode gate → capture/analysis → state update → storage → messaging → UI (popup, options, side panel) → export/deletion.
+4. Produce a feature-and-settings inventory table: Feature/Control | Intended Behavior | Source of Truth | Read/Write Path | Runtime Consumers | Visible Feedback | Privacy Impact | Tests | Status.
+
+### Phase 1 — Comprehensive Functional & Quality Testing
+Test the full path for every feature across:
+- **Monitoring & Permissions**: Per-site, All-sites, Off; first-run; grant/deny/cancel; incomplete schemes; broad conflicts; external revocation; browser restart; internal/restricted URLs.
+- **Capture & Findings**: Main-frame responses, redirect chains, cache handling, HSTS, cookie correlation, third-party cookies, API/XHR/fetch capture, CSP headers, `<meta>` CSP, service worker signals, SRI, rule scoring, and duplicate event deduplication.
+- **State & Lifecycle**: MV3 worker restart and session hydration; navigation version tagging; rejection of stale DOM/API events; tab close; multi-tab concurrent browsing; settings synchronization across popup, options, and side panel.
+- **UI & Data Management**: Popup and side panel states (loading, empty, capturing, paused, error, restricted); allowlist modifications; single-origin data purge; complete reset.
+- **CLI & Exports**: URL/HAR inputs, SARIF 2.1, JSON, Markdown exports; canary redaction verification.
+- Maintain a layer-distinguished test matrix: Unit | Production Integration | Browser E2E | Manual QA | Not Tested.
+
+### Phase 2 — Defect Triage & Implementation
+1. For any suspected defect, reproduce it on the live branch or state why it cannot be reproduced. Confirm whether previously reported issues are already resolved in current code.
+2. Rank severity (P0–P3) based on security/privacy impact, user disruption, and likelihood.
+3. Fix root causes—not just superficial symptoms—while preserving backward compatibility and accessibility.
+4. Add regression tests importing real production modules and handlers.
+
+### Phase 3 — Settings Redesign with Dedicated Home & Functional Preferences
+Redesign Settings into a structured, responsive experience:
+1. **Home / Overview Destination**:
+   - Persistent, keyboard-accessible Home button/link in the navigation header that reliably returns to the overview from any section.
+   - Prominently displays current monitoring mode and real host permission coverage (clearly stating if paused or missing access).
+   - Clear next-action callout when permissions or recovery are needed.
+   - Quick navigation cards deep-linking into each settings group.
+   - Privacy/retention summary and shortcut to data management.
+   - Version and local-analysis guarantee badge.
+2. **Information Architecture**:
+   - `Home / Overview`: Status dashboard, quick actions, section cards.
+   - `Monitoring & Permissions`: Per-site / All-sites / Off, browser grants list, broad conflict resolution, remove permissions.
+   - `Findings & Analysis`: Severity display filter, scoring explanation, display preferences separated from evaluation.
+   - `Cookie Rules`: Custom sensitive & ignored lists, overlap resolution explanation ("ignored wins"), safe examples.
+   - `History & Data Management`: History retention days, max history per origin, single-origin deletion, clear history / clear private records / full reset.
+   - `Appearance & Accessibility`:
+     - Theme preference: System / Dark / Light (consistently tokenized across all surfaces).
+     - Layout density: Comfortable / Compact for lists and tables.
+     - Reduced motion: Follows OS with explicit override option.
+   - `Advanced / Developer`: Evaluation mode (attack-surface graph accumulation), diagnostic inspection.
+   - `About & Privacy`: Version, local analysis guarantee (`connect-src 'none'`), project source link.
+3. **UX & Accessibility Polish**:
+   - Visible save states (clean, unsaved changes, saving, saved, validation error, failure).
+   - Draft preservation: switching sections preserves uncommitted edits or prompts confirmation.
+   - Field-level validation, visible `:focus-visible` rings, ARIA landmarks, screen reader live regions, and 200% zoom responsiveness without layout breakage.
+
+### Phase 4 — Performance & Stability Verification
+1. Measure cold/warm popup and Settings loading times.
+2. Benchmark high-volume events (rapid redirects, SPA DOM mutations, cookie changes, subresource API calls) to ensure event coalescing and write batching are effective.
+3. Verify graph rendering performance and bounded D3 simulation cleanup.
+4. Test storage limits: verify bounded maps/queues, deterministic eviction, and absence of sustained queue or memory growth across soak testing.
+5. Test MV3 worker termination and restart recovery while tabs remain active.
+
+### Phase 5 — Quality Gates & Final Executive Report
+1. Execute all repository gates:
+   - `npm run typecheck`
+   - `npm run lint`
+   - `npm test`
+   - `npm run build`
+   - `npm run build:firefox`
+   - `npm run test:e2e`
+   - `npm audit`
+   - CLI / export smoke tests
+2. Produce the required 11-section final report:
+   - **Section 1**: Branch, exact commit SHA, git worktree status, confirmation that no push occurred.
+   - **Section 2**: Agent roles, workstreams, and files owned/modified.
+   - **Section 3**: Feature and settings inventory (integrated, partial, broken, deferred).
+   - **Section 4**: Verified defects found (severity, reproduction, root cause, fix, regression test).
+   - **Section 5**: Settings IA & Home behavior (controls added/modified, defaults, persistence, validation, accessibility).
+   - **Section 6**: Layer-distinguished test matrix (unit, production integration, browser E2E, manual QA).
+   - **Section 7**: Gate results with exact commands, exit codes, test counts, browser versions, and audit outputs.
+   - **Section 8**: Measured performance benchmarks (before/after, workload, hardware, timings, memory bounds).
+   - **Section 9**: Privacy, permission, and data lifecycle verification (canary absence across storage, ledger, exports).
+   - **Section 10**: Known limitations, manual-only items, and prioritized follow-up work.
+   - **Section 11**: Direct release gate verdict (PASS / BLOCKED).
+
+---
+
+## Acceptance Criteria
+
+### Security & Privacy Verification
+- [ ] Confirmed zero cookie values, credentials, or sensitive path tokens (`[id]`, `[token]`) persisted in storage or exports.
+- [ ] Confirmed private/incognito browsing state never persists records to persistent `LocalStorage` sinks.
+- [ ] Confirmed Reset All Data synchronously switches the capture gate to `off` prior to asynchronous store deletion.
+- [ ] Verified that URL-valued fields in coverage and CSP directives are scrubbed through production path redactors.
+
+### Settings Experience & Accessibility
+- [ ] Settings loads a dedicated Home / Overview view with a persistent, keyboard-accessible Home button/link.
+- [ ] Section navigation preserves draft edits or warns before discarding.
+- [ ] Selected additions (Theme: System/Dark/Light, Density: Comfortable/Compact, display preferences) are fully wired and functional.
+- [ ] Accessible save states, visible focus outlines, ARIA live announcements, and 200% zoom responsiveness pass without clipping.
+
+### Functional Integration & Stability
+- [ ] Monitoring modes (Per-site, All-sites, Off) truthfully reflect browser permission state; missing broad grants render paused state.
+- [ ] Worker restart rehydrates session state and restores navigation generation counters without dropping current page signals.
+- [ ] All applicable unit, integration, and E2E tests pass cleanly with zero failures.
+- [ ] Zero TypeScript errors, zero ESLint errors/warnings, and 0 npm audit vulnerabilities.
+- [ ] All pre-existing uncommitted work is preserved; no unauthorized commits or remote pushes executed.

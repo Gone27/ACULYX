@@ -30,6 +30,7 @@ import { SettingsService } from '../shared/settings';
 import { PermissionsService, patternFromOrigin } from '../background/permissions';
 import { isModeCaptureAllowed } from '../shared/gating';
 import { selectVisibleFindings } from '../shared/filters';
+import { applyAppearance } from '../shared/appearance';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let gradeBadge:          HTMLDivElement;
@@ -212,6 +213,7 @@ async function initPopup(): Promise<void> {
 
   const settings = await SettingsService.getSettings();
   currentSettings = settings;
+  applyAppearance(settings.theme, settings.density, settings.reducedMotion);
   const broadActive = await PermissionsService.isBroadGrantPresent();
   const completeBroad = await PermissionsService.hasCompleteBroadGrant();
   const gate = isModeCaptureAllowed(tab.url, settings, broadActive, undefined, completeBroad);
@@ -297,6 +299,14 @@ function openLivePort(): void {
   const port = chrome.runtime.connect({ name: POPUP_PORT_NAME });
 
   port.onMessage.addListener((msg: unknown) => {
+    if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'SETTINGS_CHANGED') {
+      const newSettings = (msg as { settings?: SettingsV2 }).settings;
+      if (newSettings !== undefined) {
+        currentSettings = newSettings;
+        applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+      }
+      return;
+    }
     if (isStateResponse(msg) && msg.state?.tabId === currentTabId) {
       renderState(msg.state);
       return;

@@ -10,7 +10,7 @@
   --color-pass:     var(--sc-pass);
   --color-high:     var(--sc-high);
   --color-low:      var(--sc-low);
-  --color-pro:      var(--sc-violet);
+  --color-eval:     var(--sc-violet);
 }
 
 /* Node-list table (keyboard-navigable alternative to graph) */
@@ -98,16 +98,16 @@ body {
   text-transform: uppercase;
 }
 
-.tier-badge.free {
+.tier-badge.standard {
   background: var(--sc-overlay-medium);
   color: var(--text-muted);
   border: 1px solid var(--text-muted);
 }
 
-.tier-badge.pro {
+.tier-badge.evaluation {
   background: var(--sc-badge-violet-bg);
   color: var(--sc-badge-violet-text);
-  border: 1px solid var(--color-pro);
+  border: 1px solid var(--color-eval);
 }
 
 .header-actions {
@@ -132,30 +132,30 @@ body {
   color: var(--text);
 }
 
-/* ── Pro Banner ── */
-.pro-banner {
+/* ── Evaluation Banner ── */
+.eval-banner {
   background: var(--sc-banner-violet-bg);
   border-bottom: 1px solid var(--sc-banner-violet-border);
   padding: 8px 14px;
 }
 
-.pro-banner-content {
+.eval-banner-content {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.pro-icon {
+.eval-icon {
   font-size: 16px;
   color: var(--sc-gold);
 }
 
-.pro-text strong {
+.eval-text strong {
   color: var(--sc-violet-light);
   font-size: 11px;
 }
 
-.pro-text p {
+.eval-text p {
   color: var(--sc-badge-violet-text);
   font-size: 11px;
   margin-top: 1px;

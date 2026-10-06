@@ -99,5 +99,8 @@ export const DEFAULT_SETTINGS: SettingsV2 = {
   sensitiveCookieNames: [],
   ignoredCookieNames: [],
   evaluationMode: false,
+  theme: 'system',
+  density: 'comfortable',
+  reducedMotion: 'system',
 };
 

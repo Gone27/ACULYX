@@ -295,4 +295,85 @@ describe('Production Canary Leak Prevention Integration Tests', () => {
       }
     });
   });
+
+  describe('P1 URL Query Redaction & Arbitrary Query Secrets Containment', () => {
+    const OAUTH_URL =
+      'https://example.com/oauth/callback?state=csrf-canary-secret&email=private%40example.com&custom_auth_token=super_secret_opaque_token_12345&session_token=secret_session';
+    const OAUTH_STATE_SECRET = 'csrf-canary-secret';
+    const OAUTH_EMAIL_SECRET = 'private@example.com';
+    const OAUTH_EMAIL_ENCODED = 'private%40example.com';
+    const CUSTOM_TOKEN_SECRET = 'super_secret_opaque_token_12345';
+    const CUSTOM_TOKEN_KEY = 'custom_auth_token';
+
+    it('sanitizeUrlForStorage completely strips OAuth state, email, custom token, and query params', () => {
+      const sanitized = sanitizeUrlForStorage(OAUTH_URL);
+
+      expect(sanitized).toBe('https://example.com/oauth/callback');
+      expect(sanitized.includes('?')).toBe(false);
+      expect(sanitized.includes('#')).toBe(false);
+      expect(sanitized.includes(OAUTH_STATE_SECRET)).toBe(false);
+      expect(sanitized.includes(OAUTH_EMAIL_SECRET)).toBe(false);
+      expect(sanitized.includes(OAUTH_EMAIL_ENCODED)).toBe(false);
+      expect(sanitized.includes(CUSTOM_TOKEN_SECRET)).toBe(false);
+      expect(sanitized.includes(CUSTOM_TOKEN_KEY)).toBe(false);
+    });
+
+    it('assertNoSensitiveSecrets aborts on arbitrary unredacted query parameters in state.url or hops', () => {
+      const stateWithQuery = createCleanTabState();
+      stateWithQuery.url = OAUTH_URL;
+
+      expect(() => assertNoSensitiveSecrets(stateWithQuery)).toThrowError(
+        /Unredacted query string detected in state.url — storage aborted./,
+      );
+
+      const stateWithHopQuery = createCleanTabState();
+      const firstHop = stateWithHopQuery.hops[0];
+      if (firstHop !== undefined) {
+        firstHop.url = `https://api.example.com/data?email=${OAUTH_EMAIL_ENCODED}`;
+      }
+
+      expect(() => assertNoSensitiveSecrets(stateWithHopQuery)).toThrowError(
+        /Unredacted query string detected in hop\[0\].url — storage aborted./,
+      );
+    });
+
+    it('assertNoSensitiveSecrets succeeds when URLs are processed via sanitizeUrlForStorage', () => {
+      const cleanState = createCleanTabState();
+      cleanState.url = sanitizeUrlForStorage(OAUTH_URL);
+      const cleanHop = cleanState.hops[0];
+      if (cleanHop !== undefined) {
+        cleanHop.url = sanitizeUrlForStorage(`https://api.example.com/data?state=${OAUTH_STATE_SECRET}&token=test`);
+      }
+
+      expect(() => assertNoSensitiveSecrets(cleanState)).not.toThrow();
+      expect(cleanState.url).toBe('https://example.com/oauth/callback');
+      expect(cleanHop?.url).toBe('https://api.example.com/data');
+    });
+
+    it('guarantees zero OAuth state, email/PII, or custom token query secrets in exports', () => {
+      const state = createCleanTabState();
+      state.url = sanitizeUrlForStorage(OAUTH_URL);
+      const stateHop = state.hops[0];
+      if (stateHop !== undefined) {
+        stateHop.url = sanitizeUrlForStorage(`https://api.example.com/data?state=${OAUTH_STATE_SECRET}`);
+      }
+
+      const json = exportJsonReport(state);
+      const md = exportMarkdownReport(state);
+      const sarif = exportSarifReport(state);
+
+      const canaries: Array<[string, string]> = [
+        ['OAuth state secret', OAUTH_STATE_SECRET],
+        ['OAuth email secret', OAUTH_EMAIL_SECRET],
+        ['OAuth email encoded', OAUTH_EMAIL_ENCODED],
+        ['Custom token secret', CUSTOM_TOKEN_SECRET],
+      ];
+
+      for (const [name, secret] of canaries) {
+        expect(json.includes(secret), `JSON leak of ${name}`).toBe(false);
+        expect(md.includes(secret), `MD leak of ${name}`).toBe(false);
+        expect(sarif.includes(secret), `SARIF leak of ${name}`).toBe(false);
+      }
+    });
+  });
 });

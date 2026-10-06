@@ -10,7 +10,7 @@ import {
 } from '../../src/shared/settings';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 import { runRules } from '../../src/rules/engine';
-import type { Hop, CookieRecord } from '../../src/shared/types';
+import type { Hop, CookieRecord, SettingsV2 } from '../../src/shared/types';
 
 describe('Settings schema v2 and migration', () => {
   it('falls back to default settings on null, undefined, or non-object input', () => {
@@ -360,6 +360,29 @@ describe('SettingsTransitionPipeline and atomic transitions (WS1 1C)', () => {
 
     // lastAppliedSettings must not be corrupted or overwritten
     expect(pipeline.getLastAppliedSettings()).toEqual(snapshotBefore);
+  });
+
+  it('single-field appearance update (theme) detects areEqual=false, updates cache, and invokes subscriber', async () => {
+    SettingsService.clearCache();
+    const pipeline = new SettingsTransitionPipeline();
+    const initial: SettingsV2 = { ...DEFAULT_SETTINGS, theme: 'system' };
+    await pipeline.transition(initial, 'storage');
+
+    const updated: SettingsV2 = { ...DEFAULT_SETTINGS, theme: 'dark' };
+    expect(pipeline.areEqual(initial, updated)).toBe(false);
+
+    const subscriber = vi.fn();
+    const unsubscribe = SettingsService.onSettingsChanged(subscriber);
+
+    try {
+      const result = await SettingsService.transition(updated, 'storage');
+      expect(result.theme).toBe('dark');
+      expect(SettingsService.getCachedSettings().theme).toBe('dark');
+      expect(subscriber).toHaveBeenCalledTimes(1);
+      expect(subscriber).toHaveBeenCalledWith(expect.objectContaining({ theme: 'dark' }));
+    } finally {
+      unsubscribe();
+    }
   });
 });
 

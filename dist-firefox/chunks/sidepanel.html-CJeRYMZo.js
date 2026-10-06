@@ -1,6 +1,6 @@
-import { O as SIDEPANEL_PORT_NAME, a as registrableDomain, r as sendToBackground } from "./messaging-B0qCnidt.js";
+import { I as SIDEPANEL_PORT_NAME, r as sendToBackground, u as registrableDomain } from "./messaging-BvANQDmr.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-/* empty css                       */
+import { n as bootstrapAppearance, t as applyAppearance } from "./appearance-CaPqIvdZ.js";
 //#region node_modules/d3-force/src/center.js
 function center_default(x, y) {
 	var nodes, strength = 1;
@@ -854,7 +854,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	const tierBadge = getEl("tier-badge");
 	const refreshBtn = getEl("refresh-btn");
 	const optionsLink = getEl("options-link");
-	const proBanner = getEl("pro-banner");
+	const evalBanner = getEl("eval-banner");
 	const apexDomainVal = getEl("apex-domain-val");
 	const nodesCountVal = getEl("nodes-count-val");
 	const edgesCountVal = getEl("edges-count-val");
@@ -892,9 +892,15 @@ document.addEventListener("DOMContentLoaded", () => {
 	});
 	const port = chrome.runtime.connect({ name: SIDEPANEL_PORT_NAME });
 	port.onMessage.addListener((msg) => {
+		if (typeof msg === "object" && msg !== null && msg.type === "SETTINGS_CHANGED") {
+			const newSettings = msg.settings;
+			if (newSettings !== void 0) applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+			return;
+		}
 		const message = msg;
 		if (message.type === "TAB_STATE_UPDATE" && message.state !== void 0) handleTabState(message.state);
 	});
+	bootstrapAppearance();
 	(async () => {
 		try {
 			const urlParams = new URLSearchParams(window.location.search);
@@ -975,14 +981,14 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	function renderGraph(graph) {
 		graphLoading.hidden = true;
-		if (graph.isPro) {
+		if (Boolean(graph.isEvaluation ?? graph.isPro)) {
 			tierBadge.textContent = "Evaluation";
-			tierBadge.className = "tier-badge pro";
-			proBanner.hidden = true;
+			tierBadge.className = "tier-badge evaluation";
+			evalBanner.hidden = true;
 		} else {
 			tierBadge.textContent = "Standard";
-			tierBadge.className = "tier-badge free";
-			proBanner.hidden = false;
+			tierBadge.className = "tier-badge standard";
+			evalBanner.hidden = false;
 		}
 		nodesCountVal.textContent = graph.nodes.length.toString();
 		edgesCountVal.textContent = graph.edges.length.toString();
@@ -1184,4 +1190,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-FM2IEoV6.js.map
+//# sourceMappingURL=sidepanel.html-CJeRYMZo.js.map

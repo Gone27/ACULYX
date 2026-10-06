@@ -16,7 +16,7 @@
  * to avoid noise. All captures are strictly origin-gated and require user permission.
  */
 
-import { normalizeHeaders, headersDiffer, redactUrlQueryParams, redactUrlPath, redactHeaderValue } from '../rules/utils';
+import { normalizeHeaders, headersDiffer, sanitizeUrlForStorage, redactUrlPath, redactHeaderValue } from '../rules/utils';
 import type { Hop, ApiHop } from '../shared/types';
 import { getTabGeneration } from './generations';
 
@@ -135,6 +135,7 @@ export function isCaptureActiveForUrl(url: string): boolean {
 export function registerCaptureListeners(
   onHopComplete: (tabId: number, hop: Hop, isIncognito: boolean | undefined) => void,
   onApiHopComplete?: (apiHop: ApiHop, isIncognito: boolean | undefined) => void,
+  onThirdPartyBlocked?: (tabId: number, url: string) => void,
 ): void {
   const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
   const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
@@ -142,9 +143,22 @@ export function registerCaptureListeners(
   try {
     chrome.webRequest.onBeforeSendHeaders.addListener(
       (details: chrome.webRequest.WebRequestHeadersDetails): void => {
+        if (details.tabId < 0) return;
+
+        const snapshot = CapturePolicy.getSnapshot();
+        const isAllowed = isCaptureActiveForUrl(details.url);
+
+        if (!isAllowed) {
+          if (snapshot.ready && snapshot.mode === 'per-site' && details.type !== 'main_frame') {
+            if (onThirdPartyBlocked) {
+              onThirdPartyBlocked(details.tabId, details.url);
+            }
+          }
+          return;
+        }
+
         // ONLY track XHR/fetch requests
-        if (details.type !== 'xmlhttprequest' || details.tabId < 0) return;
-        if (!isCaptureActiveForUrl(details.url)) return;
+        if (details.type !== 'xmlhttprequest') return;
 
         const originHeader = details.requestHeaders?.find(
           (h) => h.name.toLowerCase() === 'origin',
@@ -232,9 +246,9 @@ export function registerCaptureListeners(
           const u = new URL(details.url);
           normalizedPath = u.origin + redactUrlPath(u.pathname);
         } catch {
-          normalizedPath = redactUrlQueryParams(details.url);
+          normalizedPath = sanitizeUrlForStorage(details.url);
         }
-        const sanitizedUrl = redactUrlQueryParams(details.url);
+        const sanitizedUrl = sanitizeUrlForStorage(details.url);
         const apiHop: ApiHop = {
           requestId: details.requestId,
           tabId: details.tabId,
@@ -280,7 +294,7 @@ export function registerCaptureListeners(
         const isIncog = incognitoTabIds.has(details.tabId) ? true : undefined;
         partial = {
           tabId: details.tabId,
-          url: redactUrlQueryParams(details.url),
+          url: sanitizeUrlForStorage(details.url),
           status: details.statusCode,
           headersReceived: null,
           rawHeadersReceived: [],
@@ -295,7 +309,7 @@ export function registerCaptureListeners(
         };
       }
 
-      const sanitizedUrl = redactUrlQueryParams(details.url);
+      const sanitizedUrl = sanitizeUrlForStorage(details.url);
 
       // Fill in stage-2 data.
       partial.headersStarted = normalised;
@@ -369,7 +383,7 @@ export function registerCaptureListeners(
       const beforeHeaders = existing?.headersReceived;
       const hop: Hop = {
         requestId: details.requestId,
-        url: redactUrlQueryParams(details.url),
+        url: sanitizeUrlForStorage(details.url),
         status: details.statusCode,
         headers,
         rawHeaders,

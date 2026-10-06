@@ -156,7 +156,7 @@ export function mergeIntoGraph(
   score: number,
   grade: Grade,
   discovered: DiscoveredNode[],
-  isPro: boolean = false
+  isEvaluation: boolean = false
 ): AttackSurfaceGraph {
   const apex = registrableDomain(currentHostname) ?? currentHostname;
   const now = Date.now();
@@ -293,7 +293,8 @@ export function mergeIntoGraph(
     apexDomain: apex,
     nodes: Array.from(nodeMap.values()),
     edges,
-    isPro,
+    isEvaluation,
+    isPro: isEvaluation,
     lastUpdated: now,
   };
 }

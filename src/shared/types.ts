@@ -118,9 +118,27 @@ export interface Finding {
    * vs heuristic (name pattern matching, bypass-prone host heuristics, version string regex).
    */
   confidence?: 'deterministic' | 'heuristic';
-  provenance?: 'response-header' | 'redirect' | 'cookie-metadata' | 'dom-signal' | 'har-json' | 'cli-fetch';
-  outcome?: 'pass' | 'fail' | 'not-observed' | 'not-applicable' | 'partial-coverage';
+  provenance?: FindingProvenance;
+  outcome?: FindingOutcome;
 }
+
+export type FindingProvenance =
+  | 'response-header'
+  | 'redirect-hop'
+  | 'redirect'
+  | 'cookie-metadata'
+  | 'dom-signal'
+  | 'har-import'
+  | 'har-json'
+  | 'cli-fetch';
+
+export type FindingOutcome =
+  | 'pass'
+  | 'violation'
+  | 'fail'
+  | 'not-observed'
+  | 'not-applicable'
+  | 'partial-coverage';
 
 export interface BaselineMetadata {
   schemaVersion: string;
@@ -154,9 +172,9 @@ export interface ScoreBreakdown {
  * never display a reassuring grade when coverage has blind spots.
  */
 export interface CoverageLedgerEntry {
-  type: 'navigation' | 'redirect' | 'api' | 'subresource' | 'cookie-jar' | 'service-worker';
+  type: 'navigation' | 'redirect' | 'api' | 'subresource' | 'cookie-jar' | 'service-worker' | 'third-party-blocked';
   url: string;
-  source: 'network' | 'cache' | 'hsts-upgrade' | 'service-worker' | 'dom';
+  source: 'network' | 'cache' | 'hsts-upgrade' | 'service-worker' | 'dom' | 'boundary-filter' | 'third-party-blocked';
   status?: number | undefined;
   timestamp: number;
   notes?: string | undefined;
@@ -219,7 +237,7 @@ export interface TabState {
   /** Navigation generation counter for this tab's current document lifecycle. */
   navigationGeneration?: number;
   /** True when this tab is an incognito/private tab. Incognito state is session-only and never persisted to local storage. */
-  isIncognito?: boolean;
+  isIncognito?: boolean | undefined;
 }
 
 export interface SettingsV2 {
@@ -231,11 +249,18 @@ export interface SettingsV2 {
   sensitiveCookieNames: string[];
   ignoredCookieNames: string[];
   evaluationMode: boolean;
+  /** Appearance: color theme preference. 'system' follows prefers-color-scheme. */
+  theme?: 'system' | 'dark' | 'light';
+  /** Appearance: layout density for lists and tables. */
+  density?: 'comfortable' | 'compact';
+  /** Appearance: motion preference override. 'system' follows prefers-reduced-motion. */
+  reducedMotion?: 'system' | 'always' | 'never';
   legacyAllowedOrigins?: string[];
   /** Legacy fields for backward compatibility */
   allowedOrigins?: string[];
   alwaysSensitiveCookies?: string[];
   alwaysIgnoreCookies?: string[];
+  isEvaluation?: boolean;
   isPro?: boolean;
 }
 
@@ -345,6 +370,8 @@ export interface AttackSurfaceGraph {
   apexDomain: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
-  isPro: boolean;
+  isEvaluation?: boolean;
+  /** @deprecated Use isEvaluation instead */
+  isPro?: boolean;
   lastUpdated: number;
 }

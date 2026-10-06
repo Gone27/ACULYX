@@ -9,186 +9,314 @@
 </head>
 <body>
 
-  <!-- ══ Page header ════════════════════════════════════════════ -->
-  <header class="page-header">
-    <h1 class="page-title">
-      <span class="brand">SecCheck</span>
-      <span class="subtitle">Settings</span>
-    </h1>
-  </header>
+  <!-- ══ App shell ════════════════════════════════════════════════ -->
+  <div class="app-shell">
 
-  <main class="options-main">
-
-    <!-- ── Monitoring mode ─────────────────────────────────────── -->
-    <section class="options-section" id="section-monitoring-mode">
-      <h2 class="section-heading">Monitoring mode</h2>
-      <p class="section-desc">
-        Choose which sites SecCheck actively inspects HTTP headers and cookies on.
-      </p>
-      <fieldset class="radio-group" id="monitoring-mode-group">
-        <legend class="sr-only">Monitoring mode</legend>
-
-        <label class="radio-label">
-          <input type="radio" name="monitoringMode" value="per-site" id="mode-per-site">
-          <span class="radio-title">Per-site opt-in</span>
-          <span class="radio-desc">Only sites you explicitly grant access to.</span>
-        </label>
-
-        <label class="radio-label">
-          <input type="radio" name="monitoringMode" value="all-sites" id="mode-all-sites">
-          <span class="radio-title">Monitor all sites</span>
-          <span class="radio-desc">Requires broad host permission (granted on first use).</span>
-        </label>
-
-        <label class="radio-label">
-          <input type="radio" name="monitoringMode" value="off" id="mode-off">
-          <span class="radio-title">Off</span>
-          <span class="radio-desc">Disable all header/cookie capture.</span>
-        </label>
-
-      </fieldset>
-
-      <!-- Broad grant conflict notification -->
-      <div class="conflict-banner" id="mode-conflict-banner" hidden role="alert">
-        <p class="conflict-banner-text" id="mode-conflict-text">Broad access is active</p>
-        <p class="conflict-banner-desc">Per-site opt-in is selected, but broad browser access is currently granted. Capture is paused until resolved.</p>
-        <div class="conflict-banner-actions">
-          <button type="button" class="btn-secondary" id="btn-remove-broad-access">Remove broad access</button>
-          <button type="button" class="btn-primary" id="btn-switch-to-all-sites">Switch to All sites</button>
-        </div>
+    <!-- ── Sidebar navigation ─────────────────────────────────────── -->
+    <nav class="settings-nav" role="navigation" aria-label="Settings sections">
+      <div class="nav-brand">
+        <span class="brand brand-name">SecCheck</span>
+        <span class="brand-sub">Settings</span>
       </div>
-    </section>
 
-    <!-- ── Per-site allowlist ───────────────────────────────────── -->
-    <section class="options-section" id="section-allowlist">
-      <h2 class="section-heading">Per-site allowlist</h2>
-      <p class="section-desc">
-        Origins you have already granted access to. Click <em>Remove</em> to revoke.
-      </p>
-      <!-- Origins injected here by options.ts via createElement -->
-      <ul class="allowlist" id="allowlist"></ul>
-      <p class="allowlist-empty-msg" id="allowlist-empty" hidden>
-        No origins in the allowlist. Use <strong>Monitor this site</strong> in the popup.
-      </p>
-    </section>
-
-    <!-- ── Severity filter ─────────────────────────────────────── -->
-    <section class="options-section" id="section-severity">
-      <h2 class="section-heading">Severity filter</h2>
-      <p class="section-desc">
-        Only findings at or above these severities appear in the popup.
-      </p>
-      <fieldset class="checkbox-group" id="severity-group">
-        <legend class="sr-only">Severity filter</legend>
-
-        <label class="checkbox-label">
-          <input type="checkbox" name="severity" value="critical" id="sev-critical">
-          <span class="sev-pill sev-critical">Critical</span>
-        </label>
-
-        <label class="checkbox-label">
-          <input type="checkbox" name="severity" value="high" id="sev-high">
-          <span class="sev-pill sev-high">High</span>
-        </label>
-
-        <label class="checkbox-label">
-          <input type="checkbox" name="severity" value="medium" id="sev-medium">
-          <span class="sev-pill sev-medium">Medium</span>
-        </label>
-
-        <label class="checkbox-label">
-          <input type="checkbox" name="severity" value="low" id="sev-low">
-          <span class="sev-pill sev-low">Low</span>
-        </label>
-
-        <label class="checkbox-label">
-          <input type="checkbox" name="severity" value="info" id="sev-info">
-          <span class="sev-pill sev-info">Info</span>
-        </label>
-
-        <label class="checkbox-label">
-          <input type="checkbox" name="severity" value="pass" id="sev-pass">
-          <span class="sev-pill sev-pass">Pass</span>
-        </label>
-
-      </fieldset>
-    </section>
-
-    <!-- ── History retention ───────────────────────────────────── -->
-    <section class="options-section" id="section-history">
-      <h2 class="section-heading">History &amp; Retention</h2>
-      <p class="section-desc">
-        Configure audit history retention and per-origin history caps.
-      </p>
-      <div class="field-row">
-        <label class="field-label" for="retain-history-days">
-          Retain history for
-          <input
-            type="number"
-            id="retain-history-days"
-            name="retainHistoryDays"
-            min="0"
-            max="365"
-            step="1"
-            class="number-input"
-            aria-describedby="retain-history-days-hint"
+      <ul class="nav-list" role="list">
+        <li>
+          <button
+            class="nav-item nav-item--home active"
+            data-section="home"
+            role="menuitem"
+            aria-current="page"
+            title="Home / Overview"
           >
-          days &nbsp;<span class="field-hint" id="retain-history-days-hint">(0 = keep forever)</span>
-        </label>
-      </div>
-      <div class="field-row" style="margin-top: 10px;">
-        <label class="field-label" for="max-history-per-origin">
-          Max history per origin
-          <input
-            type="number"
-            id="max-history-per-origin"
-            name="maxHistoryPerOrigin"
-            min="1"
-            max="50"
-            step="1"
-            class="number-input"
-            aria-describedby="max-history-per-origin-hint"
+            <span class="nav-icon" aria-hidden="true">⌂</span>
+            <span class="nav-label">Home</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="monitoring"
+            role="menuitem"
+            title="Monitoring &amp; Permissions"
           >
-          entries &nbsp;<span class="field-hint" id="max-history-per-origin-hint">(1–50, default: 10)</span>
-        </label>
-      </div>
-    </section>
+            <span class="nav-icon" aria-hidden="true">◉</span>
+            <span class="nav-label">Monitoring</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="findings"
+            role="menuitem"
+            title="Findings &amp; Analysis"
+          >
+            <span class="nav-icon" aria-hidden="true">◈</span>
+            <span class="nav-label">Findings</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="cookies"
+            role="menuitem"
+            title="Cookie Rules"
+          >
+            <span class="nav-icon" aria-hidden="true">◆</span>
+            <span class="nav-label">Cookies</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="history"
+            role="menuitem"
+            title="History &amp; Data Management"
+          >
+            <span class="nav-icon" aria-hidden="true">▤</span>
+            <span class="nav-label">History</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="appearance"
+            role="menuitem"
+            title="Appearance &amp; Accessibility"
+          >
+            <span class="nav-icon" aria-hidden="true">◑</span>
+            <span class="nav-label">Appearance</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="advanced"
+            role="menuitem"
+            title="Advanced / Developer"
+          >
+            <span class="nav-icon" aria-hidden="true">⚙</span>
+            <span class="nav-label">Advanced</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
+            data-section="about"
+            role="menuitem"
+            title="About &amp; Privacy"
+          >
+            <span class="nav-icon" aria-hidden="true">ℹ</span>
+            <span class="nav-label">About</span>
+          </button>
+        </li>
+      </ul>
 
-    <!-- ── Data Management ─────────────────────────────────────── -->
-    <section id="section-data-management" class="options-section">
-      <h2 class="section-heading">Data Management</h2>
+      <!-- Unsaved changes indicator in sidebar -->
+      <div class="nav-dirty-badge" id="nav-dirty-badge" hidden aria-hidden="true">Unsaved changes</div>
+    </nav>
 
-      <div class="field-row">
-        <label class="field-label-block" for="delete-origin-input">Per-origin data</label>
-        <div class="data-actions-row">
-          <input type="text" id="delete-origin-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" class="text-input" aria-describedby="delete-origin-hint" />
-          <button type="button" id="btn-delete-origin" class="btn-danger-sm">Delete this site</button>
+    <!-- ── Main content ───────────────────────────────────────────── -->
+    <main class="settings-main" role="main">
+
+      <!-- Global save / status bar -->
+      <div class="settings-topbar">
+        <span class="save-status" id="save-status" role="status" aria-live="polite"></span>
+        <div class="topbar-actions">
+          <button class="btn-secondary btn-sm" id="btn-discard" hidden>Discard</button>
+          <button class="btn-primary btn-sm" id="save-btn">Save settings</button>
         </div>
-        <p class="field-hint" id="delete-origin-hint">Removes history and graph data for one origin. Does not revoke monitoring permission.</p>
       </div>
 
-      <div class="field-row danger-zone" style="margin-top: 16px;">
-        <label class="field-label-block danger-label">Danger zone</label>
-        <div class="danger-actions" style="display: flex; gap: 8px; margin-top: 8px;">
-          <button type="button" id="btn-clear-history" class="btn-danger">Clear all history</button>
-          <button type="button" id="btn-clear-private" class="btn-danger">Clear private records</button>
-          <button type="button" id="btn-clear-all" class="btn-danger">Clear ALL local data</button>
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Home / Overview
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section active" id="section-home" aria-labelledby="heading-home">
+        <h1 class="section-title" id="heading-home">Overview</h1>
+
+        <!-- Status cards row -->
+        <div class="home-cards-row">
+          <!-- Monitoring mode card -->
+          <div class="home-card" id="home-card-mode">
+            <div class="home-card-label">Monitoring mode</div>
+            <div class="home-card-value" id="home-mode-value">—</div>
+          </div>
+
+          <!-- Permission coverage card -->
+          <div class="home-card" id="home-card-perms">
+            <div class="home-card-label">Permission coverage</div>
+            <div class="home-card-value" id="home-perms-value">—</div>
+          </div>
+
+          <!-- Local analysis guarantee card -->
+          <div class="home-card home-card--privacy">
+            <div class="home-card-label">Data handling</div>
+            <div class="home-card-value home-card-value--accent">100% local</div>
+            <div class="home-card-sub"><code>connect-src 'none'</code></div>
+          </div>
         </div>
-        <p class="field-hint" style="margin-top: 4px;">These actions are permanent and cannot be undone.</p>
-      </div>
 
-      <div id="data-mgmt-status" class="status-message" aria-live="polite" style="margin-top: 8px;"></div>
-    </section>
+        <!-- Status callout: shown when action is needed -->
+        <div class="home-callout" id="home-callout" hidden role="alert">
+          <span class="home-callout-icon" aria-hidden="true">⚠</span>
+          <div>
+            <div class="home-callout-title" id="home-callout-title"></div>
+            <div class="home-callout-desc" id="home-callout-desc"></div>
+            <button class="btn-primary btn-sm home-callout-action" id="home-callout-action" hidden></button>
+          </div>
+        </div>
 
-    <!-- ── Custom cookie classification ───────────────────────── -->
-    <section class="options-section" id="section-cookies">
-      <h2 class="section-heading">Custom cookie classification</h2>
-      <p class="section-desc" id="custom-cookies-desc">
-        Customize cookie sensitivity rules. Enter comma-separated cookie names.
-      </p>
-      <div class="field-row">
-        <label class="field-label-block" for="always-sensitive">
-          Always treat as sensitive
+        <!-- Quick navigation cards -->
+        <div class="home-nav-grid">
+          <button class="home-nav-card" data-goto="monitoring">
+            <span class="home-nav-card-icon" aria-hidden="true">◉</span>
+            <span class="home-nav-card-title">Monitoring &amp; Permissions</span>
+            <span class="home-nav-card-desc">Mode, per-site allowlist, browser grants</span>
+          </button>
+          <button class="home-nav-card" data-goto="findings">
+            <span class="home-nav-card-icon" aria-hidden="true">◈</span>
+            <span class="home-nav-card-title">Findings &amp; Analysis</span>
+            <span class="home-nav-card-desc">Severity display filter, scoring grades</span>
+          </button>
+          <button class="home-nav-card" data-goto="cookies">
+            <span class="home-nav-card-icon" aria-hidden="true">◆</span>
+            <span class="home-nav-card-title">Cookie Rules</span>
+            <span class="home-nav-card-desc">Custom sensitive &amp; ignored cookie names</span>
+          </button>
+          <button class="home-nav-card" data-goto="history">
+            <span class="home-nav-card-icon" aria-hidden="true">▤</span>
+            <span class="home-nav-card-title">History &amp; Data</span>
+            <span class="home-nav-card-desc">Retention, per-origin purge, full reset</span>
+          </button>
+          <button class="home-nav-card" data-goto="appearance">
+            <span class="home-nav-card-icon" aria-hidden="true">◑</span>
+            <span class="home-nav-card-title">Appearance</span>
+            <span class="home-nav-card-desc">Theme, density, reduced motion</span>
+          </button>
+          <button class="home-nav-card" data-goto="advanced">
+            <span class="home-nav-card-icon" aria-hidden="true">⚙</span>
+            <span class="home-nav-card-title">Advanced / Developer</span>
+            <span class="home-nav-card-desc">Evaluation mode, diagnostics</span>
+          </button>
+        </div>
+
+        <!-- Version / privacy badge -->
+        <div class="home-footer-row">
+          <span class="home-version-badge" id="home-version-badge">SecCheck v—</span>
+          <span class="home-privacy-badge">Analysis is local — nothing leaves your device</span>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Monitoring & Permissions
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-monitoring" hidden aria-labelledby="heading-monitoring">
+        <h2 class="section-title" id="heading-monitoring">Monitoring &amp; Permissions</h2>
+        <p class="section-desc">Choose which sites SecCheck actively inspects HTTP headers and cookies on.</p>
+
+        <fieldset class="radio-group" id="monitoring-mode-group">
+          <legend class="sr-only">Monitoring mode</legend>
+
+          <label class="radio-label">
+            <input type="radio" name="monitoringMode" value="per-site" id="mode-per-site">
+            <span class="radio-title">Per-site opt-in</span>
+            <span class="radio-desc">Only sites you explicitly grant access to.</span>
+          </label>
+
+          <label class="radio-label">
+            <input type="radio" name="monitoringMode" value="all-sites" id="mode-all-sites">
+            <span class="radio-title">Monitor all sites</span>
+            <span class="radio-desc">Requires broad host permission (granted on first use).</span>
+          </label>
+
+          <label class="radio-label">
+            <input type="radio" name="monitoringMode" value="off" id="mode-off">
+            <span class="radio-title">Off</span>
+            <span class="radio-desc">Disable all header/cookie capture.</span>
+          </label>
+        </fieldset>
+
+        <!-- Broad grant conflict notification -->
+        <div class="conflict-banner" id="mode-conflict-banner" hidden role="alert">
+          <p class="conflict-banner-text" id="mode-conflict-text">Broad access is active</p>
+          <p class="conflict-banner-desc">Per-site opt-in is selected, but broad browser access is currently granted. Capture is paused until resolved.</p>
+          <div class="conflict-banner-actions">
+            <button type="button" class="btn-secondary" id="btn-remove-broad-access">Remove broad access</button>
+            <button type="button" class="btn-primary" id="btn-switch-to-all-sites">Switch to All sites</button>
+          </div>
+        </div>
+
+        <!-- Per-site allowlist -->
+        <div id="section-allowlist">
+          <h3 class="subsection-title">Per-site allowlist</h3>
+          <p class="section-desc">Origins you have already granted access to. Click <em>Remove</em> to revoke.</p>
+          <ul class="allowlist" id="allowlist" aria-label="Allowed origins"></ul>
+          <p class="allowlist-empty-msg" id="allowlist-empty" hidden>
+            No origins in the allowlist. Use <strong>Monitor this site</strong> in the popup.
+          </p>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Findings & Analysis
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-findings" hidden aria-labelledby="heading-findings">
+        <h2 class="section-title" id="heading-findings">Findings &amp; Analysis</h2>
+        <p class="section-desc">Control which findings are shown in the popup and side panel. These settings affect display only — all rules still run.</p>
+
+        <fieldset class="checkbox-group" id="severity-group">
+          <legend class="subsection-title">Severity display filter</legend>
+          <p class="section-desc small">Only findings at or above these severities appear in the popup.</p>
+
+          <label class="checkbox-label">
+            <input type="checkbox" name="severity" value="critical" id="sev-critical">
+            <span class="sev-pill sev-critical">Critical</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="severity" value="high" id="sev-high">
+            <span class="sev-pill sev-high">High</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="severity" value="medium" id="sev-medium">
+            <span class="sev-pill sev-medium">Medium</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="severity" value="low" id="sev-low">
+            <span class="sev-pill sev-low">Low</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="severity" value="info" id="sev-info">
+            <span class="sev-pill sev-info">Info</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="severity" value="pass" id="sev-pass">
+            <span class="sev-pill sev-pass">Pass</span>
+          </label>
+        </fieldset>
+
+        <!-- Grade explanation (read-only) -->
+        <div class="info-block">
+          <h3 class="subsection-title">Grade scale</h3>
+          <dl class="grade-scale-list">
+            <div class="grade-scale-row"><dt class="grade-chip grade-a">A</dt><dd>90–100 — Excellent security posture</dd></div>
+            <div class="grade-scale-row"><dt class="grade-chip grade-b">B</dt><dd>70–89 — Good, minor issues present</dd></div>
+            <div class="grade-scale-row"><dt class="grade-chip grade-c">C</dt><dd>50–69 — Moderate issues require attention</dd></div>
+            <div class="grade-scale-row"><dt class="grade-chip grade-d">D</dt><dd>30–49 — Significant issues present</dd></div>
+            <div class="grade-scale-row"><dt class="grade-chip grade-f">F</dt><dd>0–29 — Critical issues require immediate action</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Cookie Rules
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-cookies" hidden aria-labelledby="heading-cookies">
+        <h2 class="section-title" id="heading-cookies">Cookie Rules</h2>
+        <p class="section-desc" id="custom-cookies-desc">Customize cookie sensitivity rules. Enter comma-separated cookie names (not values).</p>
+
+        <div class="field-row">
+          <label class="field-label-block" for="always-sensitive">
+            Always treat as sensitive
+          </label>
           <textarea
             id="always-sensitive"
             name="sensitiveCookieNames"
@@ -197,11 +325,12 @@
             placeholder="e.g. session_id, auth_token, jwt"
             aria-describedby="custom-cookies-desc"
           ></textarea>
-        </label>
-      </div>
-      <div class="field-row" style="margin-top: 12px;">
-        <label class="field-label-block" for="always-ignore">
-          Always ignore (exempt from sensitivity checks)
+        </div>
+
+        <div class="field-row">
+          <label class="field-label-block" for="always-ignore">
+            Always ignore (exempt from sensitivity checks)
+          </label>
           <textarea
             id="always-ignore"
             name="ignoredCookieNames"
@@ -210,56 +339,206 @@
             placeholder="e.g. _ga, theme, lang_pref"
             aria-describedby="custom-cookies-desc"
           ></textarea>
-        </label>
-      </div>
-    </section>
+        </div>
 
-    <!-- ── Developer / Evaluation Mode ──────────────────────────── -->
-    <details class="options-section developer-section" id="section-pro">
-      <summary class="section-heading cursor-pointer">Developer Settings (Evaluation Mode)</summary>
-      <div class="developer-content">
-        <p class="section-desc" id="evaluation-mode-desc">
-          Evaluation only: no billing or entitlement, no effect on security checks. Enables multi-host Attack Surface Graph accumulation and diagnostic inspection.
-        </p>
-        <label class="checkbox-label" for="pro-mode-toggle">
-          <input type="checkbox" id="pro-mode-toggle" name="evaluationMode" aria-describedby="evaluation-mode-desc">
-          <span>Enable evaluation mode (Attack Surface Graph accumulation)</span>
-        </label>
-      </div>
-    </details>
+        <div class="info-block">
+          <p class="field-hint">
+            <strong>Overlap rule:</strong> if a cookie name appears in both lists, the <em>ignored</em> list wins — that cookie will not be flagged as sensitive.
+          </p>
+          <p class="field-hint">Examples of sensitive names: <code>session</code>, <code>auth</code>, <code>token</code>, <code>csrftoken</code></p>
+          <p class="field-hint">Examples of ignored names: <code>_ga</code>, <code>_gid</code>, <code>locale</code>, <code>theme</code></p>
+        </div>
+      </section>
 
-    <!-- ── Privacy ─────────────────────────────────────────────── -->
-    <section class="options-section" id="section-privacy">
-      <h2 class="section-heading">Privacy</h2>
-      <p class="section-desc">
-        All analysis is performed <strong>entirely on your device</strong>. No header
-        values, cookie names, URLs, or findings are ever transmitted to any server.
-        The extension pages use <code>connect-src 'none'</code> in their CSP, so
-        the extension UI cannot make outbound network requests.
-      </p>
-      <p class="section-desc">
-        Source code and issue tracker:
-        <a
-          id="github-link"
-          href="https://github.com/Gone27/Cookie-and-header-reader-extention"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-link"
-        >GitHub ↗</a>
-      </p>
-    </section>
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: History & Data Management
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-history" hidden aria-labelledby="heading-history">
+        <h2 class="section-title" id="heading-history">History &amp; Data Management</h2>
+        <p class="section-desc">Configure audit history retention and manage stored data.</p>
 
-    <!-- ── Save controls ───────────────────────────────────────── -->
-    <div class="save-row">
-      <button class="btn-primary" id="save-btn">Save settings</button>
-      <!-- Status message injected here by options.ts via textContent -->
-      <span class="save-status" id="save-status" role="status" aria-live="polite"></span>
+        <h3 class="subsection-title">Retention</h3>
+        <div class="field-row">
+          <label class="field-label" for="retain-history-days">
+            Retain history for
+            <input
+              type="number"
+              id="retain-history-days"
+              name="retainHistoryDays"
+              min="0"
+              max="365"
+              step="1"
+              class="number-input"
+              aria-describedby="retain-history-days-hint"
+            >
+            days &nbsp;<span class="field-hint" id="retain-history-days-hint">(0 = keep forever)</span>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="max-history-per-origin">
+            Max history per origin
+            <input
+              type="number"
+              id="max-history-per-origin"
+              name="maxHistoryPerOrigin"
+              min="1"
+              max="50"
+              step="1"
+              class="number-input"
+              aria-describedby="max-history-per-origin-hint"
+            >
+            entries &nbsp;<span class="field-hint" id="max-history-per-origin-hint">(1–50, default: 10)</span>
+          </label>
+        </div>
+
+        <h3 class="subsection-title">Per-origin data</h3>
+        <div class="field-row">
+          <label class="field-label-block" for="delete-origin-input">Delete data for a specific origin</label>
+          <div class="data-actions-row">
+            <input type="text" id="delete-origin-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" class="text-input" aria-describedby="delete-origin-hint">
+            <button type="button" id="btn-delete-origin" class="btn-danger-sm">Delete this site</button>
+          </div>
+          <p class="field-hint" id="delete-origin-hint">Removes history and graph data for one origin. Does not revoke monitoring permission.</p>
+        </div>
+
+        <h3 class="subsection-title danger-label">Danger zone</h3>
+        <div class="danger-zone field-row">
+          <div class="danger-actions">
+            <button type="button" id="btn-clear-history" class="btn-danger">Clear all history</button>
+            <button type="button" id="btn-clear-private" class="btn-danger">Clear private records</button>
+            <button type="button" id="btn-clear-all" class="btn-danger btn-danger--prominent">Reset ALL local data</button>
+          </div>
+          <p class="field-hint">These actions are permanent and cannot be undone.</p>
+        </div>
+
+        <div id="data-mgmt-status" class="status-message" aria-live="polite"></div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Appearance & Accessibility
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-appearance" hidden aria-labelledby="heading-appearance">
+        <h2 class="section-title" id="heading-appearance">Appearance &amp; Accessibility</h2>
+        <p class="section-desc">These settings take effect immediately as you change them.</p>
+
+        <!-- Theme -->
+        <fieldset class="radio-group" id="theme-group">
+          <legend class="subsection-title">Theme</legend>
+          <label class="radio-label">
+            <input type="radio" name="theme" value="system" id="theme-system">
+            <span class="radio-title">System</span>
+            <span class="radio-desc">Follows your OS dark/light preference.</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="theme" value="dark" id="theme-dark">
+            <span class="radio-title">Dark</span>
+            <span class="radio-desc">Always use the dark cyber theme.</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="theme" value="light" id="theme-light">
+            <span class="radio-title">Light</span>
+            <span class="radio-desc">Always use the light theme.</span>
+          </label>
+        </fieldset>
+
+        <!-- Density -->
+        <fieldset class="radio-group" id="density-group">
+          <legend class="subsection-title">Layout density</legend>
+          <label class="radio-label">
+            <input type="radio" name="density" value="comfortable" id="density-comfortable">
+            <span class="radio-title">Comfortable</span>
+            <span class="radio-desc">Default spacing for easy reading.</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="density" value="compact" id="density-compact">
+            <span class="radio-title">Compact</span>
+            <span class="radio-desc">Tighter spacing, more information at once.</span>
+          </label>
+        </fieldset>
+
+        <!-- Reduced motion -->
+        <fieldset class="radio-group" id="motion-group">
+          <legend class="subsection-title">Reduced motion</legend>
+          <label class="radio-label">
+            <input type="radio" name="reducedMotion" value="system" id="motion-system">
+            <span class="radio-title">System</span>
+            <span class="radio-desc">Follow OS reduced motion setting.</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="reducedMotion" value="always" id="motion-always">
+            <span class="radio-title">Always reduce motion</span>
+            <span class="radio-desc">Disable all animations regardless of OS setting.</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="reducedMotion" value="never" id="motion-never">
+            <span class="radio-title">Never reduce motion</span>
+            <span class="radio-desc">Keep animations even if OS requests reduction.</span>
+          </label>
+        </fieldset>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Advanced / Developer
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-advanced" hidden aria-labelledby="heading-advanced">
+        <h2 class="section-title" id="heading-advanced">Advanced / Developer Settings</h2>
+
+        <div class="options-section-inner" id="section-pro">
+          <p class="section-desc" id="evaluation-mode-desc">
+            Evaluation Mode: evaluation only, no billing or entitlement, no effect on security checks. Enables multi-host Attack Surface Graph accumulation and diagnostic inspection.
+          </p>
+          <label class="checkbox-label" for="eval-mode-toggle">
+            <input type="checkbox" id="eval-mode-toggle" name="evaluationMode" aria-describedby="evaluation-mode-desc">
+            <span>Enable evaluation mode (Attack Surface Graph accumulation)</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: About & Privacy
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-about" hidden aria-labelledby="heading-about">
+        <h2 class="section-title" id="heading-about">About &amp; Privacy</h2>
+
+        <div class="about-block">
+          <div class="about-row">
+            <span class="about-label">Version</span>
+            <span class="about-value" id="about-version">—</span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Data policy</span>
+            <span class="about-value">
+              All analysis is performed <strong>entirely on your device</strong>. No header values, cookie names, URLs, or findings are ever transmitted to any server.
+            </span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Network policy</span>
+            <span class="about-value">
+              Extension pages enforce <code>connect-src 'none'</code> — the extension UI cannot make any outbound network requests.
+            </span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Source code</span>
+            <span class="about-value about-value--mono" id="about-source">github.com/Gone27/Cookie-and-header-reader-extention</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div><!-- /.app-shell -->
+
+  <!-- Unsaved-changes dialog (native <dialog>, no innerHTML) -->
+  <dialog id="unsaved-dialog" aria-labelledby="unsaved-dialog-title">
+    <h2 id="unsaved-dialog-title">Unsaved changes</h2>
+    <p>You have unsaved changes on this page. What would you like to do?</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-primary" id="dialog-save">Save &amp; continue</button>
+      <button type="button" class="btn-danger" id="dialog-discard">Discard changes</button>
+      <button type="button" class="btn-secondary" id="dialog-cancel">Stay here</button>
     </div>
-
-  </main>
+  </dialog>
 
   <!-- No inline scripts — CSP requires type="module" in separate file -->
   <script type="module" src="options.ts"></script>
 </body>
 </html>
-

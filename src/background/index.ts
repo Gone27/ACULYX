@@ -30,7 +30,13 @@ import {
 import { checkAuthTransition } from '../rules/auth-diff';
 import { discoverNodes, mergeIntoGraph } from '../rules/graph-discovery';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
-import { SessionStorage, LocalStorage } from '../shared/storage';
+import {
+  SessionStorage,
+  LocalStorage,
+  getStorageResetEpoch,
+  incrementStorageResetEpoch,
+  setStorageResetEpoch,
+} from '../shared/storage';
 import { PortRegistry, portSend } from '../shared/messaging';
 import { BroadcastCoalescer, WriteBatcher } from '../shared/coalescer';
 import {
@@ -115,6 +121,12 @@ export class TabActionQueue {
 }
 
 export const tabActionQueue = new TabActionQueue();
+export let currentResetEpoch = getStorageResetEpoch();
+
+export function setCurrentResetEpoch(epoch: number): void {
+  currentResetEpoch = epoch;
+  setStorageResetEpoch(epoch);
+}
 
 // ---------------------------------------------------------------------------
 // Message and event deduplication
@@ -251,9 +263,9 @@ export const startupReady = Promise.all([settingsReady, sessionHydrationReady]).
 // Authoritative tab privacy resolution
 // ---------------------------------------------------------------------------
 
-export const pendingPrivacyLookups = new Map<number, Promise<boolean>>();
+export const pendingPrivacyLookups = new Map<number, Promise<boolean | undefined>>();
 
-export async function resolveTabPrivacy(tabId: number): Promise<boolean> {
+export async function resolveTabPrivacy(tabId: number): Promise<boolean | undefined> {
   if (incognitoTabIds.has(tabId)) {
     return true;
   }
@@ -266,19 +278,22 @@ export async function resolveTabPrivacy(tabId: number): Promise<boolean> {
     return existing;
   }
 
-  const lookupPromise = (async () => {
+  const lookupPromise = (async (): Promise<boolean | undefined> => {
     try {
       if (typeof chrome !== 'undefined' && chrome.tabs !== undefined && typeof chrome.tabs.get === 'function') {
         const tab = await chrome.tabs.get(tabId);
         if (tab?.incognito === true) {
           incognitoTabIds.add(tabId);
           return true;
+        } else if (tab?.incognito === false) {
+          return false;
         }
       }
-      return incognitoTabIds.has(tabId);
+      return incognitoTabIds.has(tabId) ? true : undefined;
     } catch {
       // If tab lookup fails, never demote if tab was known incognito.
-      return incognitoTabIds.has(tabId);
+      // For previously unknown tabs, return undefined so callers know it is unresolved.
+      return incognitoTabIds.has(tabId) ? true : undefined;
     } finally {
       pendingPrivacyLookups.delete(tabId);
     }
@@ -341,7 +356,7 @@ function clearGraphDebounceTimers(): void {
   graphDebounceTimers.clear();
 }
 
-function debounceGraphMerge(apex: string, hostname: string, state: TabState): void {
+function debounceGraphMerge(apex: string, hostname: string, state: TabState, actionEpoch?: number): void {
   const existing = graphDebounceTimers.get(apex);
   if (existing !== undefined) {
     clearTimeout(existing);
@@ -350,16 +365,21 @@ function debounceGraphMerge(apex: string, hostname: string, state: TabState): vo
     graphDebounceTimers.delete(apex);
     void (async () => {
       try {
+        if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+        if (CapturePolicy.getSnapshot().mode === 'off') return;
         const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-        await LocalStorage.mutateGraph(apex, (existingGraph) =>
-          mergeIntoGraph(
-            existingGraph,
-            hostname,
-            state.score,
-            state.grade,
-            discovered,
-            Boolean(currentSettings.evaluationMode),
-          ),
+        await LocalStorage.mutateGraph(
+          apex,
+          (existingGraph) =>
+            mergeIntoGraph(
+              existingGraph,
+              hostname,
+              state.score,
+              state.grade,
+              discovered,
+              Boolean(currentSettings.evaluationMode),
+            ),
+          actionEpoch,
         );
       } catch {
         // Silently ignore graph merge errors
@@ -369,7 +389,10 @@ function debounceGraphMerge(apex: string, hostname: string, state: TabState): vo
   graphDebounceTimers.set(apex, timer);
 }
 
-function recomputeTabState(tabId: number, state: TabState): void {
+function recomputeTabState(tabId: number, state: TabState, actionEpoch?: number): void {
+  if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+  if (CapturePolicy.getSnapshot().mode === 'off') return;
+
   const result = runRules({
     hops: state.hops,
     cookies: state.cookies,
@@ -381,6 +404,9 @@ function recomputeTabState(tabId: number, state: TabState): void {
       alwaysIgnore: currentSettings.ignoredCookieNames,
     },
   });
+
+  if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+  if (CapturePolicy.getSnapshot().mode === 'off') return;
 
   state.findings = result.findings;
   state.score = result.score;
@@ -395,7 +421,11 @@ function recomputeTabState(tabId: number, state: TabState): void {
   state.updatedAt = Date.now();
 
   tabStates.set(tabId, state);
-  writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state));
+  writeBatcher.schedule(tabId, () => {
+    if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return Promise.resolve();
+    if (CapturePolicy.getSnapshot().mode === 'off') return Promise.resolve();
+    return SessionStorage.setTabState(state, actionEpoch);
+  });
 
   const isIncognito = state.isIncognito === true || incognitoTabIds.has(tabId);
   if (isIncognito) {
@@ -403,13 +433,23 @@ function recomputeTabState(tabId: number, state: TabState): void {
     incognitoTabIds.add(tabId);
   }
 
-  // Record historical score trend for this domain
-  if (state.monitoredByUser && state.origin !== '' && !isIncognito) {
-    void LocalStorage.recordOriginHistory(state.origin, {
-      timestamp: state.updatedAt,
-      score: state.score,
-      grade: state.grade,
-    });
+  // Only proceed with persistent storage writes (history, auth diff, graph)
+  // after the browser has positively resolved incognito: false (state.isIncognito === false)
+  const isPositivelyRegular = state.isIncognito === false && !incognitoTabIds.has(tabId);
+
+  if (state.monitoredByUser && state.origin !== '' && isPositivelyRegular) {
+    if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+    if (CapturePolicy.getSnapshot().mode === 'off') return;
+
+    void LocalStorage.recordOriginHistory(
+      state.origin,
+      {
+        timestamp: state.updatedAt,
+        score: state.score,
+        grade: state.grade,
+      },
+      actionEpoch,
+    );
 
     // Pre-login vs. post-login posture diff (isolated per origin + tab)
     const baselineKey = SessionStorage.getAuthBaselineKey(state.origin, tabId);
@@ -433,19 +473,23 @@ function recomputeTabState(tabId: number, state: TabState): void {
     );
     originAuthBaselines.set(baselineKey, newBaseline);
     if (!isAuthBaselineEquivalent(baseline, newBaseline)) {
-      void SessionStorage.setAuthBaseline(state.origin, newBaseline, tabId);
+      void SessionStorage.setAuthBaseline(state.origin, newBaseline, tabId, actionEpoch);
     }
 
     if (isAuthEvent && record !== null) {
-      void LocalStorage.recordAuthDiff(state.origin, record);
+      if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+      if (CapturePolicy.getSnapshot().mode === 'off') return;
+      void LocalStorage.recordAuthDiff(state.origin, record, actionEpoch);
     }
 
     // Accumulate attack surface graph atomically (serialized per apex domain, debounced)
     try {
+      if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+      if (CapturePolicy.getSnapshot().mode === 'off') return;
       const u = new URL(state.origin);
       const hostname = u.hostname;
       const apex = registrableDomain(hostname) ?? hostname;
-      debounceGraphMerge(apex, hostname, state);
+      debounceGraphMerge(apex, hostname, state, actionEpoch);
     } catch {
       // Silently ignore graph merge errors for non-standard origins
     }
@@ -523,9 +567,10 @@ export async function clearBadgesOnAllTabs(): Promise<void> {
 // WS1 1C & 1D: Wire atomic settings transition side effects
 settingsTransitionPipeline.registerHooks({
   onRescoreTabs: (_prev, _next) => {
+    const epoch = currentResetEpoch;
     for (const [tabId, state] of Array.from(tabStates.entries())) {
-      recomputeTabState(tabId, state);
-      writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state).catch(() => undefined));
+      recomputeTabState(tabId, state, epoch);
+      writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state, epoch).catch(() => undefined));
       broadcastCoalescer.push(tabId, state);
     }
   },
@@ -569,6 +614,9 @@ function computeBlindSpots(coverage: CoverageInfo): string[] {
   if (coverage.hopsExpected > coverage.hopsCaptured) {
     spots.push(`${coverage.hopsExpected - coverage.hopsCaptured} intermediate redirect hop(s) were missed during capture.`);
   }
+  if (Array.isArray(coverage.ledger) && coverage.ledger.some((entry) => entry.type === 'third-party-blocked')) {
+    spots.push('Third-party subresource(s) blocked at boundary pre-filter (third-party-blocked).');
+  }
   return spots;
 }
 
@@ -582,6 +630,30 @@ function pushLedgerEntry(state: TabState, entry: CoverageLedgerEntry): void {
   if (ledger.length > 50) {
     state.coverage.ledger = ledger.slice(-50);
   }
+}
+
+export function recordThirdPartyBlocked(tabId: number, url: string): void {
+  const state = tabStates.get(tabId);
+  if (state === undefined || !state.monitoredByUser) return;
+
+  const targetOrigin = originFromUrl(url);
+  if (targetOrigin === null || targetOrigin === '' || targetOrigin === state.origin) return;
+
+  pushLedgerEntry(state, {
+    type: 'third-party-blocked',
+    url: sanitizeUrlForStorage(url),
+    source: 'boundary-filter',
+    timestamp: Date.now(),
+    notes: 'third-party-blocked',
+  });
+  state.coverage.blindSpots = computeBlindSpots(state.coverage);
+  state.updatedAt = Date.now();
+
+  writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state, currentResetEpoch));
+  portRegistry.broadcast(tabId, {
+    type: 'TAB_STATE_UPDATE',
+    state,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -658,23 +730,37 @@ export async function onHopComplete(
 
   await resolveTabPrivacy(tabId);
 
+  const actionEpoch = currentResetEpoch;
   await tabActionQueue.enqueue(tabId, targetGen, async () => {
     // 0. Await settings hydration and session hydration barrier (fail-closed if pending)
     await startupReady;
 
+    if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
     if (getTabGeneration(tabId) !== targetGen) return;
 
     // 1. Retrieve or initialise tab state.
     const state = tabStates.get(tabId) ?? createDefaultTabState(tabId, hop.url);
-    const resolvedIncognito = (await resolveTabPrivacy(tabId)) || isIncognito === true || state.isIncognito === true;
-    state.isIncognito = resolvedIncognito;
-    if (resolvedIncognito) incognitoTabIds.add(tabId);
+    const privacyResult = await resolveTabPrivacy(tabId);
+    if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
+
+    if (privacyResult === true || isIncognito === true || state.isIncognito === true) {
+      state.isIncognito = true;
+      incognitoTabIds.add(tabId);
+    } else if (privacyResult === false) {
+      state.isIncognito = false;
+    } else {
+      // Lookup error or timeout for unknown tab — hold as unresolved/undefined
+      state.isIncognito = undefined;
+    }
+
     state.navigationGeneration = targetGen;
-    state.url = hop.url;
+    state.url = sanitizeUrlForStorage(hop.url);
     state.origin = originFromUrl(hop.url) ?? hop.url;
+    hop.url = sanitizeUrlForStorage(hop.url);
 
     // 2. Guard: authoritative fail-closed capture policy.
     const captureCheck = await CapturePolicy.evaluate(hop.url);
+    if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
     if (!captureCheck.allowed) {
       if (captureCheck.reason === 'off') {
         void chrome.action?.setBadgeText({ tabId, text: '' })?.catch?.(() => undefined);
@@ -734,6 +820,7 @@ export async function onHopComplete(
       (t, g) => getTabGeneration(t) === g,
       hop.requestId,
     );
+    if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
     if (correlation.discarded === true) return;
     state.cookies = correlation.records;
     const captureFindingMap = new Map(
@@ -745,7 +832,7 @@ export async function onHopComplete(
     state.captureFindings = [...captureFindingMap.values()];
 
     // 6. Recompute evaluation from the canonical tab state.
-    recomputeTabState(tabId, state);
+    recomputeTabState(tabId, state, actionEpoch);
   });
 }
 
@@ -809,6 +896,9 @@ chrome.cookies.onChanged.addListener(
   (changeInfo: chrome.cookies.CookieChangeInfo): void => {
     if (changeInfo.removed) return; // Removals don't affect security posture.
 
+    const actionEpoch = currentResetEpoch;
+    if (CapturePolicy.getSnapshot().mode === 'off') return;
+
     const affectedDomain = changeInfo.cookie.domain.replace(/^\./, '');
 
     for (const [tabId, state] of tabStates.entries()) {
@@ -826,17 +916,25 @@ chrome.cookies.onChanged.addListener(
       const gen = getTabGeneration(tabId);
       void tabActionQueue.enqueue(tabId, gen, async () => {
         try {
+          if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
+          const liveState = tabStates.get(tabId);
+          if (!liveState || liveState !== state) return;
+
           const correlation = await correlateCookies(
             tabId,
-            state.url,
+            liveState.url,
             [],
             gen,
             (t, g) => getTabGeneration(t) === g,
           );
+          if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
           if (correlation.discarded === true) return;
-          state.cookies = correlation.records;
 
-          recomputeTabState(tabId, state);
+          const liveStateAfter = tabStates.get(tabId);
+          if (!liveStateAfter || liveStateAfter !== state) return;
+          liveStateAfter.cookies = correlation.records;
+
+          recomputeTabState(tabId, liveStateAfter, actionEpoch);
         } catch {
           // Silently ignore errors from background re-scoring.
         }
@@ -994,6 +1092,8 @@ function isContentScriptSender(sender?: chrome.runtime.MessageSender): boolean {
 // ---------------------------------------------------------------------------
 
 export async function executeResetAllData(): Promise<void> {
+  // Invalidate any in-flight queued actions immediately:
+  currentResetEpoch = incrementStorageResetEpoch();
   // Synchronously switch CapturePolicy snapshot to 'off' FIRST before any async deletion:
   (CapturePolicy as CapturePolicyWithUpdate).updateSnapshot({ ...DEFAULT_SETTINGS, monitoringMode: 'off' }, []);
   clearGraphDebounceTimers();
@@ -1154,8 +1254,10 @@ chrome.runtime.onMessage.addListener(
         };
         pendingServiceWorkerReports.set(senderTabId, report);
 
+        const actionEpoch = currentResetEpoch;
         void tabActionQueue.enqueue(senderTabId, gen, async () => {
           await startupReady;
+          if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
           if (getTabGeneration(senderTabId) !== gen) return;
 
           const state = tabStates.get(senderTabId);
@@ -1176,7 +1278,7 @@ chrome.runtime.onMessage.addListener(
                 notes: 'Page is controlled by active service worker',
               });
             }
-            recomputeTabState(senderTabId, state);
+            recomputeTabState(senderTabId, state, actionEpoch);
           }
         });
       }
@@ -1208,8 +1310,10 @@ chrome.runtime.onMessage.addListener(
 
         pendingMetaCspReports.add(senderTabId);
 
+        const actionEpoch = currentResetEpoch;
         void tabActionQueue.enqueue(senderTabId, gen, async () => {
           await startupReady;
+          if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
           if (getTabGeneration(senderTabId) !== gen) return;
 
           const state = tabStates.get(senderTabId);
@@ -1248,7 +1352,7 @@ chrome.runtime.onMessage.addListener(
                 }
               }
             }
-            recomputeTabState(senderTabId, state);
+            recomputeTabState(senderTabId, state, actionEpoch);
           }
         });
       }
@@ -1277,8 +1381,10 @@ chrome.runtime.onMessage.addListener(
           return false;
         }
 
+        const actionEpoch = currentResetEpoch;
         void tabActionQueue.enqueue(senderTabId, gen, async () => {
           await startupReady;
+          if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
           if (getTabGeneration(senderTabId) !== gen) return;
 
           const state = tabStates.get(senderTabId);
@@ -1303,7 +1409,7 @@ chrome.runtime.onMessage.addListener(
                 reference: 'https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity',
               });
             }
-            recomputeTabState(senderTabId, state);
+            recomputeTabState(senderTabId, state, actionEpoch);
           }
         });
       }
@@ -1318,7 +1424,7 @@ chrome.runtime.onMessage.addListener(
         try {
           const apex = message.apexDomain;
           const graph = await LocalStorage.getGraph(apex);
-          const isPro = Boolean(currentSettings.evaluationMode);
+          const isEvaluation = Boolean(currentSettings.evaluationMode);
 
           if (!graph) {
             sendResponse({
@@ -1327,14 +1433,15 @@ chrome.runtime.onMessage.addListener(
                 apexDomain: apex,
                 nodes: [{ hostname: apex, isApex: true, lastSeen: Date.now(), discoveredVia: ['navigation'] }],
                 edges: [],
-                isPro,
+                isEvaluation,
+                isPro: isEvaluation,
                 lastUpdated: Date.now(),
               },
             });
             return;
           }
 
-          if (!isPro) {
+          if (!isEvaluation) {
             let tabHost = '';
             if (message.tabId !== undefined) {
               const tabState = tabStates.get(message.tabId);
@@ -1349,6 +1456,7 @@ chrome.runtime.onMessage.addListener(
                 ...graph,
                 nodes: filteredNodes,
                 edges: filteredEdges,
+                isEvaluation: false,
                 isPro: false,
               },
             });
@@ -1357,7 +1465,7 @@ chrome.runtime.onMessage.addListener(
 
           sendResponse({
             type: 'GRAPH_RESPONSE',
-            graph: { ...graph, isPro },
+            graph: { ...graph, isEvaluation, isPro: isEvaluation },
           });
         } catch {
           // Send fallback on error
@@ -1414,36 +1522,13 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
 
-      // Synchronously switch CapturePolicy snapshot to 'off' FIRST before any async deletion:
-      (CapturePolicy as CapturePolicyWithUpdate).updateSnapshot({ ...DEFAULT_SETTINGS, monitoringMode: 'off' }, []);
-      clearGraphDebounceTimers();
-      writeBatcher.clearAll();
-      broadcastCoalescer.clearAll();
-      tabActionQueue.clearAll();
-
-      tabStates.clear();
-      originAuthBaselines.clear();
-      captureMap.clear();
-      inFlightRequests.clear();
-      incognitoTabIds.clear();
-      clearTabGenerations();
-
-      void (async () => {
-        try {
-          await clearBadgesOnAllTabs();
-          await LocalStorage.resetAllData();
-          currentSettings = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
-          await SettingsService.updateSettings(currentSettings);
-
-          portRegistry.broadcastAll({
-            type: 'SETTINGS_CHANGED',
-            settings: currentSettings,
-          });
+      void executeResetAllData()
+        .then(() => {
           sendResponse({ type: 'RESET_ALL_DATA_RESPONSE', success: true });
-        } catch (e) {
+        })
+        .catch((e: unknown) => {
           sendResponse({ type: 'RESET_ALL_DATA_RESPONSE', success: false, error: String(e) });
-        }
-      })();
+        });
       return true;
     }
 
@@ -1476,19 +1561,30 @@ registerCaptureListeners(
 
     pruneTransientStructures();
 
+    const actionEpoch = currentResetEpoch;
     void tabActionQueue.enqueue(tabId, gen, async () => {
       // 0. Await settings hydration and session hydration barrier (fail-closed if pending)
       await startupReady;
 
+      if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
       if (getTabGeneration(tabId) !== gen) return;
 
       const state = tabStates.get(tabId);
       if (!state) return;
-      const resolvedIncognito = (await resolveTabPrivacy(tabId)) || isIncognito === true || state.isIncognito === true;
-      state.isIncognito = resolvedIncognito;
-      if (resolvedIncognito) incognitoTabIds.add(tabId);
+      const privacyResult = await resolveTabPrivacy(tabId);
+      if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
+
+      if (privacyResult === true || isIncognito === true || state.isIncognito === true) {
+        state.isIncognito = true;
+        incognitoTabIds.add(tabId);
+      } else if (privacyResult === false) {
+        state.isIncognito = false;
+      } else {
+        state.isIncognito = undefined;
+      }
 
       const allowed = await CapturePolicy.isAllowed(apiHop.url);
+      if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
       if (!allowed) return;
       if (getTabGeneration(tabId) !== gen) return;
 
@@ -1532,7 +1628,8 @@ registerCaptureListeners(
 
       state.updatedAt = Date.now();
       state.navigationGeneration = gen;
-      void SessionStorage.setTabState(state);
+      if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
+      void SessionStorage.setTabState(state, actionEpoch);
 
       // Accumulate attack surface graph for API host and CORS endpoints atomically
       const isTabIncognito = state.isIncognito === true || incognitoTabIds.has(tabId);
@@ -1540,22 +1637,29 @@ registerCaptureListeners(
         state.isIncognito = true;
         incognitoTabIds.add(tabId);
       }
-      if (!isTabIncognito) {
+      const isPositivelyRegular = state.isIncognito === false && !incognitoTabIds.has(tabId);
+      if (isPositivelyRegular) {
+        if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
+        if (CapturePolicy.getSnapshot().mode === 'off') return;
         void (async () => {
           try {
+            if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
             const u = new URL(state.origin);
             const hostname = u.hostname;
             const apex = registrableDomain(hostname) ?? hostname;
             const discovered = discoverNodes(hostname, state.hops, state.cookies, state.apiEndpoints);
-            await LocalStorage.mutateGraph(apex, (existingGraph) =>
-              mergeIntoGraph(
-                existingGraph,
-                hostname,
-                state.score,
-                state.grade,
-                discovered,
-                Boolean(currentSettings.evaluationMode),
-              ),
+            await LocalStorage.mutateGraph(
+              apex,
+              (existingGraph) =>
+                mergeIntoGraph(
+                  existingGraph,
+                  hostname,
+                  state.score,
+                  state.grade,
+                  discovered,
+                  Boolean(currentSettings.evaluationMode),
+                ),
+              actionEpoch,
             );
           } catch {
             // Silently ignore graph merge errors
@@ -1568,6 +1672,9 @@ registerCaptureListeners(
         state,
       });
     });
+  },
+  (tabId: number, url: string): void => {
+    recordThirdPartyBlocked(tabId, url);
   },
 );
 

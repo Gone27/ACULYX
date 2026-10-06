@@ -145,8 +145,8 @@ describe('redirect response capture', () => {
     expect(api?.method).toBe('POST');
     expect(api?.requestOrigin).toBe('https://app.example.com');
     expect(api?.normalizedPath).toBe('https://api.example.com/v1/users');
-    // Verify query param token was redacted!
-    expect(api?.url).toBe('https://api.example.com/v1/users?token=%5Bredacted%5D&page=1');
+    // Verify query parameters were completely stripped for privacy!
+    expect(api?.url).toBe('https://api.example.com/v1/users');
     expect(api?.headers['access-control-allow-origin']).toBe('https://app.example.com');
   });
 
@@ -220,7 +220,7 @@ describe('redirect response capture', () => {
     });
 
     expect(hops).toHaveLength(1);
-    expect(hops[0]?.url).toBe('https://example.com/reset/[token]?token=%5Bredacted%5D');
+    expect(hops[0]?.url).toBe('https://example.com/reset/[token]');
 
     // API request with UUID and secret path keyword
     listeners['onResponseStarted']?.({

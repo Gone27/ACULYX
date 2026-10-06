@@ -1,7 +1,7 @@
-import { D as SEVERITY_ORDER, r as sendToBackground, w as POPUP_PORT_NAME } from "./messaging-B0qCnidt.js";
-import { E as SettingsService, _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin, w as LocalStorage } from "./lifecycle-CKYjIEjs.js";
+import { F as SEVERITY_ORDER, M as POPUP_PORT_NAME, i as LocalStorage, r as sendToBackground, w as SettingsService } from "./messaging-BvANQDmr.js";
+import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CVNvjeon.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-/* empty css                       */
+import { t as applyAppearance } from "./appearance-CaPqIvdZ.js";
 //#region src/shared/filters.ts
 /**
 * Pure presentation selector to filter findings by allowed severity levels.
@@ -170,6 +170,7 @@ async function initPopup() {
 	currentTabId = tab.id;
 	const settings = await SettingsService.getSettings();
 	currentSettings = settings;
+	applyAppearance(settings.theme, settings.density, settings.reducedMotion);
 	const broadActive = await PermissionsService.isBroadGrantPresent();
 	const completeBroad = await PermissionsService.hasCompleteBroadGrant();
 	const gate = isModeCaptureAllowed(tab.url, settings, broadActive, void 0, completeBroad);
@@ -242,6 +243,14 @@ function openLivePort() {
 	if (currentTabId === null) return;
 	const port = chrome.runtime.connect({ name: POPUP_PORT_NAME });
 	port.onMessage.addListener((msg) => {
+		if (typeof msg === "object" && msg !== null && msg.type === "SETTINGS_CHANGED") {
+			const newSettings = msg.settings;
+			if (newSettings !== void 0) {
+				currentSettings = newSettings;
+				applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+			}
+			return;
+		}
 		if (isStateResponse(msg) && msg.state?.tabId === currentTabId) {
 			renderState(msg.state);
 			return;
@@ -1135,4 +1144,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-DV6fyt-Y.js.map
+//# sourceMappingURL=popup.html-Dr1NtBvn.js.map

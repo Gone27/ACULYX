@@ -21,6 +21,7 @@ import type { GraphNode, GraphEdge, AttackSurfaceGraph, TabState } from '../shar
 import { sendToBackground } from '../shared/messaging';
 import { SIDEPANEL_PORT_NAME } from '../shared/constants';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
+import { bootstrapAppearance, applyAppearance } from '../shared/appearance';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const WIDTH = 600;
@@ -64,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const tierBadge = getEl<HTMLSpanElement>('tier-badge');
   const refreshBtn = getEl<HTMLButtonElement>('refresh-btn');
   const optionsLink = getEl<HTMLAnchorElement>('options-link');
-  const proBanner = getEl<HTMLDivElement>('pro-banner');
+  const evalBanner = getEl<HTMLDivElement>('eval-banner');
 
   const apexDomainVal = getEl<HTMLSpanElement>('apex-domain-val');
   const nodesCountVal = getEl<HTMLSpanElement>('nodes-count-val');
@@ -117,11 +118,20 @@ document.addEventListener('DOMContentLoaded', () => {
   // Connect port for live updates
   const port = chrome.runtime.connect({ name: SIDEPANEL_PORT_NAME });
   port.onMessage.addListener((msg: unknown) => {
+    if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'SETTINGS_CHANGED') {
+      const newSettings = (msg as { settings?: { theme?: 'system' | 'dark' | 'light'; density?: 'comfortable' | 'compact'; reducedMotion?: 'system' | 'always' | 'never' } }).settings;
+      if (newSettings !== undefined) {
+        applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+      }
+      return;
+    }
     const message = msg as { type?: string; state?: TabState };
     if (message.type === 'TAB_STATE_UPDATE' && message.state !== undefined) {
       handleTabState(message.state);
     }
   });
+
+  void bootstrapAppearance();
 
   // Query active tab initially or check URL params (e.g. when opened as a full tab in Firefox)
   void (async () => {
@@ -214,14 +224,15 @@ document.addEventListener('DOMContentLoaded', () => {
     graphLoading.hidden = true;
 
     // Update Evaluation/Standard badges
-    if (graph.isPro) {
+    const isEvaluation = Boolean(graph.isEvaluation ?? graph.isPro);
+    if (isEvaluation) {
       tierBadge.textContent = 'Evaluation';
-      tierBadge.className = 'tier-badge pro';
-      proBanner.hidden = true;
+      tierBadge.className = 'tier-badge evaluation';
+      evalBanner.hidden = true;
     } else {
       tierBadge.textContent = 'Standard';
-      tierBadge.className = 'tier-badge free';
-      proBanner.hidden = false;
+      tierBadge.className = 'tier-badge standard';
+      evalBanner.hidden = false;
     }
 
     nodesCountVal.textContent = graph.nodes.length.toString();

@@ -175,6 +175,25 @@ export function migrateSettings(raw: unknown): SettingsV2 {
       .map((o) => o.trim());
   }
 
+  const VALID_THEMES = new Set(['system', 'dark', 'light']);
+  const VALID_DENSITIES = new Set(['comfortable', 'compact']);
+  const VALID_MOTIONS = new Set(['system', 'always', 'never']);
+
+  const theme: NonNullable<SettingsV2['theme']> =
+    typeof obj.theme === 'string' && VALID_THEMES.has(obj.theme)
+      ? (obj.theme as NonNullable<SettingsV2['theme']>)
+      : 'system';
+
+  const density: NonNullable<SettingsV2['density']> =
+    typeof obj.density === 'string' && VALID_DENSITIES.has(obj.density)
+      ? (obj.density as NonNullable<SettingsV2['density']>)
+      : 'comfortable';
+
+  const reducedMotion: NonNullable<SettingsV2['reducedMotion']> =
+    typeof obj.reducedMotion === 'string' && VALID_MOTIONS.has(obj.reducedMotion)
+      ? (obj.reducedMotion as NonNullable<SettingsV2['reducedMotion']>)
+      : 'system';
+
   const result: SettingsV2 = {
     schemaVersion: 2,
     monitoringMode,
@@ -184,6 +203,9 @@ export function migrateSettings(raw: unknown): SettingsV2 {
     sensitiveCookieNames: sensitive,
     ignoredCookieNames: ignored,
     evaluationMode,
+    theme,
+    density,
+    reducedMotion,
   };
 
   if (legacyAllowedOrigins !== undefined && legacyAllowedOrigins.length > 0) {
@@ -237,6 +259,10 @@ export class SettingsTransitionPipeline {
     if (a.ignoredCookieNames.length !== b.ignoredCookieNames.length) return false;
     const aIgn = new Set(a.ignoredCookieNames);
     if (b.ignoredCookieNames.some((s) => !aIgn.has(s))) return false;
+
+    if (a.theme !== b.theme) return false;
+    if (a.density !== b.density) return false;
+    if (a.reducedMotion !== b.reducedMotion) return false;
 
     return true;
   }
