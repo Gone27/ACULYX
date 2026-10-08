@@ -868,6 +868,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	const nodeRole = getEl("node-role");
 	const nodeDiscoveredVia = getEl("node-discovered-via");
 	const nodeGrade = getEl("node-grade");
+	const nodeScope = getEl("node-scope");
 	const nodeLastSeen = getEl("node-last-seen");
 	let activeTabId = null;
 	let activeApexDomain = "";
@@ -1144,6 +1145,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		nodeRole.textContent = node.isApex ? "👑 Apex Domain (Central Authority)" : "Subdomain";
 		nodeDiscoveredVia.textContent = node.discoveredVia.join(", ");
 		nodeGrade.textContent = node.grade !== void 0 && node.score !== void 0 ? `${node.grade} (${node.score}/100)` : "Passive discovery (no direct visit yet)";
+		nodeScope.textContent = node.scopeStatus !== void 0 ? node.scopeStatus : "—";
 		nodeLastSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
 		nodeDetails.hidden = false;
 	}
@@ -1190,4 +1192,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-C-vB2XUN.js.map
+//# sourceMappingURL=sidepanel.html-BjPTWGmF.js.map

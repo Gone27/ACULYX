@@ -4,13 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ACULYX</title>
-  <script type="module" crossorigin src="/chunks/popup.html-DrmMCqw-.js"></script>
+  <script type="module" crossorigin src="/chunks/popup.html-DmSZKpeG.js"></script>
   <link rel="modulepreload" crossorigin href="/chunks/messaging-CTMeVYaN.js">
   <link rel="modulepreload" crossorigin href="/chunks/lifecycle-CQzmjg6F.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
   <link rel="modulepreload" crossorigin href="/chunks/appearance-Cjc7_Dji.js">
+  <link rel="modulepreload" crossorigin href="/chunks/triage-store-BNdFsfqI.js">
   <link rel="stylesheet" crossorigin href="/assets/appearance-B4qCr-e8.css">
-  <link rel="stylesheet" crossorigin href="/assets/popup-BEhREVcZ.css">
+  <link rel="stylesheet" crossorigin href="/assets/popup-CcpRNjMd.css">
 </head>
 <body>
   <!-- Header bar -->
@@ -167,6 +168,61 @@
       <button class="export-btn export-btn-secondary" id="copy-report-btn" hidden aria-label="Copy Markdown Audit Report">📋 Copy Report</button>
     </div>
   </footer>
+
+  <!-- Finding Details & Triage Drawer -->
+  <dialog class="finding-details-drawer" id="finding-details-drawer" aria-labelledby="drawer-finding-title">
+    <div class="drawer-header">
+      <div class="drawer-header-left">
+        <span class="drawer-rule-id" id="drawer-rule-id">RULE-001</span>
+        <span class="drawer-scope-badge" id="drawer-scope-badge">Unknown</span>
+      </div>
+      <button class="drawer-close-btn" id="drawer-close-btn" type="button" aria-label="Close details">✕</button>
+    </div>
+    <div class="drawer-body">
+      <h3 class="drawer-title" id="drawer-finding-title">Finding Title</h3>
+      <div class="drawer-tags" id="drawer-tags">
+        <span class="drawer-tag" id="drawer-severity-tag">High</span>
+        <span class="drawer-tag" id="drawer-provenance-tag">header</span>
+        <span class="drawer-tag" id="drawer-confidence-tag">high</span>
+      </div>
+      <div class="drawer-field">
+        <span class="drawer-label">Observed Evidence</span>
+        <pre class="drawer-pre" id="drawer-evidence"></pre>
+      </div>
+      <div class="drawer-field" id="drawer-limitations-field" hidden>
+        <span class="drawer-label">Limitations &amp; Ambiguities</span>
+        <ul class="drawer-list" id="drawer-limitations"></ul>
+      </div>
+      <div class="drawer-field">
+        <span class="drawer-label">Impact Narrative</span>
+        <p class="drawer-text" id="drawer-impact"></p>
+      </div>
+      <div class="drawer-field">
+        <span class="drawer-label">Remediation Guidance</span>
+        <p class="drawer-text" id="drawer-remediation"></p>
+      </div>
+
+      <!-- Researcher Triage Controls -->
+      <div class="drawer-triage-section">
+        <span class="drawer-label">Researcher Triage State</span>
+        <select class="drawer-triage-select" id="drawer-triage-select" aria-label="Researcher Triage State">
+          <option value="unreviewed">Unreviewed</option>
+          <option value="needs-manual-verification">Needs Manual Verification</option>
+          <option value="verified-by-researcher">Verified by Researcher</option>
+          <option value="not-reproducible">Not Reproducible</option>
+          <option value="not-a-finding">Not a Finding</option>
+        </select>
+        <label for="drawer-triage-notes" class="drawer-label drawer-notes-label">Triage Notes</label>
+        <textarea class="drawer-triage-notes" id="drawer-triage-notes" rows="2" placeholder="Notes on reproduction or validation..."></textarea>
+      </div>
+
+      <div class="drawer-actions">
+        <button class="btn-primary btn-sm" id="drawer-export-md-btn" type="button">Export Report (MD)</button>
+        <button class="btn-secondary btn-sm" id="drawer-export-json-btn" type="button">Export Report (JSON)</button>
+        <button class="btn-secondary btn-sm" id="drawer-copy-btn" type="button">Copy Draft</button>
+      </div>
+    </div>
+  </dialog>
 
 </body>
 </html>

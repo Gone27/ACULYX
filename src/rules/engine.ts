@@ -1,12 +1,4 @@
-/**
- * Rule engine — orchestrates all header and cookie security rules.
- *
- * This is the single entry-point called by the background service worker.
- * It accepts raw capture data and returns a fully-evaluated RuleOutput that
- * the popup can render directly.
- *
- * All functions invoked here are pure — no browser APIs are used.
- */
+/** Rule engine — orchestrates all header and cookie security rules. */
 
 import type {
   CookieRecord,
@@ -16,6 +8,8 @@ import type {
   ScoreBreakdown,
   SubdomainTrustAnalysis,
 } from '../shared/types';
+import type { ScopeEngine, ScopeProfile } from '../shared/scope';
+import { ScopeEngine as ConcreteScopeEngine } from '../shared/scope/engine';
 
 import { checkHsts } from './headers/hsts';
 import { checkCsp } from './headers/csp';
@@ -34,30 +28,22 @@ import { checkCors } from './headers/cors';
 import { computeScore } from './scoring';
 import { checkDuplicateHeaders } from './utils';
 
-// ---------------------------------------------------------------------------
-// Public interfaces
-// ---------------------------------------------------------------------------
-
-/** Data fed into the rule engine from the capture layer. */
 export interface RuleInput {
-  /** All hops in the redirect chain; the final hop is used for header checks. */
   hops: Hop[];
-  /** Cookies associated with the page at evaluation time. */
   cookies: CookieRecord[];
-  /** The effective origin of the final page (e.g. 'https://example.com'). */
   origin: string;
-  /** A meta CSP was detected in the document when no response header exists. */
   metaCspFound?: boolean;
-  /** Response-correlation diagnostics that do not originate in static rules. */
   captureFindings?: Finding[];
-  /** Optional cookie overrides from user settings. */
   cookieSettings?: {
     alwaysSensitive: string[];
     alwaysIgnore: string[];
   };
+  /** Optional ScopeEngine instance to evaluate scopeStatus on findings */
+  scopeEngine?: ScopeEngine | undefined;
+  /** Optional ScopeProfile to instantiate a ScopeEngine */
+  scopeProfile?: ScopeProfile | undefined;
 }
 
-/** Aggregated result returned to the popup / storage layer. */
 export interface RuleOutput {
   findings: Finding[];
   score: number;
@@ -66,36 +52,13 @@ export interface RuleOutput {
   qualityGrade: Grade;
   breakdown: ScoreBreakdown[];
   scoreVersion: string;
-  /** Subdomain escalation analysis (always populated, may have no vectors). */
   subdomainTrust: SubdomainTrustAnalysis;
 }
 
-// ---------------------------------------------------------------------------
-// Engine
-// ---------------------------------------------------------------------------
-
-/**
- * Run all security rules against captured hop and cookie data.
- *
- * Execution order:
- *  1. checkHsts         — transport security
- *  2. checkCsp          — content security policy (also yields directives map)
- *  3. checkXfo          — framing protection (uses CSP directives)
- *  4. checkXcto         — MIME-type sniffing
- *  5. checkReferrer     — referrer policy
- *  6. checkDeprecated   — deprecated headers
- *  7. checkInfoLeak     — information leakage
- *  8. checkCacheCookie  — cache control on cookie-setting responses
- *
- * @param input - Captured hops, cookies, and origin.
- * @returns Aggregated findings, score, grade, breakdown, and score version.
- */
 export function runRules(input: RuleInput): RuleOutput {
   const { hops } = input;
-
   const emptySubdomainTrust: SubdomainTrustAnalysis = { hasEscalationPath: false, vectors: [] };
 
-  // Guard: nothing to evaluate when no hops were captured.
   if (hops.length === 0) {
     return {
       findings: [],
@@ -109,93 +72,83 @@ export function runRules(input: RuleInput): RuleOutput {
     };
   }
 
-  // All header checks operate on the final hop (the authoritative response).
   const finalHop = hops[hops.length - 1];
-
-  // noUncheckedIndexedAccess: array access returns T | undefined even when
-  // length > 0. The guard above ensures we only reach here with hops.length > 0,
-  // so finalHop is always defined. Cast with a non-null assertion here.
   if (finalHop === undefined) {
-    return { findings: [], score: 100, grade: 'A', qualityScore: 100, qualityGrade: 'A', breakdown: [], scoreVersion: '', subdomainTrust: emptySubdomainTrust };
+    return {
+      findings: [],
+      score: 100,
+      grade: 'A',
+      qualityScore: 100,
+      qualityGrade: 'A',
+      breakdown: [],
+      scoreVersion: '',
+      subdomainTrust: emptySubdomainTrust,
+    };
   }
 
-  const findings: Finding[] = [];
+  const scopeEngine =
+    input.scopeEngine !== undefined
+      ? input.scopeEngine
+      : input.scopeProfile !== undefined
+        ? new ConcreteScopeEngine(input.scopeProfile)
+        : undefined;
 
-  const redirectFindings = detectRedirectDegradation(hops).map(f => ({ ...f, provenance: 'redirect' as const }));
+  const findings: Finding[] = [];
+  const redirectFindings = detectRedirectDegradation(hops).map((f) => ({
+    ...f,
+    provenance: 'redirect' as const,
+    outcome: 'partial-coverage' as const,
+    limitations: ['Observed across redirect hops; intermediate hops may have different policy boundaries.'],
+    scopeStatus: scopeEngine !== undefined ? scopeEngine.classify(f.sourceUrl ?? finalHop.url) : undefined,
+  }));
   findings.push(...redirectFindings);
   findings.push(...(input.captureFindings ?? []));
   
   const headerFindings: Finding[] = [];
   headerFindings.push(...checkDuplicateHeaders(finalHop));
-
-  // 1. HSTS
   headerFindings.push(...checkHsts(finalHop));
 
-  // 2. CSP — also returns the parsed directives map for downstream rules.
   const { findings: cspFindings, directives } = checkCsp(finalHop, input.metaCspFound);
   headerFindings.push(...cspFindings);
 
-  // 3. XFO — needs the CSP directives to decide if frame-ancestors supersedes it.
   headerFindings.push(...checkXfo(finalHop, directives));
-
-  // 4. X-Content-Type-Options
   headerFindings.push(...checkXcto(finalHop));
-
-  // 5. Referrer-Policy
   headerFindings.push(...checkReferrer(finalHop));
-
   headerFindings.push(...checkIsolationHeaders(finalHop));
   headerFindings.push(...checkReportingHeaders(finalHop));
   headerFindings.push(...checkPolicyHardeningHeaders(finalHop));
   headerFindings.push(...checkCors(finalHop));
-
-  // 6. Deprecated headers (X-XSS-Protection, etc.)
   headerFindings.push(...checkDeprecated(finalHop));
-
-  // 7. Information leakage via server/framework version headers
   headerFindings.push(...checkInfoLeak(finalHop));
-
-  // 8. Cache-Control on responses that set cookies
   headerFindings.push(...checkCacheCookie(
     finalHop,
     input.cookieSettings?.alwaysSensitive,
-    input.cookieSettings?.alwaysIgnore
+    input.cookieSettings?.alwaysIgnore,
   ));
   
-  findings.push(...headerFindings.map(f => ({ ...f, provenance: 'response-header' as const })));
+  findings.push(...headerFindings.map((f) => ({ ...f, provenance: f.provenance ?? ('response-header' as const) })));
 
-  // 9. Cookie attribute rules (Secure, HttpOnly, SameSite, prefix compliance)
   const isHttps = finalHop.url.startsWith('https://');
   const cookieFindings = checkCookies(
     input.cookies,
     isHttps,
     input.cookieSettings?.alwaysSensitive,
-    input.cookieSettings?.alwaysIgnore
+    input.cookieSettings?.alwaysIgnore,
   );
-  findings.push(...cookieFindings.map(f => ({ ...f, provenance: 'cookie-metadata' as const })));
+  findings.push(...cookieFindings.map((f) => ({ ...f, provenance: f.provenance ?? ('cookie-metadata' as const) })));
 
-  // 10. Subdomain → main-domain escalation trust analysis
   const subdomainResult = checkSubdomainTrust(
     finalHop,
     input.cookies,
     input.cookieSettings?.alwaysSensitive,
-    input.cookieSettings?.alwaysIgnore
+    input.cookieSettings?.alwaysIgnore,
   );
   findings.push(...subdomainResult.findings);
 
   const heuristicRules = new Set([
-    'LEAK-001',
-    'CSP-009',
-    'CSP-008',
-    'CSP-META-001',
-    'SUB-001',
-    'SUB-002',
-    'SUB-003H',
-    'SUB-004',
-    'SUB-005',
-    'SUB-006',
-    'SUB-007',
-    'SUB-008',
+    'LEAK-001', 'CSP-009', 'CSP-008', 'CSP-META-001',
+    'SUB-001', 'SUB-002', 'SUB-003H', 'SUB-004', 'SUB-005',
+    'SUB-006', 'SUB-007', 'SUB-008',
   ]);
 
   const findingsWithSource: Finding[] = findings.map((finding) => {
@@ -203,18 +156,26 @@ export function runRules(input: RuleInput): RuleOutput {
       heuristicRules.has(finding.ruleId) ||
       finding.title.includes('(name-based heuristic)');
     const isPass = finding.severity === 'info' || finding.severity === 'pass';
+    const targetUrl = finding.sourceUrl ?? finalHop.url;
     return {
       ...finding,
-      sourceUrl: finding.sourceUrl ?? finalHop.url,
+      sourceUrl: targetUrl,
       provenance: finding.provenance ?? 'response-header',
       confidence:
         finding.confidence ?? (isHeuristic ? 'heuristic' : 'deterministic'),
-      outcome: finding.outcome ?? (isPass ? 'pass' : 'fail'),
+      outcome:
+        finding.outcome ?? (isPass ? 'pass' : (finalHop.fromCache ? 'partial-coverage' : 'fail')),
+      limitations: finding.limitations ?? (finalHop.fromCache
+        ? ['Response served from browser cache; header presence unverified.']
+        : ['Passive analysis only; no active probes or exploit verification executed.']),
+      scopeStatus: finding.scopeStatus ?? (scopeEngine !== undefined ? scopeEngine.classify(targetUrl) : undefined),
     };
   });
 
-  // Compute the aggregate score and grade, taking caching into account.
-  const { score, grade, qualityScore, qualityGrade, breakdown, scoreVersion } = computeScore(findingsWithSource, finalHop.fromCache);
+  const { score, grade, qualityScore, qualityGrade, breakdown, scoreVersion } = computeScore(
+    findingsWithSource,
+    finalHop.fromCache,
+  );
 
   return {
     findings: findingsWithSource,
@@ -231,31 +192,47 @@ export function runRules(input: RuleInput): RuleOutput {
   };
 }
 
-
 export function runApiRules(
   apiHop: import('../shared/types').ApiHop,
-  cookieSettings?: { alwaysSensitive: string[]; alwaysIgnore: string[] }
+  optionsOrSettings?:
+    | { alwaysSensitive?: string[]; alwaysIgnore?: string[]; scopeEngine?: ScopeEngine }
+    | { alwaysSensitive: string[]; alwaysIgnore: string[] },
 ): Finding[] {
   const hopLike = apiHop as unknown as Hop;
   const findings: Finding[] = [];
 
-  // API runs only a subset of rules that make sense for XHR/Fetch endpoints.
+  const sensitive =
+    optionsOrSettings !== undefined && 'alwaysSensitive' in optionsOrSettings
+      ? optionsOrSettings.alwaysSensitive
+      : undefined;
+  const ignored =
+    optionsOrSettings !== undefined && 'alwaysIgnore' in optionsOrSettings
+      ? optionsOrSettings.alwaysIgnore
+      : undefined;
+  const scopeEngine =
+    optionsOrSettings !== undefined && 'scopeEngine' in optionsOrSettings
+      ? optionsOrSettings.scopeEngine
+      : undefined;
+
   findings.push(...checkCors(hopLike));
   findings.push(...checkXcto(hopLike));
   findings.push(...checkInfoLeak(hopLike));
   findings.push(...checkCacheCookie(
     hopLike,
-    cookieSettings?.alwaysSensitive,
-    cookieSettings?.alwaysIgnore
+    sensitive,
+    ignored,
   ));
   
-  // Tag all findings with the specific API source URL and confidence
   return findings.map((f) => ({
     ...f,
     sourceUrl: apiHop.url,
     confidence: f.confidence ?? (f.ruleId === 'LEAK-001' ? 'heuristic' : 'deterministic'),
     provenance: 'response-header',
-    outcome: 'fail',
+    outcome: f.outcome ?? (f.severity === 'info' || f.severity === 'pass' ? 'pass' : 'fail'),
+    limitations: f.limitations ?? [
+      'Passive analysis of captured API response; no active probes sent.',
+    ],
+    scopeStatus: f.scopeStatus ?? (scopeEngine !== undefined ? scopeEngine.classify(apiHop.url) : undefined),
   }));
 }
 
@@ -300,9 +277,9 @@ function detectRedirectDegradation(hops: Hop[]): Finding[] {
       category: 'header',
       severity: 'info',
       title: `Redirect response drops ${removed.length} previously present security header(s)`,
-      impact: 'A protection present on an earlier redirect response is absent from the next response; review whether the destination needs its own policy.',
+      impact: 'A protection present on an earlier redirect response is absent from the next response.',
       evidence: `${safeHopLabel(previous)} -> ${safeHopLabel(current)}: ${removed.join(', ')}`,
-      recommendation: 'Review the redirect chain and configure the destination response to send the protections required for that origin. Header policies do not automatically carry across responses.',
+      recommendation: 'Review the redirect chain and configure the destination response to send required protections.',
       reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections',
       sourceUrl: current.url,
     });

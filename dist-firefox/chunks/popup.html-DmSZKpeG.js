@@ -1,7 +1,258 @@
-import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CTMeVYaN.js";
+import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, b as sanitizeUrlForStorage, g as redactHeaderValue, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CTMeVYaN.js";
 import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CQzmjg6F.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 import { t as applyAppearance } from "./appearance-Cjc7_Dji.js";
+import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
+//#region src/shared/reporting/report-builder.ts
+var UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+var JWT_RE = /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g;
+var HEX_TOKEN_RE = /\b[0-9a-f]{32,}\b/gi;
+var CANARY_RE = /\b(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
+var SENSITIVE_QUERY_PARAMS = /* @__PURE__ */ new Set([
+	"token",
+	"access_token",
+	"id_token",
+	"refresh_token",
+	"auth",
+	"authentication",
+	"api_key",
+	"apikey",
+	"key",
+	"secret",
+	"password",
+	"passwd",
+	"pwd",
+	"session",
+	"sessionid",
+	"sessid",
+	"sig",
+	"signature",
+	"code",
+	"ticket",
+	"credential",
+	"canary"
+]);
+/**
+* Sanitizes a URL for report inclusion by stripping credentials,
+* redacting sensitive path segments, filtering sensitive query parameters,
+* and removing fragments.
+*/
+function sanitizeUrlForReport(rawUrl) {
+	if (!rawUrl || typeof rawUrl !== "string") return "";
+	const trimmed = rawUrl.trim();
+	if (trimmed.length === 0) return "";
+	try {
+		const parsed = new URL(trimmed);
+		parsed.username = "";
+		parsed.password = "";
+		parsed.hash = "";
+		const searchParams = new URLSearchParams(parsed.search);
+		const keys = Array.from(searchParams.keys());
+		for (const key of keys) if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) searchParams.set(key, "[REDACTED]");
+		parsed.search = searchParams.toString();
+		const sanitizedBase = sanitizeUrlForStorage(parsed.origin + parsed.pathname);
+		return parsed.search.length > 0 ? `${sanitizedBase}?${parsed.search}` : sanitizedBase;
+	} catch {
+		const parts = (trimmed.replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, "").replace(/^[^@/]+@/, "").split("#")[0] ?? "").split("?");
+		const pathPart = sanitizeUrlForStorage(parts[0] ?? "");
+		if (parts.length > 1 && parts[1] !== void 0 && parts[1].length > 0) try {
+			const sp = new URLSearchParams(parts[1]);
+			for (const k of Array.from(sp.keys())) if (SENSITIVE_QUERY_PARAMS.has(k.toLowerCase())) sp.set(k, "[REDACTED]");
+			return `${pathPart}?${sp.toString()}`;
+		} catch {
+			return pathPart;
+		}
+		return pathPart;
+	}
+}
+/**
+* Performs comprehensive secret and canary token redaction on arbitrary text.
+*/
+function redactAllSecrets(text) {
+	if (!text || typeof text !== "string") return "";
+	let sanitized = text;
+	sanitized = sanitized.replace(/(?:authorization|proxy-authorization)\s*:\s*(?:bearer|basic|token)?\s*[^\r\n]+/gi, (match) => {
+		const colonIdx = match.indexOf(":");
+		if (colonIdx !== -1) return `${match.slice(0, colonIdx).trim()}: [REDACTED]`;
+		return match;
+	});
+	sanitized = sanitized.replace(/set-cookie\s*:\s*[^\r\n]+/gi, (match) => {
+		const colonIdx = match.indexOf(":");
+		if (colonIdx !== -1) {
+			const headerName = match.slice(0, colonIdx).trim();
+			const val = match.slice(colonIdx + 1).trim();
+			return `${headerName}: ${redactHeaderValue("set-cookie", val)}`;
+		}
+		return match;
+	});
+	sanitized = sanitized.replace(/(?<![\w-])cookie\s*:\s*[^\r\n]+/gi, (match) => {
+		const colonIdx = match.indexOf(":");
+		if (colonIdx !== -1) {
+			const headerName = match.slice(0, colonIdx).trim();
+			const val = match.slice(colonIdx + 1).trim();
+			return `${headerName}: ${redactHeaderValue("cookie", val)}`;
+		}
+		return match;
+	});
+	sanitized = sanitized.replace(JWT_RE, "[token]");
+	sanitized = sanitized.replace(UUID_RE, "[id]");
+	sanitized = sanitized.replace(HEX_TOKEN_RE, "[token]");
+	sanitized = sanitized.replace(CANARY_RE, "[REDACTED]");
+	return sanitized;
+}
+var RULE_KNOWLEDGE_BASE = {
+	"HSTS-001": {
+		cweId: "CWE-319",
+		cvssScore: 6.5,
+		expectedBehavior: "The server must enforce HTTPS connections using a Strict-Transport-Security header with a max-age of at least 31536000 seconds (1 year) and includeSubDomains.",
+		remediation: "Add the Strict-Transport-Security header to all HTTPS responses at the edge gateway or server configuration:\n`Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`",
+		references: ["https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security"]
+	},
+	"CSP-001": {
+		cweId: "CWE-1021",
+		cvssScore: 7.2,
+		expectedBehavior: "The server must serve a valid, restrictive Content-Security-Policy header restricting script execution and resource loading.",
+		remediation: "Deploy a robust Content-Security-Policy header restricting executable script sources:\n`Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-...'; object-src 'none'; base-uri 'self';`",
+		references: ["https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html", "https://csp.withgoogle.com/docs/strict-csp.html"]
+	},
+	"CSP-005": {
+		cweId: "CWE-1021",
+		cvssScore: 5.4,
+		expectedBehavior: "The server must prevent unauthorized framing by defining frame-ancestors in Content-Security-Policy or using X-Frame-Options: DENY / SAMEORIGIN.",
+		remediation: "Configure Content-Security-Policy with the frame-ancestors directive:\n`Content-Security-Policy: frame-ancestors 'self';`",
+		references: ["https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/frame-ancestors"]
+	},
+	"XFO-001": {
+		cweId: "CWE-1021",
+		cvssScore: 5.4,
+		expectedBehavior: "The server must protect against clickjacking by serving an X-Frame-Options header (DENY or SAMEORIGIN) or CSP frame-ancestors.",
+		remediation: "Add the X-Frame-Options header to all HTML responses:\n`X-Frame-Options: SAMEORIGIN`\nOr preferably enforce CSP `frame-ancestors`.",
+		references: ["https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options", "https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html"]
+	},
+	"XCTO-001": {
+		cweId: "CWE-79",
+		cvssScore: 4.3,
+		expectedBehavior: "The server must disable MIME-type sniffing by returning X-Content-Type-Options: nosniff on all responses.",
+		remediation: "Emit the header across all HTTP responses:\n`X-Content-Type-Options: nosniff`",
+		references: ["https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options"]
+	},
+	"COOK-001": {
+		cweId: "CWE-614",
+		cvssScore: 6.5,
+		expectedBehavior: "All session and authentication cookies must include the Secure, HttpOnly, and SameSite attributes.",
+		remediation: "Update session cookie generation to enforce flags:\n`Set-Cookie: session=[token]; Secure; HttpOnly; SameSite=Lax; Path=/`",
+		references: ["https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#cookies-attributes"]
+	},
+	"CORS-001": {
+		cweId: "CWE-942",
+		cvssScore: 7.5,
+		expectedBehavior: "The server must not reflect arbitrary Origin headers with Access-Control-Allow-Credentials: true or emit Access-Control-Allow-Origin: * on authenticated endpoints.",
+		remediation: "Implement an explicit, strict server-side whitelist for allowed cross-origin requests. Never reflect the Origin header without strict origin validation.",
+		references: ["https://portswigger.net/web-security/cors", "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS"]
+	}
+};
+var ReportBuilder = class {
+	/**
+	* Generates a complete BugBountyReportDraft from a scanner finding and optional context.
+	*/
+	static buildReportDraft(finding, options) {
+		const target = sanitizeUrlForReport(options?.targetUrl ?? finding.sourceUrl ?? "https://target.example.com");
+		const meta = RULE_KNOWLEDGE_BASE[finding.ruleId] ?? {
+			expectedBehavior: "The server should implement recognized security hardening headers and standards.",
+			remediation: finding.recommendation.length > 0 ? finding.recommendation : "Consult security best practices to remediate this finding.",
+			references: finding.reference !== void 0 && finding.reference.length > 0 ? [finding.reference] : []
+		};
+		const sanitizedEvidence = redactAllSecrets(finding.evidence.length > 0 ? finding.evidence : "Header or attribute not observed");
+		const reproductionSteps = [
+			`1. Open an HTTP inspection client or browser developer tools network tab.`,
+			`2. Navigate to target endpoint: ${target}`,
+			`3. Inspect the HTTP response headers and cookies returned by the server.`,
+			`4. Verify the observed response for ${finding.ruleId}: "${sanitizedEvidence}".`,
+			`5. Notice the absence of secure compliance configuration described below.`
+		];
+		const preconditions = [`Valid network access to ${target}.`, `Passive HTTP response inspection capabilities.`];
+		const observedBehavior = finding.evidence.length > 0 ? `Server responded with: ${sanitizedEvidence}` : `Server omitted the required security control for rule ${finding.ruleId}.`;
+		const limitations = finding.limitations && finding.limitations.length > 0 ? [...finding.limitations] : ["Passive observation only; no intrusive payloads were transmitted.", "Intermediaries or reverse-proxies may alter response headers dynamically."];
+		const reviewState = options?.reviewState ?? "unreviewed";
+		const draft = {
+			id: `aculyx-${finding.ruleId.toLowerCase()}-${Date.now()}`,
+			title: `[${finding.severity.toUpperCase()}] ${finding.title} on ${target}`,
+			severity: finding.severity,
+			target,
+			summary: finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : `Passive analysis identified ${finding.title} (${finding.ruleId}) on target ${target}.`,
+			reproductionSteps,
+			preconditions,
+			expectedBehavior: meta.expectedBehavior,
+			observedBehavior,
+			impact: finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : "Potential security exposure resulting from missing or improperly configured HTTP security controls.",
+			evidence: sanitizedEvidence,
+			remediation: meta.remediation.length > 0 ? meta.remediation : finding.recommendation,
+			limitations,
+			reviewState,
+			updatedAt: Date.now(),
+			createdAt: Date.now(),
+			ruleId: finding.ruleId
+		};
+		if (finding.scopeStatus !== void 0) draft.scopeStatus = finding.scopeStatus;
+		if (meta.cweId !== void 0) draft.cweId = meta.cweId;
+		if (meta.cvssScore !== void 0) draft.cvssScore = meta.cvssScore;
+		if (meta.references.length > 0) draft.references = [...meta.references];
+		return draft;
+	}
+	/**
+	* Formats a BugBountyReportDraft into clean, submission-ready Markdown.
+	*/
+	static formatReportAsMarkdown(draft) {
+		const lines = [];
+		lines.push(`# ${draft.title}\n`);
+		lines.push(`## Vulnerability Details`);
+		lines.push(`- **Target:** \`${draft.target}\``);
+		lines.push(`- **Severity:** **${draft.severity.toUpperCase()}**`);
+		if (draft.ruleId !== void 0 && draft.ruleId.length > 0) lines.push(`- **Rule ID:** \`${draft.ruleId}\``);
+		if (draft.cweId !== void 0 && draft.cweId.length > 0) lines.push(`- **CWE:** [${draft.cweId}](https://cwe.mitre.org/data/definitions/${draft.cweId.replace("CWE-", "")}.html)`);
+		if (draft.cvssScore !== void 0) lines.push(`- **CVSS Score:** ${draft.cvssScore.toFixed(1)}`);
+		if (draft.scopeStatus !== void 0) lines.push(`- **Scope Status:** \`${draft.scopeStatus}\``);
+		lines.push(`- **Researcher Review State:** \`${draft.reviewState}\`\n`);
+		lines.push(`## Executive Summary`);
+		lines.push(`${draft.summary}\n`);
+		lines.push(`## Preconditions`);
+		for (const pre of draft.preconditions) lines.push(`- ${pre}`);
+		lines.push("");
+		lines.push(`## Reproduction Steps`);
+		for (const step of draft.reproductionSteps) lines.push(`${step}`);
+		lines.push("");
+		lines.push(`## Expected vs Observed Behavior`);
+		lines.push(`**Expected:**\n${draft.expectedBehavior}\n`);
+		lines.push(`**Observed:**\n${draft.observedBehavior}\n`);
+		lines.push(`## Sanitized Evidence`);
+		lines.push("```http");
+		lines.push(draft.evidence);
+		lines.push("```\n");
+		lines.push(`## Security Impact`);
+		lines.push(`${draft.impact}\n`);
+		lines.push(`## Remediation`);
+		lines.push(`${draft.remediation}\n`);
+		if (draft.limitations.length > 0) {
+			lines.push(`## Detection Limitations & Caveats`);
+			for (const lim of draft.limitations) lines.push(`- ${lim}`);
+			lines.push("");
+		}
+		if (draft.references !== void 0 && draft.references.length > 0) {
+			lines.push(`## References`);
+			for (const ref of draft.references) lines.push(`- ${ref}`);
+			lines.push("");
+		}
+		lines.push(`---\n*Report generated by ACULYX Passive Bug-Bounty Scanner. All credentials and sensitive tokens were strictly redacted.*`);
+		return lines.join("\n");
+	}
+	/**
+	* Serializes a BugBountyReportDraft into formatted JSON string.
+	*/
+	static formatReportAsJson(draft) {
+		return JSON.stringify(draft, null, 2);
+	}
+};
+//#endregion
 //#region src/shared/filters.ts
 /**
 * Pure presentation selector to filter findings by allowed severity levels.
@@ -65,6 +316,25 @@ var authDiffList;
 var openGraphBtn;
 var findingsFilterNotice;
 var showAllFindingsBtn;
+var findingDetailsDrawer;
+var drawerRuleId;
+var drawerScopeBadge;
+var drawerCloseBtn;
+var drawerFindingTitle;
+var drawerSeverityTag;
+var drawerProvenanceTag;
+var drawerConfidenceTag;
+var drawerEvidence;
+var drawerLimitationsField;
+var drawerLimitations;
+var drawerImpact;
+var drawerRemediation;
+var drawerTriageSelect;
+var drawerTriageNotes;
+var drawerExportMdBtn;
+var drawerExportJsonBtn;
+var drawerCopyBtn;
+var activeDrawerFinding = null;
 /** The tab ID currently being inspected by the popup. */
 var currentTabId = null;
 /** The normalised origin (scheme + host + port) of the active tab. */
@@ -121,6 +391,101 @@ document.addEventListener("DOMContentLoaded", () => {
 	openGraphBtn = getEl("open-graph-btn");
 	findingsFilterNotice = getEl("findings-filter-notice");
 	showAllFindingsBtn = getEl("show-all-findings-btn");
+	findingDetailsDrawer = getEl("finding-details-drawer");
+	drawerRuleId = getEl("drawer-rule-id");
+	drawerScopeBadge = getEl("drawer-scope-badge");
+	drawerCloseBtn = getEl("drawer-close-btn");
+	drawerFindingTitle = getEl("drawer-finding-title");
+	drawerSeverityTag = getEl("drawer-severity-tag");
+	drawerProvenanceTag = getEl("drawer-provenance-tag");
+	drawerConfidenceTag = getEl("drawer-confidence-tag");
+	drawerEvidence = getEl("drawer-evidence");
+	drawerLimitationsField = getEl("drawer-limitations-field");
+	drawerLimitations = getEl("drawer-limitations");
+	drawerImpact = getEl("drawer-impact");
+	drawerRemediation = getEl("drawer-remediation");
+	drawerTriageSelect = getEl("drawer-triage-select");
+	drawerTriageNotes = getEl("drawer-triage-notes");
+	drawerExportMdBtn = getEl("drawer-export-md-btn");
+	drawerExportJsonBtn = getEl("drawer-export-json-btn");
+	drawerCopyBtn = getEl("drawer-copy-btn");
+	drawerCloseBtn.addEventListener("click", () => {
+		findingDetailsDrawer.close();
+	});
+	drawerTriageSelect.addEventListener("change", () => {
+		if (activeDrawerFinding) {
+			const state = drawerTriageSelect.value;
+			const notes = drawerTriageNotes.value;
+			const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
+			TriageStore.setAnnotation(findingKey, state, notes).catch(() => void 0);
+		}
+	});
+	drawerTriageNotes.addEventListener("blur", () => {
+		if (activeDrawerFinding) {
+			const state = drawerTriageSelect.value;
+			const notes = drawerTriageNotes.value;
+			const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
+			TriageStore.setAnnotation(findingKey, state, notes).catch(() => void 0);
+		}
+	});
+	drawerExportMdBtn.addEventListener("click", () => {
+		if (!activeDrawerFinding) return;
+		const state = drawerTriageSelect.value;
+		const notes = drawerTriageNotes.value;
+		const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
+			targetUrl: currentState?.url ?? currentOrigin,
+			reviewState: state,
+			triageNotes: notes
+		});
+		const md = ReportBuilder.formatReportAsMarkdown(draft);
+		const blob = new Blob([md], { type: "text/markdown" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `aculyx-report-${activeDrawerFinding.ruleId.toLowerCase()}.md`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	});
+	drawerExportJsonBtn.addEventListener("click", () => {
+		if (!activeDrawerFinding) return;
+		const state = drawerTriageSelect.value;
+		const notes = drawerTriageNotes.value;
+		const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
+			targetUrl: currentState?.url ?? currentOrigin,
+			reviewState: state,
+			triageNotes: notes
+		});
+		const json = ReportBuilder.formatReportAsJson(draft);
+		const blob = new Blob([json], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `aculyx-report-${activeDrawerFinding.ruleId.toLowerCase()}.json`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	});
+	drawerCopyBtn.addEventListener("click", () => {
+		if (!activeDrawerFinding) return;
+		const state = drawerTriageSelect.value;
+		const notes = drawerTriageNotes.value;
+		const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
+			targetUrl: currentState?.url ?? currentOrigin,
+			reviewState: state,
+			triageNotes: notes
+		});
+		const md = ReportBuilder.formatReportAsMarkdown(draft);
+		navigator.clipboard.writeText(md).then(() => {
+			const origText = drawerCopyBtn.textContent;
+			drawerCopyBtn.textContent = "Copied!";
+			setTimeout(() => {
+				drawerCopyBtn.textContent = origText;
+			}, 1500);
+		}).catch(() => void 0);
+	});
 	showAllFindingsBtn.addEventListener("click", () => {
 		showAllFindingsOverride = !showAllFindingsOverride;
 		renderFindings(currentFindings);
@@ -434,9 +799,50 @@ function buildFindingItem(finding) {
 		});
 		body.appendChild(pocBtn);
 	}
+	const detailsBtn = document.createElement("button");
+	detailsBtn.className = "finding-details-btn";
+	detailsBtn.textContent = "Details ↗";
+	detailsBtn.setAttribute("aria-label", `View details for ${finding.ruleId}`);
+	detailsBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		openFindingDetails(finding);
+	});
+	body.appendChild(detailsBtn);
 	li.appendChild(severitySpan);
 	li.appendChild(body);
 	return li;
+}
+function openFindingDetails(finding) {
+	activeDrawerFinding = finding;
+	drawerRuleId.textContent = finding.ruleId;
+	const scope = finding.scopeStatus ?? "unknown";
+	drawerScopeBadge.textContent = scope;
+	drawerScopeBadge.className = `drawer-scope-badge scope-${scope}`;
+	drawerFindingTitle.textContent = finding.title;
+	drawerSeverityTag.textContent = finding.severity.toUpperCase();
+	drawerProvenanceTag.textContent = finding.provenance ?? "observation";
+	drawerConfidenceTag.textContent = finding.confidence ?? "high";
+	drawerEvidence.textContent = finding.evidence.length > 0 ? finding.evidence : "No raw evidence captured";
+	drawerImpact.textContent = finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : "Potential security weakness.";
+	drawerRemediation.textContent = finding.recommendation.length > 0 ? finding.recommendation : "Consult security recommendations.";
+	while (drawerLimitations.firstChild) drawerLimitations.removeChild(drawerLimitations.firstChild);
+	if (finding.limitations !== void 0 && finding.limitations.length > 0) {
+		drawerLimitationsField.hidden = false;
+		for (const lim of finding.limitations) {
+			const li = document.createElement("li");
+			li.textContent = lim;
+			drawerLimitations.appendChild(li);
+		}
+	} else drawerLimitationsField.hidden = true;
+	const findingKey = `${finding.ruleId}:${currentOrigin}`;
+	TriageStore.getAnnotation(findingKey).then((ann) => {
+		if (activeDrawerFinding?.ruleId === finding.ruleId) {
+			drawerTriageSelect.value = ann?.state ?? "unreviewed";
+			drawerTriageNotes.value = ann?.notes ?? "";
+		}
+	});
+	if (typeof findingDetailsDrawer.showModal === "function") findingDetailsDrawer.showModal();
+	else findingDetailsDrawer.setAttribute("open", "");
 }
 function renderBreakdown(breakdown) {
 	while (breakdownBody.firstChild) breakdownBody.removeChild(breakdownBody.firstChild);
@@ -1144,4 +1550,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-DrmMCqw-.js.map
+//# sourceMappingURL=popup.html-DmSZKpeG.js.map

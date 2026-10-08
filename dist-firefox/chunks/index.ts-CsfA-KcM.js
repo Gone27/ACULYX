@@ -513,6 +513,225 @@ function registerPageSignalInjection() {
 	});
 }
 //#endregion
+//#region src/shared/scope/normalize.ts
+/**
+* Normalizes a hostname:
+* - Strips trailing dots
+* - Converts to lowercase
+* - Converts IDNA international domain names to ASCII punycode
+*/
+function normalizeHostname(rawHost) {
+	let cleaned = rawHost.trim().toLowerCase();
+	while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
+	if (cleaned.length === 0) throw new Error("Hostname cannot be empty");
+	if (cleaned.startsWith("[") && cleaned.endsWith("]")) return cleaned;
+	try {
+		return new URL(`http://${cleaned}`).hostname;
+	} catch {
+		return cleaned;
+	}
+}
+/**
+* Extracts and normalizes the scheme (e.g. 'https', 'http') from a URL string.
+* Returns undefined if no scheme is specified.
+*/
+function parseScheme(raw) {
+	const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.exec(raw.trim());
+	if (match && match[0]) return match[0].replace(/:\/\/$/, "").toLowerCase();
+}
+/**
+* Normalizes a scope target (URL, host pattern, or wildcard pattern)
+* into a NormalizedScopeTarget structure.
+*/
+function normalizeScopeTarget(raw) {
+	if (typeof raw !== "string" || raw.trim().length === 0) throw new Error("Scope target must be a non-empty string");
+	const trimmed = raw.trim();
+	const scheme = parseScheme(trimmed);
+	let authority = trimmed;
+	if (scheme !== void 0) authority = authority.slice(scheme.length + 3);
+	const pathIdx = authority.search(/[\/?#]/);
+	if (pathIdx !== -1) authority = authority.slice(0, pathIdx);
+	const atIdx = authority.lastIndexOf("@");
+	if (atIdx !== -1) authority = authority.slice(atIdx + 1);
+	let isWildcard = false;
+	let hostAndPort = authority;
+	if (hostAndPort.startsWith("*.")) {
+		isWildcard = true;
+		hostAndPort = hostAndPort.slice(2);
+	} else if (hostAndPort.startsWith("*")) {
+		isWildcard = true;
+		hostAndPort = hostAndPort.slice(1);
+		if (hostAndPort.startsWith(".")) hostAndPort = hostAndPort.slice(1);
+	}
+	let port;
+	let rawHost = hostAndPort;
+	if (hostAndPort.startsWith("[")) {
+		const closeBracket = hostAndPort.indexOf("]");
+		if (closeBracket === -1) throw new Error(`Malformed IPv6 host: ${hostAndPort}`);
+		rawHost = hostAndPort.slice(0, closeBracket + 1);
+		const afterBracket = hostAndPort.slice(closeBracket + 1);
+		if (afterBracket.startsWith(":")) {
+			const portStr = afterBracket.slice(1);
+			const parsedPort = Number(portStr);
+			if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) throw new Error(`Invalid port number: ${portStr}`);
+			port = parsedPort;
+		}
+	} else {
+		const colonIdx = hostAndPort.lastIndexOf(":");
+		if (colonIdx !== -1) {
+			rawHost = hostAndPort.slice(0, colonIdx);
+			const portStr = hostAndPort.slice(colonIdx + 1);
+			const parsedPort = Number(portStr);
+			if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) throw new Error(`Invalid port number: ${portStr}`);
+			port = parsedPort;
+		}
+	}
+	const hostname = normalizeHostname(rawHost);
+	return {
+		raw,
+		...scheme !== void 0 ? { scheme } : {},
+		hostname,
+		...port !== void 0 ? { port } : {},
+		isWildcard
+	};
+}
+//#endregion
+//#region src/shared/scope/matcher.ts
+/**
+* Checks whether targetHost is a true subdomain of parentHost.
+* Strictly enforces that apex parentHost itself is NOT a subdomain of itself.
+* Example:
+* - 'api.example.com' isSubdomainOf 'example.com' -> true
+* - 'sub.api.example.com' isSubdomainOf 'example.com' -> true
+* - 'example.com' isSubdomainOf 'example.com' -> false (apex boundary)
+* - 'fakeexample.com' isSubdomainOf 'example.com' -> false
+*/
+function isSubdomainOf(targetHost, parentHost) {
+	const normTarget = targetHost.toLowerCase();
+	const normParent = parentHost.toLowerCase();
+	if (normTarget === normParent) return false;
+	return normTarget.endsWith(`.${normParent}`);
+}
+/**
+* Evaluates whether a normalized target matches a normalized scope rule.
+*/
+function matchTarget(target, ruleInput) {
+	const rule = "isWildcard" in ruleInput ? ruleInput : normalizeScopeTarget(ruleInput.pattern);
+	if (rule.port !== void 0) {
+		if (target.port !== rule.port) return false;
+	}
+	if (rule.scheme !== void 0 && target.scheme !== void 0) {
+		if (rule.scheme !== target.scheme) return false;
+	}
+	if (rule.isWildcard) return isSubdomainOf(target.hostname, rule.hostname);
+	return target.hostname === rule.hostname;
+}
+//#endregion
+//#region src/shared/scope/engine.ts
+var ScopeEngine = class {
+	rules = [];
+	profile;
+	constructor(profileOrRules) {
+		if (profileOrRules !== void 0) {
+			if (Array.isArray(profileOrRules)) this.setRules(profileOrRules);
+			else this.setProfile(profileOrRules);
+		}
+	}
+	setProfile(profile) {
+		this.profile = profile;
+		this.rules = [...profile.rules];
+	}
+	getProfile() {
+		return this.profile;
+	}
+	setRules(rules) {
+		this.rules = [...rules];
+	}
+	getRules() {
+		return [...this.rules];
+	}
+	addRule(rule) {
+		this.rules.push(rule);
+	}
+	removeRule(pattern) {
+		this.rules = this.rules.filter((r) => r.pattern !== pattern);
+	}
+	clearRules() {
+		this.rules = [];
+		this.profile = void 0;
+	}
+	/**
+	* Evaluates a target URL, hostname, or normalized target against the active scope rules.
+	*
+	* Precedence:
+	* 1. Any matching exclude rule -> 'out-of-scope' (exclude precedence).
+	* 2. Any matching include rule -> 'in-scope'.
+	* 3. No match -> 'unknown'.
+	*/
+	evaluate(target) {
+		let normTarget;
+		try {
+			normTarget = typeof target === "string" ? normalizeScopeTarget(target) : target;
+		} catch (err) {
+			return {
+				status: "unknown",
+				reason: `Target normalization failed: ${err instanceof Error ? err.message : String(err)}`
+			};
+		}
+		if (this.rules.length === 0) return {
+			status: "unknown",
+			reason: "No scope rules configured in engine"
+		};
+		for (const rule of this.rules) if (rule.type === "exclude" && matchTarget(normTarget, rule)) return {
+			status: "out-of-scope",
+			matchedPattern: rule.pattern,
+			ruleType: "exclude",
+			reason: rule.description !== void 0 && rule.description.length > 0 ? `Target matches exclusion rule ${rule.pattern}: ${rule.description}` : `Target matches exclusion rule: ${rule.pattern}`
+		};
+		for (const rule of this.rules) if (rule.type === "include" && matchTarget(normTarget, rule)) return {
+			status: "in-scope",
+			matchedPattern: rule.pattern,
+			ruleType: "include",
+			reason: rule.description !== void 0 && rule.description.length > 0 ? `Target matches inclusion rule ${rule.pattern}: ${rule.description}` : `Target matches inclusion rule: ${rule.pattern}`
+		};
+		return {
+			status: "unknown",
+			reason: `Target ${normTarget.hostname} is not covered by any configured scope rule`
+		};
+	}
+	/**
+	* Independently evaluates a redirect hop URL.
+	* Redirect targets never blindly inherit the scope of the initiating request.
+	*/
+	evaluateRedirectHop(hopUrl, sourceUrl) {
+		const result = this.evaluate(hopUrl);
+		const sourceContext = sourceUrl !== void 0 && sourceUrl.length > 0 ? ` (redirected from ${sourceUrl})` : "";
+		return {
+			...result,
+			reason: `Redirect hop${sourceContext} evaluated independently: ${result.reason}`
+		};
+	}
+	/**
+	* Independently evaluates a third-party subresource or API endpoint URL.
+	*/
+	evaluateThirdParty(resourceUrl, firstPartyUrl) {
+		const result = this.evaluate(resourceUrl);
+		return {
+			...result,
+			reason: `Subresource evaluated independently from page ${firstPartyUrl}: ${result.reason}`
+		};
+	}
+	isTargetInScope(target) {
+		return this.evaluate(target).status === "in-scope";
+	}
+	isTargetOutOfScope(target) {
+		return this.evaluate(target).status === "out-of-scope";
+	}
+	classify(target) {
+		return this.evaluate(target).status;
+	}
+};
+//#endregion
 //#region src/rules/headers/hsts.ts
 var REFERENCE$7 = "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security";
 var HSTS_HEADER = "strict-transport-security";
@@ -1673,40 +1892,15 @@ var import_parser = require_parser();
 var import_finding = require_finding();
 var REFERENCE$6 = "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy";
 var CSP_HEADER = "content-security-policy";
-/**
-* Bypass-prone hosts derived from Google's csp_evaluator maintained JSONP list.
-* Extracted at module-load time: strip scheme/path from each URL and deduplicate.
-*
-* This replaces the hand-written 4-item list with the package's curated set,
-* which Google keeps up to date with real-world bypass-prone endpoints.
-*/
 var CSP_BYPASS_HOSTS = new Set(import_jsonp.URLS.map((url) => {
 	return (url.replace(/^(https?:)?\/\//, "").split("/")[0] ?? "").toLowerCase();
 }).filter((host) => host.length > 0));
-/**
-* Resolve the effective source list for a directive, falling back to
-* default-src when the specific directive is absent.
-*
-* Returns undefined when neither the specific directive nor default-src exists.
-*/
 function resolveEffective(directives, directive) {
 	return directives.get(directive) ?? directives.get("default-src");
 }
-/**
-* Split a CSP source-list string on whitespace and return individual tokens.
-*/
 function sourceTokens(sourceList) {
 	return sourceList.split(/\s+/).filter((t) => t.length > 0);
 }
-/**
-* Returns true when the source list contains a truly open wildcard or insecure scheme:
-*   - exactly '*' (allows script execution from any origin or scheme)
-*   - exactly 'http:' (allows unencrypted scripts subject to MITM)
-*   - exactly 'https:' when NOT protected by 'strict-dynamic' or nonces
-*
-* Scoped domain wildcards (e.g. '*.example.com', '*.muscache.com') are legitimate
-* CDN/subdomain patterns and are evaluated under subdomain trust, not as open wildcards.
-*/
 function hasWildcardSource(sourceList, isModernStrict) {
 	if (isModernStrict) return false;
 	return sourceTokens(sourceList).some((token) => token === "*" || token === "http:" || token === "https:");
@@ -1723,47 +1917,53 @@ function findBypassProneHosts(sourceList) {
 	}
 	return [...matched];
 }
-/**
-* Evaluate the Content-Security-Policy header for the final response hop.
-* This function is pure — no browser APIs are used.
-*
-* @param finalHop - The last hop in the redirect chain.
-* @returns An object containing all findings and the parsed directives map.
-*/
 function checkCsp(finalHop, metaCspFound = false) {
 	const findings = [];
 	const cspValue = finalHop.headers[CSP_HEADER];
+	const fromCache = finalHop.fromCache === true;
 	if (cspValue === void 0) {
 		const reportOnlyValue = finalHop.headers["content-security-policy-report-only"];
 		if (metaCspFound) findings.push({
 			ruleId: "CSP-008",
 			category: "header",
 			severity: "info",
+			confidence: "heuristic",
+			provenance: "dom-signal",
+			outcome: "pass",
 			title: "CSP detected in a meta tag; policy details are not evaluated",
-			impact: "A meta CSP can enforce some policy directives, but it cannot replace response-header protections such as frame-ancestors and may take effect later in document parsing.",
+			impact: "A meta CSP can enforce some policy directives, but cannot replace response-header protections such as frame-ancestors and may take effect later in document parsing.",
 			evidence: sanitizeEvidence("<meta http-equiv=\"Content-Security-Policy\">"),
 			recommendation: "Also send Content-Security-Policy as an HTTP response header for complete coverage. This report does not assess the meta policy contents.",
-			reference: REFERENCE$6
+			reference: REFERENCE$6,
+			limitations: ["Meta tag CSP detected via DOM signal; HTTP response header remains authoritative."]
 		});
 		else if (reportOnlyValue !== void 0) findings.push({
 			ruleId: "CSP-001",
 			category: "header",
 			severity: "high",
+			confidence: "deterministic",
+			provenance: "response-header",
+			outcome: fromCache ? "partial-coverage" : "fail",
 			title: "Only Content-Security-Policy-Report-Only is present; no enforcing CSP is configured",
-			impact: "Report-Only policies observe violations but do not block unsafe content, so they do not provide CSP enforcement.",
+			impact: "Report-Only policies observe violations but do not block unsafe content.",
 			evidence: sanitizeEvidence(reportOnlyValue),
 			recommendation: "After validating reports, deploy the intended policy as Content-Security-Policy. Keep Report-Only separately if continued monitoring is desired.",
-			reference: REFERENCE$6
+			reference: REFERENCE$6,
+			limitations: fromCache ? ["Response served from cache; report-only status unverified on live hit."] : []
 		});
 		else findings.push({
 			ruleId: "CSP-001",
 			category: "header",
 			severity: "high",
+			confidence: "deterministic",
+			provenance: "response-header",
+			outcome: fromCache ? "partial-coverage" : "fail",
 			title: "Content-Security-Policy header is missing",
-			impact: "Without a CSP, any Cross-Site Scripting (XSS) vulnerability can execute malicious scripts, steal login cookies, or take over user accounts.",
+			impact: "Without a CSP, XSS vulnerabilities can execute malicious scripts.",
 			evidence: sanitizeEvidence("(header absent)"),
 			recommendation: "Add a Content-Security-Policy header. Start with a strict base policy such as \"default-src 'none'; script-src 'self'; object-src 'none'; base-uri 'none'\".",
-			reference: REFERENCE$6
+			reference: REFERENCE$6,
+			limitations: fromCache ? ["Response served from browser cache; header presence cannot be confirmed without live network hit."] : ["Passive header analysis; no active script injection tested."]
 		});
 		return {
 			findings,
@@ -1775,11 +1975,15 @@ function checkCsp(finalHop, metaCspFound = false) {
 		ruleId: "CSP-010",
 		category: "header",
 		severity: "info",
+		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: "pass",
 		title: "CSP has no default-src or script-src fallback",
-		impact: "The policy does not establish a general resource fallback or an explicit script source policy.",
+		impact: "The policy does not establish a general resource fallback.",
 		evidence: sanitizeEvidence(cspValue),
 		recommendation: "Add default-src as a baseline and define script-src explicitly where script loading needs a different policy.",
-		reference: REFERENCE$6
+		reference: REFERENCE$6,
+		limitations: ["Informational configuration observation."]
 	});
 	const effectiveScriptSrc = resolveEffective(directives, "script-src");
 	if (effectiveScriptSrc !== void 0) {
@@ -1789,53 +1993,73 @@ function checkCsp(finalHop, metaCspFound = false) {
 			ruleId: "CSP-009",
 			category: "header",
 			severity: "info",
+			confidence: "heuristic",
+			provenance: "response-header",
+			outcome: "pass",
 			title: "CSP script-src trusts host(s) with historically bypass-prone endpoints or libraries",
-			impact: "Some allowlisted hosts expose JSONP endpoints or host libraries with script gadgets; actual exploitability depends on the specific endpoint, path, and version.",
+			impact: "Some allowlisted hosts expose JSONP endpoints or host libraries with script gadgets; actual exploitability depends on endpoint path and version.",
 			evidence: sanitizeEvidence(bypassProneHosts.join(", ")),
 			recommendation: "Review whether each host is required, restrict paths where practical, pin library versions, and prefer nonces or hashes. This curated host match is a heuristic, not proof of a bypass.",
-			reference: "https://csp-evaluator.withgoogle.com/"
+			reference: "https://csp-evaluator.withgoogle.com/",
+			limitations: ["Passive heuristic analysis only; presence of domain does not verify an active JSONP or gadget endpoint."]
 		});
 		if (effectiveScriptSrc.includes("'unsafe-inline'")) {
 			if (isModernStrict) findings.push({
 				ruleId: "CSP-002",
 				category: "header",
 				severity: "info",
+				confidence: "deterministic",
+				provenance: "response-header",
+				outcome: "pass",
 				title: "CSP script-src includes 'unsafe-inline' as a legacy fallback (safely ignored due to nonce/strict-dynamic)",
-				impact: "Older browsers may allow inline scripts, but modern browsers safely ignore this fallback because a nonce or strict-dynamic is present.",
+				impact: "Modern browsers safely ignore this fallback because a nonce or strict-dynamic is present.",
 				evidence: sanitizeEvidence(effectiveScriptSrc),
-				recommendation: "No action needed for modern browsers. 'unsafe-inline' is ignored by CSP Level 3 browsers when a nonce or 'strict-dynamic' is present.",
-				reference: REFERENCE$6
+				recommendation: "No action needed for modern browsers.",
+				reference: REFERENCE$6,
+				limitations: ["Level 3 CSP browsers ignore unsafe-inline when nonces or strict-dynamic are present."]
 			});
 			else findings.push({
 				ruleId: "CSP-002",
 				category: "header",
 				severity: "high",
+				confidence: "deterministic",
+				provenance: "response-header",
+				outcome: fromCache ? "partial-coverage" : "fail",
 				title: "CSP script-src contains 'unsafe-inline'",
-				impact: "Injected HTML tags (like <script> or event handlers) can execute arbitrary JavaScript directly inside victim browsers.",
+				impact: "Injected HTML tags can execute arbitrary JavaScript directly inside victim browsers.",
 				evidence: sanitizeEvidence(effectiveScriptSrc),
-				recommendation: "Remove 'unsafe-inline' and use nonces or hashes to allow specific inline scripts.",
-				reference: REFERENCE$6
+				recommendation: "Remove 'unsafe-inline' and use nonces or hashes.",
+				reference: REFERENCE$6,
+				limitations: fromCache ? ["Response served from cache."] : ["Passive policy inspection."]
 			});
 		}
 		if (effectiveScriptSrc.includes("'unsafe-eval'")) findings.push({
 			ruleId: "CSP-003",
 			category: "header",
 			severity: "high",
+			confidence: "deterministic",
+			provenance: "response-header",
+			outcome: fromCache ? "partial-coverage" : "fail",
 			title: "CSP script-src contains 'unsafe-eval'",
-			impact: "Allows dynamic code execution via eval() and new Function(), enabling attackers who control string inputs to run arbitrary JavaScript.",
+			impact: "Allows dynamic code execution via eval() and new Function().",
 			evidence: sanitizeEvidence(effectiveScriptSrc),
-			recommendation: "Remove 'unsafe-eval'. Refactor code that uses eval(), new Function(), or similar dynamic evaluation.",
-			reference: REFERENCE$6
+			recommendation: "Remove 'unsafe-eval'.",
+			reference: REFERENCE$6,
+			limitations: fromCache ? ["Response served from cache."] : ["Passive policy inspection."]
 		});
 		if (hasWildcardSource(effectiveScriptSrc, isModernStrict)) findings.push({
 			ruleId: "CSP-004",
 			category: "header",
 			severity: "medium",
+			confidence: "deterministic",
+			provenance: "response-header",
+			outcome: fromCache ? "partial-coverage" : "fail",
 			title: "CSP script-src contains an overly broad wildcard or scheme-only source",
-			impact: "Open wildcard sources allow scripts to be loaded and executed from any external host on the web.",
+			impact: "Open wildcard sources allow scripts to be loaded from any external host.",
 			evidence: sanitizeEvidence(effectiveScriptSrc),
-			recommendation: "Replace wildcard or scheme-only sources (*, http:, https:) with explicit allowlisted hostnames or use nonces/hashes.",
-			reference: REFERENCE$6
+			recommendation: "Replace wildcard sources with explicit hostnames.",
+			reference: REFERENCE$6,
+			limitations: fromCache ? ["Response served from cache."] : ["Passive policy inspection."]
 		});
 	}
 	if (!directives.has("frame-ancestors")) {
@@ -1845,11 +2069,15 @@ function checkCsp(finalHop, metaCspFound = false) {
 			ruleId: "CSP-005",
 			category: "header",
 			severity: hasValidXfo ? "info" : "medium",
+			confidence: "deterministic",
+			provenance: "response-header",
+			outcome: hasValidXfo ? "pass" : fromCache ? "partial-coverage" : "fail",
 			title: hasValidXfo ? "CSP is missing 'frame-ancestors' (mitigated by X-Frame-Options)" : "CSP is missing the 'frame-ancestors' directive",
-			impact: hasValidXfo ? "Legacy browsers without XFO support could potentially embed this page, but modern browsers are protected by X-Frame-Options." : "Malicious websites can embed your site in an invisible iframe to trick users into clicking buttons they cannot see (Clickjacking).",
+			impact: hasValidXfo ? "Protected by X-Frame-Options in modern browsers." : "Malicious websites can embed your site in an iframe for Clickjacking.",
 			evidence: sanitizeEvidence(cspValue),
-			recommendation: "Add \"frame-ancestors 'none'\" (or \"'self'\") to control which origins may embed this page.",
-			reference: REFERENCE$6
+			recommendation: "Add \"frame-ancestors 'none'\" (or 'self').",
+			reference: REFERENCE$6,
+			limitations: hasValidXfo ? ["XFO mitigation confirmed."] : []
 		});
 	}
 	const effectiveObjectSrc = resolveEffective(directives, "object-src");
@@ -1857,21 +2085,29 @@ function checkCsp(finalHop, metaCspFound = false) {
 		ruleId: "CSP-006",
 		category: "header",
 		severity: "medium",
+		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: fromCache ? "partial-coverage" : "fail",
 		title: "CSP object-src is absent or not restricted to 'none'",
-		impact: "Allows plugins (Flash, Java applets, PDF objects) to load untrusted resources that can bypass standard script constraints.",
+		impact: "Allows plugins to load untrusted resources.",
 		evidence: sanitizeEvidence(effectiveObjectSrc ?? "(directive absent)"),
-		recommendation: "Add \"object-src 'none'\" to block plugin-based content (Flash, Java applets, etc.).",
-		reference: REFERENCE$6
+		recommendation: "Add \"object-src 'none'\".",
+		reference: REFERENCE$6,
+		limitations: fromCache ? ["Response served from cache."] : []
 	});
 	if (!directives.has("base-uri")) findings.push({
 		ruleId: "CSP-007",
 		category: "header",
 		severity: "low",
+		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: fromCache ? "partial-coverage" : "fail",
 		title: "CSP is missing the 'base-uri' directive",
-		impact: "An attacker injecting a <base> tag can redirect all relative script, image, and form action URLs to an external phishing/exfiltration server.",
+		impact: "An attacker injecting a <base> tag can hijack relative URLs.",
 		evidence: sanitizeEvidence(cspValue),
-		recommendation: "Add \"base-uri 'none'\" (or \"'self'\") to prevent base-tag injection attacks.",
-		reference: REFERENCE$6
+		recommendation: "Add \"base-uri 'none'\".",
+		reference: REFERENCE$6,
+		limitations: fromCache ? ["Response served from cache."] : []
 	});
 	try {
 		const parsed = new import_parser.CspParser(cspValue).csp;
@@ -1885,11 +2121,15 @@ function checkCsp(finalHop, metaCspFound = false) {
 						ruleId: "CSP-002S",
 						category: "header",
 						severity: "low",
+						confidence: "deterministic",
+						provenance: "response-header",
+						outcome: fromCache ? "partial-coverage" : "fail",
 						title: "CSP style-src contains 'unsafe-inline'",
 						impact: "Allows injection of malicious CSS which can exfiltrate data via attribute selectors or deface the site.",
 						evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ""}`),
 						recommendation: "Remove unsafe-inline from style-src and use external stylesheets or nonces/hashes for inline styles.",
-						reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/style-src"
+						reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/style-src",
+						limitations: ["Passive analysis."]
 					});
 					existingRules.add("CSP-002S");
 				}
@@ -1899,11 +2139,15 @@ function checkCsp(finalHop, metaCspFound = false) {
 						ruleId: "CSP-009",
 						category: "header",
 						severity: "info",
+						confidence: "heuristic",
+						provenance: "response-header",
+						outcome: "pass",
 						title: "CSP allowlist bypass or structural weakness",
 						impact: f.description,
 						evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ""}`),
 						recommendation: "Remove the bypass host or use strict-dynamic / nonces instead of an allowlist.",
-						reference: "https://csp-evaluator.withgoogle.com/"
+						reference: "https://csp-evaluator.withgoogle.com/",
+						limitations: ["Passive heuristic analysis only."]
 					});
 					existingRules.add("CSP-009");
 				}
@@ -1912,11 +2156,15 @@ function checkCsp(finalHop, metaCspFound = false) {
 					ruleId: "CSP-SYNTAX-001",
 					category: "header",
 					severity: "info",
+					confidence: "deterministic",
+					provenance: "response-header",
+					outcome: "pass",
 					title: "CSP Syntax or Nonce Issue",
 					impact: f.description,
 					evidence: sanitizeEvidence(`${f.directive}: ${f.value ?? ""}`),
 					recommendation: "Review CSP syntax.",
-					reference: "https://csp-evaluator.withgoogle.com/"
+					reference: "https://csp-evaluator.withgoogle.com/",
+					limitations: ["Informational syntax issue."]
 				});
 				existingRules.add("CSP-SYNTAX-001");
 			}
@@ -2211,17 +2459,6 @@ function checkInfoLeak(finalHop) {
 //#region src/rules/headers/cache-cookie.ts
 var REFERENCE = "https://owasp.org/www-project-secure-headers/#cache-control";
 var CACHE_CONTROL_HEADER = "cache-control";
-/**
-* Check that responses setting sensitive session/auth cookies include
-* Cache-Control: no-store.
-*
-* Responses setting purely non-sensitive cookies (consent, theme, language,
-* client-side analytics) are intentionally exempt so as not to penalize
-* standard Back-Forward Cache (bfcache) optimizations.
-*
-* @param finalHop - The last hop in the redirect chain.
-* @returns An array of zero or one finding.
-*/
 function checkCacheCookie(finalHop, alwaysSensitive = [], alwaysIgnore = []) {
 	const setCookieHeaders = finalHop.rawHeaders.filter((h) => h.name.toLowerCase() === "set-cookie").map((h) => h.value);
 	if (setCookieHeaders.length === 0) return [];
@@ -2230,15 +2467,20 @@ function checkCacheCookie(finalHop, alwaysSensitive = [], alwaysIgnore = []) {
 		return /;\s*httponly/i.test(headerVal) || isSensitiveCookie(name, alwaysSensitive, alwaysIgnore).isSensitive;
 	}).length === 0) return [];
 	const cacheControlValue = finalHop.headers[CACHE_CONTROL_HEADER];
+	const fromCache = finalHop.fromCache === true;
 	if (cacheControlValue === void 0) return [{
 		ruleId: "CACHE-001",
 		category: "header",
 		severity: "medium",
+		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: fromCache ? "partial-coverage" : "fail",
 		title: "Cache-Control: no-store missing on a response that sets sensitive cookies",
-		impact: "Responses setting authentication cookies may be stored by intermediate web caches or proxy servers, exposing user session tokens to unauthorized parties.",
+		impact: "Responses setting authentication cookies may be stored by intermediate web caches, exposing session tokens.",
 		evidence: sanitizeEvidence("(header absent)"),
 		recommendation: "Add \"Cache-Control: no-store\" to responses that set authentication or session cookies.",
-		reference: REFERENCE
+		reference: REFERENCE,
+		limitations: fromCache ? ["Response served from browser cache; Cache-Control presence cannot be verified from cached hop."] : ["Passive response inspection; did not test intermediary proxy behavior."]
 	}];
 	const normalised = cacheControlValue.toLowerCase();
 	if (normalised.includes("no-store")) return [];
@@ -2246,21 +2488,29 @@ function checkCacheCookie(finalHop, alwaysSensitive = [], alwaysIgnore = []) {
 		ruleId: "CACHE-001",
 		category: "header",
 		severity: "info",
+		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: "pass",
 		title: "Cache-Control allows local caching for response with sensitive cookies (mitigated by private/no-cache)",
-		impact: "Intermediate proxy/CDN caching is prevented by \"private\", but local browser storage persists the response, which could be exposed on shared kiosk computers.",
+		impact: "Intermediate proxy/CDN caching is prevented by \"private\", but local browser storage persists the response.",
 		evidence: sanitizeEvidence(cacheControlValue),
-		recommendation: "Shared CDN caching is prevented by \"private\", but consider \"no-store\" if shared/public computers are in scope.",
-		reference: REFERENCE
+		recommendation: "Shared CDN caching is prevented by \"private\", but consider \"no-store\" if shared computers are in scope.",
+		reference: REFERENCE,
+		limitations: ["Passive inspection; intermediate caching blocked by private/no-cache."]
 	}];
 	return [{
 		ruleId: "CACHE-001",
 		category: "header",
 		severity: "medium",
+		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: fromCache ? "partial-coverage" : "fail",
 		title: "Cache-Control: no-store missing on a response that sets sensitive cookies",
-		impact: "Sensitive authentication tokens and responses can be cached by shared CDN or proxy servers, allowing other users to retrieve session data.",
+		impact: "Sensitive authentication tokens can be cached by shared CDN or proxy servers.",
 		evidence: sanitizeEvidence(cacheControlValue),
 		recommendation: "Add \"Cache-Control: no-store\" to responses setting sensitive session cookies.",
-		reference: REFERENCE
+		reference: REFERENCE,
+		limitations: fromCache ? ["Response served from browser cache."] : ["Passive analysis."]
 	}];
 }
 //#endregion
@@ -2280,11 +2530,15 @@ function checkSecure(cookie, isHttps, alwaysSensitive = [], alwaysIgnore = []) {
 		ruleId: "COOK-001",
 		category: "cookie",
 		severity: effectiveSeverity,
+		confidence: isRegexHeuristic ? "heuristic" : "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "fail",
 		title: `${isSensitive ? "Sensitive cookie" : "Cookie"} "${sanitizeEvidence(cookie.name)}" is missing the Secure flag${heuristicLabel}`,
 		impact: "The cookie can be transmitted across unencrypted HTTP links, allowing network eavesdroppers to intercept session tokens or user data in cleartext.",
 		evidence: sanitizeEvidence(cookie.name),
 		recommendation: "Add the Secure attribute so the cookie is never sent over plain HTTP.",
-		reference: REF_COOKIES
+		reference: REF_COOKIES,
+		limitations: ["Passive metadata inspection of cookie attributes."]
 	};
 }
 function checkHttpOnly(cookie, alwaysSensitive = [], alwaysIgnore = []) {
@@ -2299,11 +2553,15 @@ function checkHttpOnly(cookie, alwaysSensitive = [], alwaysIgnore = []) {
 		ruleId: "COOK-002",
 		category: "cookie",
 		severity: "medium",
+		confidence: isRegexHeuristic ? "heuristic" : "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "fail",
 		title: `Sensitive cookie "${sanitizeEvidence(cookie.name)}" is missing the HttpOnly flag${heuristicLabel}`,
 		impact: "This sensitive session cookie is readable by JavaScript via document.cookie, meaning any Cross-Site Scripting (XSS) attack can immediately steal it.",
 		evidence: sanitizeEvidence(cookie.name),
 		recommendation: "Add HttpOnly so this sensitive session/auth cookie cannot be read by JavaScript (mitigates XSS cookie theft).",
-		reference: REF_COOKIES
+		reference: REF_COOKIES,
+		limitations: ["Passive metadata inspection; sensitivity inferred from cookie name pattern."]
 	};
 }
 function checkSameSiteNone(cookie) {
@@ -2313,11 +2571,15 @@ function checkSameSiteNone(cookie) {
 		ruleId: "COOK-003",
 		category: "cookie",
 		severity: "high",
+		confidence: "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "fail",
 		title: `Cookie "${sanitizeEvidence(cookie.name)}" uses SameSite=None without Secure`,
 		impact: "SameSite=None permits cross-site requests to send this cookie, but omitting Secure allows it to travel unencrypted, violating modern browser security standards.",
 		evidence: sanitizeEvidence(cookie.name),
 		recommendation: "Add the Secure attribute or change SameSite to Strict or Lax.",
-		reference: REF_SAMESITE
+		reference: REF_SAMESITE,
+		limitations: ["RFC 6265bis mandates Secure attribute when SameSite=None is set."]
 	};
 }
 function checkSameSiteMissing(cookie) {
@@ -2326,11 +2588,15 @@ function checkSameSiteMissing(cookie) {
 		ruleId: "COOK-004",
 		category: "cookie",
 		severity: "info",
+		confidence: "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "pass",
 		title: `Cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute (defaults to Lax in modern browsers)`,
 		impact: "Modern browsers automatically enforce SameSite=Lax for this cookie, though older clients without Lax-by-default support may still attach it to cross-site requests.",
 		evidence: sanitizeEvidence(cookie.name),
 		recommendation: "Modern browsers (Chrome 80+, Firefox, Safari) enforce SameSite=Lax by default. Explicitly setting SameSite=Lax or Strict is recommended for defense-in-depth on legacy clients.",
-		reference: REF_SAMESITE
+		reference: REF_SAMESITE,
+		limitations: ["Informational observation; modern browsers enforce Lax by default."]
 	};
 }
 function checkHostPrefix(cookie) {
@@ -2344,11 +2610,15 @@ function checkHostPrefix(cookie) {
 		ruleId: "COOK-005",
 		category: "cookie",
 		severity: "high",
+		confidence: "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "fail",
 		title: `Cookie "${sanitizeEvidence(cookie.name)}" violates __Host- prefix requirements`,
 		impact: "Failing __Host- prefix requirements breaks browser isolation guarantees, allowing subdomains or subpaths to overwrite or shadow the main session cookie.",
 		evidence: sanitizeEvidence(violations.join("; ")),
 		recommendation: "Fix the cookie so it has Secure=true, Path=/, and no Domain attribute.",
-		reference: REF_PREFIX
+		reference: REF_PREFIX,
+		limitations: ["Passive metadata inspection; Domain attribute verified from Set-Cookie when observed."]
 	};
 }
 function checkSecurePrefix(cookie) {
@@ -2358,11 +2628,15 @@ function checkSecurePrefix(cookie) {
 		ruleId: "COOK-006",
 		category: "cookie",
 		severity: "high",
+		confidence: "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "fail",
 		title: `Cookie "${sanitizeEvidence(cookie.name)}" violates __Secure- prefix requirements`,
 		impact: "The __Secure- prefix explicitly promises the cookie will only be sent over HTTPS. Omitting Secure causes browsers to reject the cookie or allow plaintext transmission.",
 		evidence: sanitizeEvidence(cookie.name),
 		recommendation: "Add the Secure attribute — the __Secure- prefix requires it.",
-		reference: REF_PREFIX
+		reference: REF_PREFIX,
+		limitations: ["Passive metadata inspection of cookie flags."]
 	};
 }
 function checkHttpPrefix(cookie) {
@@ -2380,23 +2654,17 @@ function checkHttpPrefix(cookie) {
 		ruleId: "COOK-007",
 		category: "cookie",
 		severity: "high",
+		confidence: "deterministic",
+		provenance: "cookie-metadata",
+		outcome: "fail",
 		title: `Cookie "${sanitizeEvidence(cookie.name)}" violates ${hostHttp ? "__Host-Http-" : "__Http-"} prefix requirements`,
 		impact: "The browser-enforced prefix requirements are not met, so the cookie may be rejected or lose the server-only and host-bound protections its name claims.",
 		evidence: sanitizeEvidence(violations.join("; ")),
 		recommendation: hostHttp ? "Use Secure, HttpOnly, Path=/, and omit Domain." : "Use both Secure and HttpOnly.",
-		reference: REF_PREFIX
+		reference: REF_PREFIX,
+		limitations: ["Passive metadata inspection."]
 	};
 }
-/**
-* Run all cookie security rules against the list of cookie metadata records.
-*
-* Cookie *values* are never accessed. Evidence strings contain only the
-* sanitized cookie name and/or attribute information.
-*
-* @param cookies - Metadata-only cookie records for the current page.
-* @param isHttps - Whether the final hop was served over HTTPS.
-* @returns An array of findings, one per violated rule per cookie.
-*/
 function checkCookies(cookies, isHttps, alwaysSensitive = [], alwaysIgnore = []) {
 	const findings = [];
 	for (const cookie of cookies) {
@@ -2600,38 +2868,51 @@ function checkCors(hop) {
 	const credentials = hop.headers["access-control-allow-credentials"]?.trim().toLowerCase() === "true";
 	const lowerOrigin = allowOrigin.toLowerCase();
 	const requestOrigin = hop.requestOrigin;
-	if (credentials && requestOrigin !== void 0 && requestOrigin.length > 0 && allowOrigin === requestOrigin) return [{
-		ruleId: "CORS-001",
-		category: "cors",
-		severity: "medium",
-		confidence: "heuristic",
-		title: "CORS allows request Origin with credentials (potential reflection)",
-		impact: "Any website can induce a user browser to make requests to this endpoint and read the response using the victim ambient credentials (cookies/auth) if the server dynamically reflects the origin.",
-		evidence: sanitizeEvidence(`Request Origin: ${requestOrigin} -> ACAO: ${allowOrigin}; ACAC: true`),
-		recommendation: "Verify that the server does not dynamically reflect arbitrary Origin headers when Access-Control-Allow-Credentials is true. Validate incoming Origin headers against a strict, static allowlist.",
-		reference: REF_CORS
-	}];
+	const fromCache = hop.fromCache === true;
+	if (credentials && requestOrigin !== void 0 && requestOrigin.length > 0 && allowOrigin === requestOrigin) {
+		const hopOrigin = originFromUrl(hop.url);
+		if (!(hopOrigin !== null && hopOrigin.toLowerCase() === requestOrigin.toLowerCase())) return [{
+			ruleId: "CORS-001",
+			category: "cors",
+			severity: "medium",
+			confidence: "heuristic",
+			provenance: "response-header",
+			outcome: fromCache ? "partial-coverage" : "fail",
+			title: "CORS allows cross-origin request Origin with credentials (potential reflection)",
+			impact: "Any cross-origin website can induce a user browser to make requests to this endpoint and read the response using victim credentials if the server dynamically reflects the origin.",
+			evidence: sanitizeEvidence(`Request Origin: ${requestOrigin} -> ACAO: ${allowOrigin}; ACAC: true`),
+			recommendation: "Verify that the server does not dynamically reflect arbitrary Origin headers when Access-Control-Allow-Credentials is true. Validate incoming Origin headers against a strict, static allowlist.",
+			reference: REF_CORS,
+			limitations: fromCache ? ["Response served from browser cache; CORS reflection behavior may differ on live origin hit."] : ["Passive observation only; did not actively probe endpoint with forged Origin headers."]
+		}];
+	}
 	if (lowerOrigin === "null") return [{
 		ruleId: "CORS-001",
 		category: "cors",
 		severity: credentials ? "high" : "medium",
 		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: fromCache ? "partial-coverage" : "fail",
 		title: "CORS allows the 'null' origin to read this response",
 		impact: "Allowing the \"null\" origin permits sandboxed iframes, local files, and data: URIs from arbitrary origins to read sensitive data.",
 		evidence: sanitizeEvidence(`Access-Control-Allow-Origin: null${credentials ? "; Access-Control-Allow-Credentials: true" : ""}`),
 		recommendation: "Remove \"null\" from CORS allowlists. Sandboxed attacker iframes can forge a null origin.",
-		reference: REF_CORS
+		reference: REF_CORS,
+		limitations: ["Passive observation of ACAO: null.", credentials ? "Credentials allowed with null origin" : "Ambient credentials disabled (ACAC not true)"]
 	}];
 	if (allowOrigin === "*") return [{
 		ruleId: "CORS-001",
 		category: "cors",
 		severity: "medium",
 		confidence: "deterministic",
+		provenance: "response-header",
+		outcome: fromCache ? "partial-coverage" : "fail",
 		title: "CORS allows every origin to read this response",
 		impact: "Any website can read this response through browser JavaScript; this is risky when the response contains non-public data.",
 		evidence: sanitizeEvidence(`Access-Control-Allow-Origin: *${credentials ? "; Access-Control-Allow-Credentials: true (credentials are ignored with wildcard origin)" : ""}`),
 		recommendation: "Replace the wildcard with an explicit allowlist of trusted origins when this response contains data that should not be public.",
-		reference: REF_CORS
+		reference: REF_CORS,
+		limitations: ["Passive observation of wildcard CORS; permissible for public endpoints, hazardous for sensitive endpoints."]
 	}];
 	return [];
 }
@@ -2967,7 +3248,7 @@ function computeScore(findings, fromCache = false) {
 	const breakdown = [];
 	const findingsByRule = /* @__PURE__ */ new Map();
 	for (const finding of findings) {
-		if (finding.severity === "pass" || finding.severity === "info" || finding.outcome === "pass" || finding.outcome === "not-observed" || finding.outcome === "not-applicable") continue;
+		if (finding.severity === "pass" || finding.severity === "info" || finding.outcome === "pass" || finding.outcome === "not-observed" || finding.outcome === "not-applicable" || finding.outcome === "partial-coverage") continue;
 		const list = findingsByRule.get(finding.ruleId) ?? [];
 		list.push(finding);
 		findingsByRule.set(finding.ruleId, list);
@@ -3014,22 +3295,6 @@ function computeScore(findings, fromCache = false) {
 }
 //#endregion
 //#region src/rules/engine.ts
-/**
-* Run all security rules against captured hop and cookie data.
-*
-* Execution order:
-*  1. checkHsts         — transport security
-*  2. checkCsp          — content security policy (also yields directives map)
-*  3. checkXfo          — framing protection (uses CSP directives)
-*  4. checkXcto         — MIME-type sniffing
-*  5. checkReferrer     — referrer policy
-*  6. checkDeprecated   — deprecated headers
-*  7. checkInfoLeak     — information leakage
-*  8. checkCacheCookie  — cache control on cookie-setting responses
-*
-* @param input - Captured hops, cookies, and origin.
-* @returns Aggregated findings, score, grade, breakdown, and score version.
-*/
 function runRules(input) {
 	const { hops } = input;
 	const emptySubdomainTrust = {
@@ -3057,10 +3322,14 @@ function runRules(input) {
 		scoreVersion: "",
 		subdomainTrust: emptySubdomainTrust
 	};
+	const scopeEngine = input.scopeEngine !== void 0 ? input.scopeEngine : input.scopeProfile !== void 0 ? new ScopeEngine(input.scopeProfile) : void 0;
 	const findings = [];
 	const redirectFindings = detectRedirectDegradation(hops).map((f) => ({
 		...f,
-		provenance: "redirect"
+		provenance: "redirect",
+		outcome: "partial-coverage",
+		limitations: ["Observed across redirect hops; intermediate hops may have different policy boundaries."],
+		scopeStatus: scopeEngine !== void 0 ? scopeEngine.classify(f.sourceUrl ?? finalHop.url) : void 0
 	}));
 	findings.push(...redirectFindings);
 	findings.push(...input.captureFindings ?? []);
@@ -3081,13 +3350,13 @@ function runRules(input) {
 	headerFindings.push(...checkCacheCookie(finalHop, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore));
 	findings.push(...headerFindings.map((f) => ({
 		...f,
-		provenance: "response-header"
+		provenance: f.provenance ?? "response-header"
 	})));
 	const isHttps = finalHop.url.startsWith("https://");
 	const cookieFindings = checkCookies(input.cookies, isHttps, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore);
 	findings.push(...cookieFindings.map((f) => ({
 		...f,
-		provenance: "cookie-metadata"
+		provenance: f.provenance ?? "cookie-metadata"
 	})));
 	const subdomainResult = checkSubdomainTrust(finalHop, input.cookies, input.cookieSettings?.alwaysSensitive, input.cookieSettings?.alwaysIgnore);
 	findings.push(...subdomainResult.findings);
@@ -3108,12 +3377,15 @@ function runRules(input) {
 	const findingsWithSource = findings.map((finding) => {
 		const isHeuristic = heuristicRules.has(finding.ruleId) || finding.title.includes("(name-based heuristic)");
 		const isPass = finding.severity === "info" || finding.severity === "pass";
+		const targetUrl = finding.sourceUrl ?? finalHop.url;
 		return {
 			...finding,
-			sourceUrl: finding.sourceUrl ?? finalHop.url,
+			sourceUrl: targetUrl,
 			provenance: finding.provenance ?? "response-header",
 			confidence: finding.confidence ?? (isHeuristic ? "heuristic" : "deterministic"),
-			outcome: finding.outcome ?? (isPass ? "pass" : "fail")
+			outcome: finding.outcome ?? (isPass ? "pass" : finalHop.fromCache ? "partial-coverage" : "fail"),
+			limitations: finding.limitations ?? (finalHop.fromCache ? ["Response served from browser cache; header presence unverified."] : ["Passive analysis only; no active probes or exploit verification executed."]),
+			scopeStatus: finding.scopeStatus ?? (scopeEngine !== void 0 ? scopeEngine.classify(targetUrl) : void 0)
 		};
 	});
 	const { score, grade, qualityScore, qualityGrade, breakdown, scoreVersion } = computeScore(findingsWithSource, finalHop.fromCache);
@@ -3131,19 +3403,24 @@ function runRules(input) {
 		}
 	};
 }
-function runApiRules(apiHop, cookieSettings) {
+function runApiRules(apiHop, optionsOrSettings) {
 	const hopLike = apiHop;
 	const findings = [];
+	const sensitive = optionsOrSettings !== void 0 && "alwaysSensitive" in optionsOrSettings ? optionsOrSettings.alwaysSensitive : void 0;
+	const ignored = optionsOrSettings !== void 0 && "alwaysIgnore" in optionsOrSettings ? optionsOrSettings.alwaysIgnore : void 0;
+	const scopeEngine = optionsOrSettings !== void 0 && "scopeEngine" in optionsOrSettings ? optionsOrSettings.scopeEngine : void 0;
 	findings.push(...checkCors(hopLike));
 	findings.push(...checkXcto(hopLike));
 	findings.push(...checkInfoLeak(hopLike));
-	findings.push(...checkCacheCookie(hopLike, cookieSettings?.alwaysSensitive, cookieSettings?.alwaysIgnore));
+	findings.push(...checkCacheCookie(hopLike, sensitive, ignored));
 	return findings.map((f) => ({
 		...f,
 		sourceUrl: apiHop.url,
 		confidence: f.confidence ?? (f.ruleId === "LEAK-001" ? "heuristic" : "deterministic"),
 		provenance: "response-header",
-		outcome: "fail"
+		outcome: f.outcome ?? (f.severity === "info" || f.severity === "pass" ? "pass" : "fail"),
+		limitations: f.limitations ?? ["Passive analysis of captured API response; no active probes sent."],
+		scopeStatus: f.scopeStatus ?? (scopeEngine !== void 0 ? scopeEngine.classify(apiHop.url) : void 0)
 	}));
 }
 var REDIRECT_SECURITY_HEADERS = [
@@ -3182,9 +3459,9 @@ function detectRedirectDegradation(hops) {
 			category: "header",
 			severity: "info",
 			title: `Redirect response drops ${removed.length} previously present security header(s)`,
-			impact: "A protection present on an earlier redirect response is absent from the next response; review whether the destination needs its own policy.",
+			impact: "A protection present on an earlier redirect response is absent from the next response.",
 			evidence: `${safeHopLabel(previous)} -> ${safeHopLabel(current)}: ${removed.join(", ")}`,
-			recommendation: "Review the redirect chain and configure the destination response to send the protections required for that origin. Header policies do not automatically carry across responses.",
+			recommendation: "Review the redirect chain and configure the destination response to send required protections.",
 			reference: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections",
 			sourceUrl: current.url
 		});
@@ -4797,4 +5074,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, currentResetEpoch, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, recordThirdPartyBlocked, resolveTabPrivacy, sessionHydrationReady, setCurrentResetEpoch, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations, writeBatcher };
 
-//# sourceMappingURL=index.ts-BIdH0NLL.js.map
+//# sourceMappingURL=index.ts-CsfA-KcM.js.map

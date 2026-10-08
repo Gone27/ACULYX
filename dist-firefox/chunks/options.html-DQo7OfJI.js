@@ -2,6 +2,7 @@ import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER,
 import { d as PermissionsService } from "./lifecycle-CQzmjg6F.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 import { t as applyAppearance } from "./appearance-Cjc7_Dji.js";
+import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
 var modeRadios;
@@ -22,6 +23,8 @@ var btnRemoveBroadAccess;
 var btnSwitchToAllSites;
 var navDirtyBadge;
 var unsavedDialog;
+var triageCountBadge;
+var btnClearTriage;
 var currentMode = "per-site";
 var pendingNavSection = null;
 /** In-memory working copy of the allowedOrigins array. */
@@ -47,6 +50,8 @@ document.addEventListener("DOMContentLoaded", () => {
 	btnSwitchToAllSites = getEl("btn-switch-to-all-sites");
 	navDirtyBadge = getEl("nav-dirty-badge");
 	unsavedDialog = getEl("unsaved-dialog");
+	triageCountBadge = getEl("triage-count-badge");
+	btnClearTriage = getEl("btn-clear-triage");
 	wireNav();
 	wireNavCards();
 	wireModeRadios();
@@ -57,6 +62,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	wireDataManagement();
 	wireAppearanceLivePreview();
 	wireUnsavedDialog();
+	wireTriageManagement();
 	if (typeof chrome !== "undefined" && typeof chrome.runtime !== "undefined") {
 		const manifest = chrome.runtime.getManifest();
 		const versionEl = document.getElementById("home-version-badge");
@@ -608,6 +614,21 @@ function clearStatus() {
 	saveStatus.textContent = "";
 	saveStatus.className = "save-status";
 }
+function wireTriageManagement() {
+	const refreshTriageCount = async () => {
+		try {
+			const annotations = await TriageStore.getAnnotations();
+			const count = Object.keys(annotations).length;
+			triageCountBadge.textContent = `${count} triaged finding${count === 1 ? "" : "s"}`;
+		} catch {
+			triageCountBadge.textContent = "0 triaged findings";
+		}
+	};
+	btnClearTriage.addEventListener("click", () => {
+		if (window.confirm("Reset all researcher triage annotations and notes? This cannot be undone.")) TriageStore.clearAll().then(() => refreshTriageCount());
+	});
+	refreshTriageCount();
+}
 function getEl(id) {
 	const el = document.getElementById(id);
 	if (!el) throw new Error(`Missing required element #${id}`);
@@ -633,4 +654,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-R7Z75edD.js.map
+//# sourceMappingURL=options.html-DQo7OfJI.js.map

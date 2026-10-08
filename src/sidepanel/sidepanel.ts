@@ -82,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const nodeRole = getEl<HTMLSpanElement>('node-role');
   const nodeDiscoveredVia = getEl<HTMLSpanElement>('node-discovered-via');
   const nodeGrade = getEl<HTMLSpanElement>('node-grade');
+  const nodeScope = getEl<HTMLSpanElement>('node-scope');
   const nodeLastSeen = getEl<HTMLSpanElement>('node-last-seen');
 
   let activeTabId: number | null = null;
@@ -437,6 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     nodeGrade.textContent = node.grade !== undefined && node.score !== undefined
       ? `${node.grade} (${node.score}/100)`
       : 'Passive discovery (no direct visit yet)';
+    nodeScope.textContent = node.scopeStatus !== undefined ? node.scopeStatus : '—';
     nodeLastSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
     nodeDetails.hidden = false;
   }

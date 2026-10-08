@@ -81,7 +81,8 @@ export function computeScore(findings: Finding[], fromCache = false): ScoreResul
       finding.severity === 'info' ||
       finding.outcome === 'pass' ||
       finding.outcome === 'not-observed' ||
-      finding.outcome === 'not-applicable'
+      finding.outcome === 'not-applicable' ||
+      finding.outcome === 'partial-coverage'
     ) {
       continue;
     }

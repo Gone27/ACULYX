@@ -1,3 +1,5 @@
+import type { ScopeStatus } from './scope/contracts';
+
 // ─── Core enumerations ────────────────────────────────────────────────────────
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'pass';
@@ -120,6 +122,8 @@ export interface Finding {
   confidence?: 'deterministic' | 'heuristic';
   provenance?: FindingProvenance;
   outcome?: FindingOutcome;
+  limitations?: string[] | undefined;
+  scopeStatus?: ScopeStatus | undefined;
 }
 
 export type FindingProvenance =
@@ -356,6 +360,7 @@ export interface GraphNode {
   grade?: Grade;
   lastSeen: number;
   discoveredVia: DiscoveredVia[];
+  scopeStatus?: ScopeStatus | undefined;
 }
 
 export interface GraphEdge {

@@ -31,6 +31,7 @@ import { PermissionsService, patternFromOrigin } from '../background/permissions
 import { isModeCaptureAllowed } from '../shared/gating';
 import { selectVisibleFindings } from '../shared/filters';
 import { applyAppearance } from '../shared/appearance';
+import { TriageStore, ReportBuilder, type ResearcherReviewState } from '../shared/reporting';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let gradeBadge:          HTMLDivElement;
@@ -71,6 +72,25 @@ let authDiffList:        HTMLUListElement;
 let openGraphBtn:        HTMLButtonElement;
 let findingsFilterNotice: HTMLDivElement;
 let showAllFindingsBtn:  HTMLButtonElement;
+let findingDetailsDrawer: HTMLDialogElement;
+let drawerRuleId:        HTMLSpanElement;
+let drawerScopeBadge:    HTMLSpanElement;
+let drawerCloseBtn:      HTMLButtonElement;
+let drawerFindingTitle:  HTMLHeadingElement;
+let drawerSeverityTag:   HTMLSpanElement;
+let drawerProvenanceTag: HTMLSpanElement;
+let drawerConfidenceTag: HTMLSpanElement;
+let drawerEvidence:      HTMLPreElement;
+let drawerLimitationsField: HTMLDivElement;
+let drawerLimitations:   HTMLUListElement;
+let drawerImpact:        HTMLParagraphElement;
+let drawerRemediation:   HTMLParagraphElement;
+let drawerTriageSelect:  HTMLSelectElement;
+let drawerTriageNotes:   HTMLTextAreaElement;
+let drawerExportMdBtn:   HTMLButtonElement;
+let drawerExportJsonBtn: HTMLButtonElement;
+let drawerCopyBtn:       HTMLButtonElement;
+let activeDrawerFinding: Finding | null = null;
 
 /** The tab ID currently being inspected by the popup. */
 let currentTabId: number | null = null;
@@ -145,6 +165,107 @@ document.addEventListener('DOMContentLoaded', () => {
   openGraphBtn        = getEl<HTMLButtonElement>('open-graph-btn');
   findingsFilterNotice = getEl<HTMLDivElement>('findings-filter-notice');
   showAllFindingsBtn  = getEl<HTMLButtonElement>('show-all-findings-btn');
+  findingDetailsDrawer = getEl<HTMLDialogElement>('finding-details-drawer');
+  drawerRuleId        = getEl<HTMLSpanElement>('drawer-rule-id');
+  drawerScopeBadge    = getEl<HTMLSpanElement>('drawer-scope-badge');
+  drawerCloseBtn      = getEl<HTMLButtonElement>('drawer-close-btn');
+  drawerFindingTitle  = getEl<HTMLHeadingElement>('drawer-finding-title');
+  drawerSeverityTag   = getEl<HTMLSpanElement>('drawer-severity-tag');
+  drawerProvenanceTag = getEl<HTMLSpanElement>('drawer-provenance-tag');
+  drawerConfidenceTag = getEl<HTMLSpanElement>('drawer-confidence-tag');
+  drawerEvidence      = getEl<HTMLPreElement>('drawer-evidence');
+  drawerLimitationsField = getEl<HTMLDivElement>('drawer-limitations-field');
+  drawerLimitations   = getEl<HTMLUListElement>('drawer-limitations');
+  drawerImpact        = getEl<HTMLParagraphElement>('drawer-impact');
+  drawerRemediation   = getEl<HTMLParagraphElement>('drawer-remediation');
+  drawerTriageSelect  = getEl<HTMLSelectElement>('drawer-triage-select');
+  drawerTriageNotes   = getEl<HTMLTextAreaElement>('drawer-triage-notes');
+  drawerExportMdBtn   = getEl<HTMLButtonElement>('drawer-export-md-btn');
+  drawerExportJsonBtn = getEl<HTMLButtonElement>('drawer-export-json-btn');
+  drawerCopyBtn       = getEl<HTMLButtonElement>('drawer-copy-btn');
+
+  drawerCloseBtn.addEventListener('click', () => {
+    findingDetailsDrawer.close();
+  });
+
+  drawerTriageSelect.addEventListener('change', () => {
+    if (activeDrawerFinding) {
+      const state = drawerTriageSelect.value as ResearcherReviewState;
+      const notes = drawerTriageNotes.value;
+      const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
+      void TriageStore.setAnnotation(findingKey, state, notes).catch(() => undefined);
+    }
+  });
+
+  drawerTriageNotes.addEventListener('blur', () => {
+    if (activeDrawerFinding) {
+      const state = drawerTriageSelect.value as ResearcherReviewState;
+      const notes = drawerTriageNotes.value;
+      const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
+      void TriageStore.setAnnotation(findingKey, state, notes).catch(() => undefined);
+    }
+  });
+
+  drawerExportMdBtn.addEventListener('click', () => {
+    if (!activeDrawerFinding) return;
+    const state = drawerTriageSelect.value as ResearcherReviewState;
+    const notes = drawerTriageNotes.value;
+    const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
+      targetUrl: currentState?.url ?? currentOrigin,
+      reviewState: state,
+      triageNotes: notes,
+    });
+    const md = ReportBuilder.formatReportAsMarkdown(draft);
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aculyx-report-${activeDrawerFinding.ruleId.toLowerCase()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  drawerExportJsonBtn.addEventListener('click', () => {
+    if (!activeDrawerFinding) return;
+    const state = drawerTriageSelect.value as ResearcherReviewState;
+    const notes = drawerTriageNotes.value;
+    const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
+      targetUrl: currentState?.url ?? currentOrigin,
+      reviewState: state,
+      triageNotes: notes,
+    });
+    const json = ReportBuilder.formatReportAsJson(draft);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aculyx-report-${activeDrawerFinding.ruleId.toLowerCase()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  drawerCopyBtn.addEventListener('click', () => {
+    if (!activeDrawerFinding) return;
+    const state = drawerTriageSelect.value as ResearcherReviewState;
+    const notes = drawerTriageNotes.value;
+    const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
+      targetUrl: currentState?.url ?? currentOrigin,
+      reviewState: state,
+      triageNotes: notes,
+    });
+    const md = ReportBuilder.formatReportAsMarkdown(draft);
+    navigator.clipboard.writeText(md).then(() => {
+      const origText = drawerCopyBtn.textContent;
+      drawerCopyBtn.textContent = 'Copied!';
+      setTimeout(() => {
+        drawerCopyBtn.textContent = origText;
+      }, 1500);
+    }).catch(() => undefined);
+  });
 
   showAllFindingsBtn.addEventListener('click', () => {
     showAllFindingsOverride = !showAllFindingsOverride;
@@ -597,10 +718,64 @@ function buildFindingItem(finding: Finding): HTMLLIElement {
     body.appendChild(pocBtn);
   }
 
+  const detailsBtn = document.createElement('button');
+  detailsBtn.className = 'finding-details-btn';
+  detailsBtn.textContent = 'Details ↗';
+  detailsBtn.setAttribute('aria-label', `View details for ${finding.ruleId}`);
+  detailsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openFindingDetails(finding);
+  });
+  body.appendChild(detailsBtn);
+
   li.appendChild(severitySpan);
   li.appendChild(body);
 
   return li;
+}
+
+function openFindingDetails(finding: Finding): void {
+  activeDrawerFinding = finding;
+  drawerRuleId.textContent = finding.ruleId;
+  const scope = finding.scopeStatus ?? 'unknown';
+  drawerScopeBadge.textContent = scope;
+  drawerScopeBadge.className = `drawer-scope-badge scope-${scope}`;
+  drawerFindingTitle.textContent = finding.title;
+  drawerSeverityTag.textContent = finding.severity.toUpperCase();
+  drawerProvenanceTag.textContent = finding.provenance ?? 'observation';
+  drawerConfidenceTag.textContent = finding.confidence ?? 'high';
+  drawerEvidence.textContent = finding.evidence.length > 0 ? finding.evidence : 'No raw evidence captured';
+  drawerImpact.textContent = (finding.impact !== undefined && finding.impact.length > 0) ? finding.impact : 'Potential security weakness.';
+  drawerRemediation.textContent = finding.recommendation.length > 0 ? finding.recommendation : 'Consult security recommendations.';
+
+  while (drawerLimitations.firstChild) {
+    drawerLimitations.removeChild(drawerLimitations.firstChild);
+  }
+
+  if (finding.limitations !== undefined && finding.limitations.length > 0) {
+    drawerLimitationsField.hidden = false;
+    for (const lim of finding.limitations) {
+      const li = document.createElement('li');
+      li.textContent = lim;
+      drawerLimitations.appendChild(li);
+    }
+  } else {
+    drawerLimitationsField.hidden = true;
+  }
+
+  const findingKey = `${finding.ruleId}:${currentOrigin}`;
+  void TriageStore.getAnnotation(findingKey).then((ann) => {
+    if (activeDrawerFinding?.ruleId === finding.ruleId) {
+      drawerTriageSelect.value = ann?.state ?? 'unreviewed';
+      drawerTriageNotes.value = ann?.notes ?? '';
+    }
+  });
+
+  if (typeof findingDetailsDrawer.showModal === 'function') {
+    findingDetailsDrawer.showModal();
+  } else {
+    findingDetailsDrawer.setAttribute('open', '');
+  }
 }
 
 /* ── B: Score breakdown ───────────────────────────────────────── */

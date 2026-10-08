@@ -15,6 +15,7 @@ import { LocalStorage } from '../shared/storage';
 import { sendToBackground } from '../shared/messaging';
 import { SEVERITY_ORDER, DEFAULT_SETTINGS } from '../shared/constants';
 import { applyAppearance } from '../shared/appearance';
+import { TriageStore } from '../shared/reporting';
 
 /* ── Canonical severity values ───────────────────────────────────── */
 const ALL_SEVERITIES: Severity[] = [...SEVERITY_ORDER];
@@ -38,6 +39,8 @@ let btnRemoveBroadAccess: HTMLButtonElement;
 let btnSwitchToAllSites: HTMLButtonElement;
 let navDirtyBadge: HTMLElement;
 let unsavedDialog: HTMLDialogElement;
+let triageCountBadge: HTMLSpanElement;
+let btnClearTriage: HTMLButtonElement;
 let currentMode: Settings['monitoringMode'] = 'per-site';
 let pendingNavSection: string | null = null;
 
@@ -70,6 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
   btnSwitchToAllSites  = getEl<HTMLButtonElement>('btn-switch-to-all-sites');
   navDirtyBadge        = getEl<HTMLElement>('nav-dirty-badge');
   unsavedDialog        = getEl<HTMLDialogElement>('unsaved-dialog');
+  triageCountBadge     = getEl<HTMLSpanElement>('triage-count-badge');
+  btnClearTriage       = getEl<HTMLButtonElement>('btn-clear-triage');
 
   wireNav();
   wireNavCards();
@@ -81,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireDataManagement();
   wireAppearanceLivePreview();
   wireUnsavedDialog();
+  wireTriageManagement();
 
   // Version badge
   if (typeof chrome !== 'undefined' && typeof chrome.runtime !== 'undefined') {
@@ -833,6 +839,31 @@ function setStatus(msg: string, isError: boolean, dirtyFlag: boolean = false): v
 function clearStatus(): void {
   saveStatus.textContent = '';
   saveStatus.className = 'save-status';
+}
+
+/* ================================================================
+   Researcher Triage Management
+   ================================================================ */
+
+function wireTriageManagement(): void {
+  const refreshTriageCount = async (): Promise<void> => {
+    try {
+      const annotations = await TriageStore.getAnnotations();
+      const count = Object.keys(annotations).length;
+      triageCountBadge.textContent = `${count} triaged finding${count === 1 ? '' : 's'}`;
+    } catch {
+      triageCountBadge.textContent = '0 triaged findings';
+    }
+  };
+
+  btnClearTriage.addEventListener('click', () => {
+    const confirmed = window.confirm('Reset all researcher triage annotations and notes? This cannot be undone.');
+    if (confirmed) {
+      void TriageStore.clearAll().then(() => refreshTriageCount());
+    }
+  });
+
+  void refreshTriageCount();
 }
 
 /* ================================================================

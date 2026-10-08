@@ -429,3 +429,83 @@ Redesign Settings into a structured, responsive experience:
 - [ ] All applicable unit, integration, and E2E tests pass cleanly with zero failures.
 - [ ] Zero TypeScript errors, zero ESLint errors/warnings, and 0 npm audit vulnerabilities.
 - [ ] All pre-existing uncommitted work is preserved; no unauthorized commits or remote pushes executed.
+
+
+## 2026-10-08T16:22:03Z
+
+# Teamwork Project Prompt — Final
+
+Working directory: D:\Projects\ACULYX
+Integrity mode: development
+Requested team: Use 2 agents (Agent 1: Scope & Rules, Agent 2: Evidence & Reporting)
+
+ACULYX: High-Confidence Bug-Bounty Scanner — Two-Agent Parallel Implementation.
+
+## Architecture & Work Split
+
+### R0. Shared Contract Kickoff (Coordinator Foundation)
+Establish non-overlapping contracts before parallel agent execution:
+- `src/shared/scope/contracts.ts`:
+  - `ScopeStatus`: `'in-scope' | 'out-of-scope' | 'unknown'`
+  - `ScopeResult`: `{ status: ScopeStatus; matchedPattern?: string; reason: string; ruleType?: 'include' | 'exclude' }`
+  - Host & Port Normalization Contract: Normalize the hostname using IDNA, lowercase, and trailing-dot removal; preserve scheme and explicit port separately. Scope rules must state whether they cover a hostname or a specific scheme/port. Never silently discard an explicitly scoped port. Deliberate apex vs wildcard boundary (`*.example.com` does NOT match `example.com` unless explicitly listed).
+- `src/shared/reporting/types.ts`:
+  - `ResearcherReviewState`: `'unreviewed' | 'needs-manual-verification' | 'verified-by-researcher' | 'not-reproducible' | 'not-a-finding'`
+  - `FindingReportDetail`: reproduction steps, preconditions, expected vs observed behavior, impact, sanitized evidence, limitations, scope note.
+  - Comprehensive Secret Redaction Criteria: Strictly redact and exclude credentials embedded in URLs, sensitive path segments, fragments, raw authorization headers, Set-Cookie lines, logs, and exports—not just query tokens. Retain strict incognito/private-window isolation and storage exclusion.
+
+### R1. Scope Engine & Bounded Rule Precision (Agent 1 Ownership)
+**Files Owned**: `src/shared/scope/**`, `src/rules/**`, `tests/scope/**`, `tests/rules/**`
+- **Scope Engine**: Pure deterministic domain & wildcard matcher supporting exact hosts, `*.domain.com`, exclusions with precedence, preserved explicit ports, and independent redirect/third-party scope evaluation.
+- **Bounded Rule Precision Audit**: Audit all six broad rule families (headers/policies, cookies, CORS, caching, redirects/transport, page signals), but implement only the highest-value, evidence-supported fixes in this pass (e.g. CORS preflight/null-origin context, cookie prefixes and path/domain boundaries, CSP bypass host caveats, cache cookie sensitivity).
+- **Scope Restriction**: This task does NOT add active testing unless it is separately authorized and scoped. All scanning remains passive and non-intrusive.
+- **Rule Authoring Standards**: Narrow claims, authoritative citations, synthetic test fixtures (positive, safe-negative, not-applicable, incomplete, malformed, regression). Output honest `limitations` and `outcome: 'partial-coverage'` or `'not-observed'` when server context is ambiguous.
+
+### R2. Evidence, Triage & Report Workflow (Agent 2 Ownership)
+**Files Owned**: `src/shared/reporting/**`, `src/options/**`, `src/popup/**`, `src/sidepanel/**`, report/export tests
+- **Finding Details UI**: Dedicated view showing stable rule ID, observed facts, provenance, confidence, limitations, and scope status badge.
+- **Researcher Review States**: Local triage annotations without mutating immutable captured scanner findings.
+- **Local Bug-Bounty Report Builder**: Generates Markdown and JSON report drafts with reproduction steps, preconditions, impact, evidence, remediation, and scope notes.
+- **UI Responsiveness & Accessibility**: Safe text rendering (no innerHTML), secret redaction, keyboard navigation, and reduced-motion support.
+
+### R3. Integration & Release Verification (Coordinator)
+- Combine Agent 1 and Agent 2 branches/modules cleanly.
+- Verify zero secret leak, incognito isolation, and write barrier integrity.
+- Execute full test and build gate matrix.
+
+## Test Schedule & Release Bar
+
+### Test Schedule
+Add tests alongside changes during development, but run the combined focused tests and full release gates after both agents integrate—not after every module or individual agent commit.
+
+### Acceptance Criteria
+- [ ] Scope correctly classifies exact domains, wildcard boundaries (`*.example.com` does not match apex `example.com` unless specified), exclusions (take precedence over includes), explicit ports, and unknown hosts.
+- [ ] Hostname normalization uses IDNA, lowercase, and trailing-dot removal; scheme and explicit port are preserved separately and never silently stripped.
+- [ ] Unknown scope returns `'unknown'`; third-party APIs and redirect targets are evaluated independently.
+- [ ] No active testing is executed (scanner remains purely passive).
+- [ ] Zero changed rules emit a confirmed vulnerability on known-safe configurations.
+- [ ] Ambiguous or incomplete contexts (cache, service worker, partial redirect) emit `outcome: 'partial-coverage'` or `'not-observed'`.
+- [ ] Every finding includes ruleId, sanitized evidence, provenance, applicability, and explicit `limitations`.
+- [ ] Review states (`unreviewed`, `needs-manual-verification`, `verified-by-researcher`, `not-reproducible`, `not-a-finding`) can be set and persisted locally without altering captured scanner findings.
+- [ ] Markdown and JSON report drafts export reproduction steps, preconditions, expected/observed results, remediation, and scope notes.
+- [ ] Zero credentials embedded in URLs, sensitive path segments, fragments, raw authorization headers, Set-Cookie lines, logs, or exports.
+- [ ] Incognito isolation remains intact (zero persistence of private window browsing data).
+
+### Automated Release Gates (Full Run After Integration)
+- [ ] `npm run typecheck` passes with 0 errors.
+- [ ] `npm run lint -- --max-warnings=0` passes with 0 warnings.
+- [ ] `npm test` passes all unit, scope, and rule tests.
+- [ ] `npm run test:e2e` passes all Playwright browser tests.
+- [ ] `npm run build` compiles Chrome MV3 extension cleanly into `dist/`.
+- [ ] `npm run build:firefox` compiles Firefox MV3 extension cleanly into `dist-firefox/`.
+- [ ] `npm audit --audit-level=low` reports 0 vulnerabilities.
+
+
+## 2026-10-08T17:15:36Z
+
+do it make it the current workspace
+
+
+## 2026-10-08T17:18:45Z
+
+User directive: Do NOT run audits or test suites after each module. Complete the entire implementation across R1 and R2 first, then run the full audit and test gates once after whole completion.
