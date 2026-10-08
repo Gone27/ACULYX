@@ -51,7 +51,7 @@ function sanitizeUrlForReport(rawUrl) {
 		for (const key of keys) if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) searchParams.set(key, "[REDACTED]");
 		parsed.search = searchParams.toString();
 		const sanitizedBase = sanitizeUrlForStorage(parsed.origin + parsed.pathname);
-		return parsed.search.length > 0 ? `${sanitizedBase}?${parsed.search}` : sanitizedBase;
+		return parsed.search.length > 0 ? `${sanitizedBase}${parsed.search.startsWith("?") ? "" : "?"}${parsed.search}` : sanitizedBase;
 	} catch {
 		const parts = (trimmed.replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, "").replace(/^[^@/]+@/, "").split("#")[0] ?? "").split("?");
 		const pathPart = sanitizeUrlForStorage(parts[0] ?? "");
@@ -94,6 +94,11 @@ function redactAllSecrets(text) {
 		}
 		return match;
 	});
+	sanitized = sanitized.replace(/([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+):([^@/\s]+)@/g, "$1[REDACTED]:[REDACTED]@");
+	sanitized = sanitized.replace(/([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+)@/g, "$1[REDACTED]@");
+	sanitized = sanitized.replace(/(^|[\s"'<(])([a-zA-Z0-9_.-]+):([^@/\s:]+)@([a-zA-Z0-9.-]+)/g, "$1[REDACTED]:[REDACTED]@$4");
+	sanitized = sanitized.replace(/(\/(?:reset|token|auth|verify|confirm)\/)([^/\s?#]+)/gi, "$1[token]");
+	sanitized = sanitized.replace(/#(?:token|access_token|secret|canary|state|id)=[^&\s]+/gi, "#[REDACTED]");
 	sanitized = sanitized.replace(JWT_RE, "[token]");
 	sanitized = sanitized.replace(UUID_RE, "[id]");
 	sanitized = sanitized.replace(HEX_TOKEN_RE, "[token]");
@@ -1550,4 +1555,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-DmSZKpeG.js.map
+//# sourceMappingURL=popup.html-Di8gqqvB.js.map

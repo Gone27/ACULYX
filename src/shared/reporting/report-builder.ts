@@ -75,7 +75,9 @@ export function sanitizeUrlForReport(rawUrl: string): string {
 
     // Redact path
     const sanitizedBase = sanitizeUrlForStorage(parsed.origin + parsed.pathname);
-    return parsed.search.length > 0 ? `${sanitizedBase}?${parsed.search}` : sanitizedBase;
+    return parsed.search.length > 0
+      ? `${sanitizedBase}${parsed.search.startsWith('?') ? '' : '?'}${parsed.search}`
+      : sanitizedBase;
   } catch {
     // Relative URL or invalid URL format
     const noCreds = trimmed
@@ -144,16 +146,42 @@ export function redactAllSecrets(text: string): string {
     return match;
   });
 
-  // 4. Redact JWTs
+  // 4. Redact URL userinfo credentials (with scheme, user-only, or schemeless)
+  sanitized = sanitized.replace(
+    /([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+):([^@/\s]+)@/g,
+    '$1[REDACTED]:[REDACTED]@',
+  );
+  sanitized = sanitized.replace(
+    /([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+)@/g,
+    '$1[REDACTED]@',
+  );
+  sanitized = sanitized.replace(
+    /(^|[\s"'<(])([a-zA-Z0-9_.-]+):([^@/\s:]+)@([a-zA-Z0-9.-]+)/g,
+    '$1[REDACTED]:[REDACTED]@$4',
+  );
+
+  // 5. Redact sensitive path segments
+  sanitized = sanitized.replace(
+    /(\/(?:reset|token|auth|verify|confirm)\/)([^/\s?#]+)/gi,
+    '$1[token]',
+  );
+
+  // 6. Redact fragment secrets
+  sanitized = sanitized.replace(
+    /#(?:token|access_token|secret|canary|state|id)=[^&\s]+/gi,
+    '#[REDACTED]',
+  );
+
+  // 7. Redact JWTs
   sanitized = sanitized.replace(JWT_RE, '[token]');
 
-  // 5. Redact UUIDs
+  // 8. Redact UUIDs
   sanitized = sanitized.replace(UUID_RE, '[id]');
 
-  // 6. Redact hex tokens
+  // 9. Redact hex tokens
   sanitized = sanitized.replace(HEX_TOKEN_RE, '[token]');
 
-  // 7. Redact known canary patterns
+  // 10. Redact known canary patterns
   sanitized = sanitized.replace(CANARY_RE, '[REDACTED]');
 
   return sanitized;

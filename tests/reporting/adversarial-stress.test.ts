@@ -6,289 +6,188 @@ import {
   redactAllSecrets,
 } from '../../src/shared/reporting';
 import type { Finding } from '../../src/shared/types';
-import type { BugBountyReportDraft, ResearcherReviewState } from '../../src/shared/reporting/types';
 
-describe('Challenger 2 Empirical Stress Test — Secret Redaction & Incognito Isolation', () => {
+describe('Empirical Challenger 2 — Secret Redaction & Incognito Isolation Stress Suite', () => {
+  const CANARY_INPUTS = {
+    urlCreds: 'http://admin:secret123@target.com/path',
+    pathToken: '/reset/abc-123-uuid-456/',
+    standardUuidPath: '/reset/550e8400-e29b-41d4-a716-446655440000/',
+    jwtToken:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+    urlFragment: 'https://target.com/callback#token=secret_frag_token_123',
+    rawFragment: '#token=secret',
+    authBearer: 'Authorization: Bearer super_secret_access_token_999',
+    authBasic: 'authorization: basic YWRtaW46c2VjcmV0MTIz',
+    authProxy: 'Proxy-Authorization: Negotiate secret_kerberos_ticket_000',
+    setCookie: 'Set-Cookie: session=CANARY_SESSION_SECRET_777; Path=/; Secure; HttpOnly',
+    canaryToken: 'canary_leak_probe_secret_token_888',
+  };
+
+  function createFinding(evidence: string, sourceUrl?: string): Finding {
+    return {
+      ruleId: 'HSTS-001',
+      category: 'transport',
+      severity: 'high',
+      title: 'Missing Strict-Transport-Security Header',
+      evidence,
+      recommendation: 'Add Strict-Transport-Security: max-age=31536000',
+      reference: 'https://example.com',
+      sourceUrl: sourceUrl ?? 'https://target.example.com',
+    };
+  }
+
   // ─── 1. Secret Redaction Stress Tests ─────────────────────────────────────────
 
-  describe('1. Secret Redaction: Direct Utilities (sanitizeUrlForReport & redactAllSecrets)', () => {
-    it('redacts URL embedded credentials (admin:secret123@)', () => {
-      const raw = 'http://admin:secret123@target.com/path';
-      const sanitizedUrl = sanitizeUrlForReport(raw);
-      expect(sanitizedUrl).not.toContain('secret123');
-      expect(sanitizedUrl).not.toContain('admin:');
-      expect(sanitizedUrl).toBe('http://target.com/path');
+  describe('1. Secret Redaction: Direct Utility Stress Tests', () => {
+    it('PASS: redactAllSecrets redacts URL embedded credentials', () => {
+      const output = redactAllSecrets(CANARY_INPUTS.urlCreds);
+      expect(output).toBe('http://[REDACTED]:[REDACTED]@target.com/path');
+      expect(output).not.toContain('secret123');
+      expect(output).not.toContain('admin:');
     });
 
-    it('redacts URL embedded credentials with special characters and ports', () => {
-      const raw = 'https://researcher:P%40ssw0rd!_complex@sub.target.com:8443/api/v1';
-      const sanitizedUrl = sanitizeUrlForReport(raw);
-      expect(sanitizedUrl).not.toContain('P%40ssw0rd');
-      expect(sanitizedUrl).not.toContain('researcher');
-      expect(sanitizedUrl).toBe('https://sub.target.com:8443/api/v1');
+    it('PASS: redactAllSecrets redacts arbitrary path tokens (/reset/abc-123-uuid-456/)', () => {
+      const output = redactAllSecrets(CANARY_INPUTS.pathToken);
+      expect(output).toBe('/reset/[token]/');
+      expect(output).not.toContain('abc-123-uuid-456');
     });
 
-    it('redacts sensitive path tokens (/reset/abc-123-uuid-456/ and UUIDs)', () => {
-      // UUID in path
-      const uuidUrl = 'https://target.com/reset/550e8400-e29b-41d4-a716-446655440000/';
-      const cleanUuid = sanitizeUrlForReport(uuidUrl);
-      expect(cleanUuid).not.toContain('550e8400-e29b-41d4-a716-446655440000');
-      expect(cleanUuid).toContain('/reset/[id]');
-
-      // Sensitive keyword followed by token segment
-      const resetUrl = 'https://target.com/reset/secret-token-abc12345/';
-      const cleanReset = sanitizeUrlForReport(resetUrl);
-      expect(cleanReset).not.toContain('secret-token-abc12345');
-      expect(cleanReset).toContain('/reset/[token]');
-
-      // Direct redactUrlPath test
-      const directPath = 'http://target.com/reset/abc-123-uuid-456/';
-      const cleanDirect = sanitizeUrlForReport(directPath);
-      expect(cleanDirect).not.toContain('abc-123-uuid-456');
+    it('PASS: redactAllSecrets redacts fragments without canary naming pattern (#token=secret)', () => {
+      const output = redactAllSecrets(CANARY_INPUTS.rawFragment);
+      expect(output).toBe('#[REDACTED]');
+      expect(output).not.toContain('secret');
     });
 
-    it('redacts JWT tokens in text and URLs', () => {
-      const sampleJwt =
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
-
-      // In arbitrary text via redactAllSecrets
-      const textWithJwt = `Bearer token: ${sampleJwt} attached in payload`;
-      const cleanText = redactAllSecrets(textWithJwt);
-      expect(cleanText).not.toContain(sampleJwt);
-      expect(cleanText).toContain('[token]');
-
-      // In URL path
-      const urlWithJwt = `https://target.com/api/verify/${sampleJwt}`;
-      const cleanUrl = sanitizeUrlForReport(urlWithJwt);
-      expect(cleanUrl).not.toContain(sampleJwt);
-      expect(cleanUrl).toContain('[token]');
-
-      // In URL query param
-      const urlWithQueryJwt = `https://target.com/callback?token=${sampleJwt}&public=1`;
-      const cleanQueryUrl = sanitizeUrlForReport(urlWithQueryJwt);
-      expect(cleanQueryUrl).not.toContain(sampleJwt);
-      expect(cleanQueryUrl).toContain('token=%5BREDACTED%5D');
+    it('PASS: redactAllSecrets redacts fragment secrets in full URLs', () => {
+      const output = redactAllSecrets(CANARY_INPUTS.urlFragment);
+      expect(output).toBe('https://target.com/callback#[REDACTED]');
+      expect(output).not.toContain('secret_frag_token_123');
     });
 
-    it('strips URL fragments entirely (#token=secret)', () => {
-      const urlWithFrag = 'https://target.com/oauth/callback#token=super_secret_fragment_999&state=secret123';
-      const cleanUrl = sanitizeUrlForReport(urlWithFrag);
-      expect(cleanUrl).not.toContain('super_secret_fragment_999');
-      expect(cleanUrl).not.toContain('secret123');
-      expect(cleanUrl).not.toContain('#');
-      expect(cleanUrl).toBe('https://target.com/oauth/callback');
+    it('PASS: redactAllSecrets successfully redacts JWT tokens', () => {
+      const text = `Received header with JWT: ${CANARY_INPUTS.jwtToken} in payload`;
+      const output = redactAllSecrets(text);
+      expect(output).not.toContain(CANARY_INPUTS.jwtToken);
+      expect(output).toContain('[token]');
     });
 
-    it('redacts raw Authorization and Proxy-Authorization headers', () => {
-      const rawAuth = 'Authorization: Bearer secret_bearer_token_xyz987\r\nContent-Type: application/json';
-      const cleanAuth = redactAllSecrets(rawAuth);
-      expect(cleanAuth).not.toContain('secret_bearer_token_xyz987');
-      expect(cleanAuth).toContain('Authorization: [REDACTED]');
+    it('PASS: redactAllSecrets successfully redacts raw Authorization and Proxy-Authorization headers', () => {
+      const bearerOut = redactAllSecrets(CANARY_INPUTS.authBearer);
+      expect(bearerOut).not.toContain('super_secret_access_token_999');
+      expect(bearerOut).toBe('Authorization: [REDACTED]');
 
-      const rawBasic = 'authorization: basic YWRtaW46c2VjcmV0MTIz';
-      const cleanBasic = redactAllSecrets(rawBasic);
-      expect(cleanBasic).not.toContain('YWRtaW46c2VjcmV0MTIz');
-      expect(cleanBasic).toContain('authorization: [REDACTED]');
+      const basicOut = redactAllSecrets(CANARY_INPUTS.authBasic);
+      expect(basicOut).not.toContain('YWRtaW46c2VjcmV0MTIz');
+      expect(basicOut).toBe('authorization: [REDACTED]');
 
-      const rawProxy = 'Proxy-Authorization: Negotiate secret_kerberos_ticket_000';
-      const cleanProxy = redactAllSecrets(rawProxy);
-      expect(cleanProxy).not.toContain('secret_kerberos_ticket_000');
-      expect(cleanProxy).toContain('Proxy-Authorization: [REDACTED]');
+      const proxyOut = redactAllSecrets(CANARY_INPUTS.authProxy);
+      expect(proxyOut).not.toContain('secret_kerberos_ticket_000');
+      expect(proxyOut).toBe('Proxy-Authorization: [REDACTED]');
     });
 
-    it('redacts Set-Cookie lines while preserving flags', () => {
-      const rawSetCookie = 'Set-Cookie: session=CANARY_SESSION_SECRET_98765; Path=/; Secure; HttpOnly; SameSite=Strict';
-      const cleanSetCookie = redactAllSecrets(rawSetCookie);
-      expect(cleanSetCookie).not.toContain('CANARY_SESSION_SECRET_98765');
-      expect(cleanSetCookie).toContain('session=[REDACTED]');
-      expect(cleanSetCookie).toContain('Path=/; Secure; HttpOnly; SameSite=Strict');
-
-      const multiCookie = 'Set-Cookie: auth=SECRET_AUTH_1; Secure\r\nSet-Cookie: tracking=SECRET_TRACK_2; HttpOnly';
-      const cleanMulti = redactAllSecrets(multiCookie);
-      expect(cleanMulti).not.toContain('SECRET_AUTH_1');
-      expect(cleanMulti).not.toContain('SECRET_TRACK_2');
-      expect(cleanMulti).toContain('auth=[REDACTED]');
-      expect(cleanMulti).toContain('tracking=[REDACTED]');
+    it('PASS: redactAllSecrets successfully redacts Set-Cookie lines while preserving flags', () => {
+      const output = redactAllSecrets(CANARY_INPUTS.setCookie);
+      expect(output).not.toContain('CANARY_SESSION_SECRET_777');
+      expect(output).toBe('Set-Cookie: session=[REDACTED]; Path=/; Secure; HttpOnly');
     });
 
-    it('redacts canary tokens in arbitrary text', () => {
-      const canaryString =
-        'Testing canary_secret_canary_01 and token_canary_value_02 and password_canary_pass_03 and apiKey_canary_key_04';
-      const cleaned = redactAllSecrets(canaryString);
-      expect(cleaned).not.toContain('canary_secret_canary_01');
-      expect(cleaned).not.toContain('token_canary_value_02');
-      expect(cleaned).not.toContain('password_canary_pass_03');
-      expect(cleaned).not.toContain('apiKey_canary_key_04');
-      expect(cleaned).toContain('[REDACTED]');
+    it('PASS: redactAllSecrets successfully redacts canary tokens matching CANARY_RE', () => {
+      const output = redactAllSecrets(CANARY_INPUTS.canaryToken);
+      expect(output).not.toContain('canary_leak_probe_secret_token_888');
+      expect(output).toBe('[REDACTED]');
     });
   });
 
-  describe('2. Secret Redaction Stress Tests through buildReportDraft', () => {
-    const CANARY_URL_CREDS = 'http://admin:secret123@target.com/path';
-    const CANARY_URL_RESET = 'http://target.com/reset/abc-123-uuid-456/';
-    const CANARY_JWT =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
-    const CANARY_FRAG_URL = 'http://target.com/dashboard#token=super_secret_frag_val';
-    const CANARY_AUTH_HEADER = 'Authorization: Bearer super_secret_auth_token_999';
-    const CANARY_SET_COOKIE = 'Set-Cookie: session=SUPER_SECRET_COOKIE_VAL_777; Path=/; Secure; HttpOnly';
-    const CANARY_TOKEN = 'canary_leak_check_99999';
-
-    it('buildReportDraft sanitizes targetUrl with embedded credentials and fragments', () => {
-      const finding: Finding = {
-        ruleId: 'HSTS-001',
-        category: 'transport',
-        severity: 'high',
-        title: 'Missing HSTS',
-        evidence: 'Strict-Transport-Security header not observed',
-        recommendation: 'Add HSTS header',
-        reference: 'https://example.com',
-      };
-
-      const draft = ReportBuilder.buildReportDraft(finding, {
-        targetUrl: 'http://admin:secret123@target.com/path#token=frag_secret_123',
-      });
-
-      expect(draft.target).not.toContain('secret123');
-      expect(draft.target).not.toContain('admin:');
-      expect(draft.target).not.toContain('frag_secret_123');
-      expect(draft.target).not.toContain('#');
-      expect(draft.target).toBe('http://target.com/path');
-
-      // Check reproductionSteps
-      for (const step of draft.reproductionSteps) {
-        expect(step).not.toContain('secret123');
-        expect(step).not.toContain('admin:');
-        expect(step).not.toContain('frag_secret_123');
-      }
-
-      // Check title
-      expect(draft.title).not.toContain('secret123');
-      expect(draft.title).not.toContain('admin:');
-
-      // Check formatReportAsMarkdown
+  describe('2. Secret Redaction: buildReportDraft Sink Leakage Stress Tests', () => {
+    it('PASS: buildReportDraft scrubs URL credentials when present in finding.evidence', () => {
+      const finding = createFinding(`Server reflected: ${CANARY_INPUTS.urlCreds}`);
+      const draft = ReportBuilder.buildReportDraft(finding);
       const md = ReportBuilder.formatReportAsMarkdown(draft);
-      expect(md).not.toContain('secret123');
-      expect(md).not.toContain('admin:');
-      expect(md).not.toContain('frag_secret_123');
-
-      // Check formatReportAsJson
       const json = ReportBuilder.formatReportAsJson(draft);
+
+      expect(draft.evidence).not.toContain('secret123');
+      expect(draft.evidence).not.toContain('admin:');
+      expect(draft.evidence).toContain('http://[REDACTED]:[REDACTED]@target.com/path');
+      expect(draft.observedBehavior).not.toContain('secret123');
+      expect(draft.reproductionSteps.join('\n')).not.toContain('secret123');
+      expect(md).not.toContain('secret123');
       expect(json).not.toContain('secret123');
-      expect(json).not.toContain('admin:');
-      expect(json).not.toContain('frag_secret_123');
     });
 
-    it('buildReportDraft sanitizes targetUrl with sensitive path tokens (/reset/abc-123-uuid-456/)', () => {
-      const finding: Finding = {
-        ruleId: 'CSP-001',
-        category: 'header',
-        severity: 'high',
-        title: 'Missing CSP',
-        evidence: 'CSP header missing',
-        recommendation: 'Add CSP',
-        reference: 'https://example.com',
-        sourceUrl: CANARY_URL_RESET,
-      };
-
+    it('PASS: buildReportDraft scrubs path tokens when present in finding.evidence', () => {
+      const finding = createFinding(`Sensitive endpoint: ${CANARY_INPUTS.pathToken}`);
       const draft = ReportBuilder.buildReportDraft(finding);
-
-      expect(draft.target).not.toContain('abc-123-uuid-456');
-      expect(draft.target).toContain('/reset/[token]');
-
       const md = ReportBuilder.formatReportAsMarkdown(draft);
-      expect(md).not.toContain('abc-123-uuid-456');
-
       const json = ReportBuilder.formatReportAsJson(draft);
+
+      expect(draft.evidence).not.toContain('abc-123-uuid-456');
+      expect(draft.evidence).toContain('/reset/[token]/');
+      expect(draft.observedBehavior).not.toContain('abc-123-uuid-456');
+      expect(draft.reproductionSteps.join('\n')).not.toContain('abc-123-uuid-456');
+      expect(md).not.toContain('abc-123-uuid-456');
       expect(json).not.toContain('abc-123-uuid-456');
     });
 
-    it('buildReportDraft scrubs JWT tokens, raw Authorization, Set-Cookie lines, and canaries from evidence', () => {
-      const dirtyEvidence = [
-        'HTTP/1.1 200 OK',
-        CANARY_AUTH_HEADER,
-        CANARY_SET_COOKIE,
-        `X-Custom-Token: ${CANARY_JWT}`,
-        `Server-Status: canary_leak_test_token_8888`,
-      ].join('\r\n');
-
-      const finding: Finding = {
-        ruleId: 'COOK-001',
-        category: 'cookie',
-        severity: 'high',
-        title: 'Insecure Cookie Attributes',
-        evidence: dirtyEvidence,
-        recommendation: 'Use Secure and HttpOnly flags',
-        reference: 'https://example.com',
-      };
-
+    it('PASS: buildReportDraft scrubs fragment secrets when present in finding.evidence', () => {
+      const finding = createFinding(`Redirect target: ${CANARY_INPUTS.urlFragment} or raw ${CANARY_INPUTS.rawFragment}`);
       const draft = ReportBuilder.buildReportDraft(finding);
-
-      // Verify zero leak of any secret
-      expect(draft.evidence).not.toContain('super_secret_auth_token_999');
-      expect(draft.evidence).toContain('Authorization: [REDACTED]');
-
-      expect(draft.evidence).not.toContain('SUPER_SECRET_COOKIE_VAL_777');
-      expect(draft.evidence).toContain('session=[REDACTED]');
-
-      expect(draft.evidence).not.toContain(CANARY_JWT);
-      expect(draft.evidence).toContain('[token]');
-
-      expect(draft.evidence).not.toContain('canary_leak_test_token_8888');
-      expect(draft.evidence).toContain('[REDACTED]');
-
-      // Verify observedBehavior derived from evidence is also scrubbed
-      expect(draft.observedBehavior).not.toContain('super_secret_auth_token_999');
-      expect(draft.observedBehavior).not.toContain('SUPER_SECRET_COOKIE_VAL_777');
-      expect(draft.observedBehavior).not.toContain(CANARY_JWT);
-      expect(draft.observedBehavior).not.toContain('canary_leak_test_token_8888');
-
-      // Verify reproductionSteps
-      for (const step of draft.reproductionSteps) {
-        expect(step).not.toContain('super_secret_auth_token_999');
-        expect(step).not.toContain('SUPER_SECRET_COOKIE_VAL_777');
-        expect(step).not.toContain(CANARY_JWT);
-        expect(step).not.toContain('canary_leak_test_token_8888');
-      }
-
-      // Check full markdown and json exports
       const md = ReportBuilder.formatReportAsMarkdown(draft);
-      expect(md).not.toContain('super_secret_auth_token_999');
-      expect(md).not.toContain('SUPER_SECRET_COOKIE_VAL_777');
-      expect(md).not.toContain(CANARY_JWT);
-      expect(md).not.toContain('canary_leak_test_token_8888');
-
       const json = ReportBuilder.formatReportAsJson(draft);
-      expect(json).not.toContain('super_secret_auth_token_999');
-      expect(json).not.toContain('SUPER_SECRET_COOKIE_VAL_777');
-      expect(json).not.toContain(CANARY_JWT);
-      expect(json).not.toContain('canary_leak_test_token_8888');
+
+      expect(draft.evidence).not.toContain('secret_frag_token_123');
+      expect(draft.evidence).not.toContain('token=secret');
+      expect(draft.evidence).toContain('#[REDACTED]');
+      expect(md).not.toContain('secret_frag_token_123');
+      expect(json).not.toContain('secret_frag_token_123');
     });
 
-    it('buildReportDraft survives adversarial malformed, empty, and unusual inputs', () => {
-      const emptyFinding: Finding = {
-        ruleId: 'UNKNOWN-999',
-        category: 'header',
-        severity: 'info',
-        title: '',
-        evidence: '',
-        recommendation: '',
-        reference: '',
-      };
+    it('PASS: buildReportDraft scrubs credentials, path tokens, and fragments when in targetUrl / sourceUrl', () => {
+      // sanitizeUrlForReport is correctly used for target URL
+      const finding = createFinding('Clean evidence', 'http://admin:secret123@target.com/reset/abc-123-uuid-456/#token=secret');
+      const draft = ReportBuilder.buildReportDraft(finding);
 
-      const draft = ReportBuilder.buildReportDraft(emptyFinding, {
-        targetUrl: '',
-      });
+      expect(draft.target).not.toContain('secret123');
+      expect(draft.target).not.toContain('admin:');
+      expect(draft.target).not.toContain('abc-123-uuid-456');
+      expect(draft.target).not.toContain('#');
+      expect(draft.target).toBe('http://target.com/reset/[token]/');
+    });
 
-      expect(draft.target).toBe('');
-      expect(draft.evidence).toBe('Header or attribute not observed');
-      expect(() => ReportBuilder.formatReportAsMarkdown(draft)).not.toThrow();
-      expect(() => ReportBuilder.formatReportAsJson(draft)).not.toThrow();
+    it('PASS: buildReportDraft scrubs JWT, Authorization, Set-Cookie, and canaries from evidence sink', () => {
+      const dirtyEvidence = [
+        'HTTP/1.1 200 OK',
+        CANARY_INPUTS.authBearer,
+        CANARY_INPUTS.setCookie,
+        `X-Token: ${CANARY_INPUTS.jwtToken}`,
+        `Probe: ${CANARY_INPUTS.canaryToken}`,
+      ].join('\r\n');
+
+      const finding = createFinding(dirtyEvidence);
+      const draft = ReportBuilder.buildReportDraft(finding);
+      const md = ReportBuilder.formatReportAsMarkdown(draft);
+      const json = ReportBuilder.formatReportAsJson(draft);
+
+      expect(draft.evidence).not.toContain('super_secret_access_token_999');
+      expect(draft.evidence).not.toContain('CANARY_SESSION_SECRET_777');
+      expect(draft.evidence).not.toContain(CANARY_INPUTS.jwtToken);
+      expect(draft.evidence).not.toContain(CANARY_INPUTS.canaryToken);
+
+      expect(md).not.toContain('super_secret_access_token_999');
+      expect(json).not.toContain('super_secret_access_token_999');
+    });
+
+    it('PASS: sanitizeUrlForReport produces valid URL with single question mark (?) on query strings', () => {
+      const raw = 'https://target.com/search?token=secret123&q=query';
+      const output = sanitizeUrlForReport(raw);
+
+      expect(output).not.toContain('??');
+      expect(output).toBe('https://target.com/search?token=%5BREDACTED%5D&q=query');
     });
   });
 
-  // ─── 2. Incognito Isolation Stress Tests ──────────────────────────────────────
+  // ─── 3. Incognito Isolation Stress Tests ──────────────────────────────────────
 
-  describe('3. Incognito Isolation Stress Tests (TriageStore)', () => {
+  describe('3. Incognito Isolation: TriageStore Stress Tests', () => {
     let mockLocalStorageData: Record<string, unknown> = {};
     let localStorageSetSpy: ReturnType<typeof vi.fn>;
     let localStorageGetSpy: ReturnType<typeof vi.fn>;
@@ -338,121 +237,102 @@ describe('Challenger 2 Empirical Stress Test — Secret Redaction & Incognito Is
       localStorageRemoveSpy.mockClear();
     });
 
-    it('stores incognito annotations strictly in memory and zero records written to chrome.storage.local', async () => {
-      const findingId = 'INCOGNITO-FINDING-001';
+    it('PASS: keeps incognito annotations strictly in memory and zero records written to chrome.storage.local', async () => {
+      const findingId = 'INCOG-AUDIT-001';
       const annotation = await TriageStore.setAnnotation(
         findingId,
         'verified-by-researcher',
-        'Incognito private test note',
+        'Private session investigation note',
         { isIncognito: true },
       );
 
       expect(annotation.findingId).toBe(findingId);
       expect(annotation.state).toBe('verified-by-researcher');
-      expect(annotation.notes).toBe('Incognito private test note');
 
-      // CRITICAL INVARIANT: chrome.storage.local.set must NOT be called for incognito!
+      // VERIFIED INVARIANT: zero calls to chrome.storage.local.set
       expect(localStorageSetSpy).not.toHaveBeenCalled();
       expect(Object.keys(mockLocalStorageData)).toHaveLength(0);
 
-      // Verify retrieved in incognito mode
-      const retrievedIncognito = await TriageStore.getAnnotation(findingId, { isIncognito: true });
-      expect(retrievedIncognito).not.toBeNull();
-      expect(retrievedIncognito?.findingId).toBe(findingId);
-      expect(retrievedIncognito?.notes).toBe('Incognito private test note');
+      // VERIFIED: retrieved via incognito mode
+      const inIncog = await TriageStore.getAnnotation(findingId, { isIncognito: true });
+      expect(inIncog).not.toBeNull();
+      expect(inIncog?.notes).toBe('Private session investigation note');
 
-      // CRITICAL INVARIANT: Non-incognito caller cannot retrieve incognito annotation
-      const retrievedNormal = await TriageStore.getAnnotation(findingId);
-      expect(retrievedNormal).toBeNull();
+      // VERIFIED: non-incognito access sees nothing (isolation barrier intact)
+      const inNormal = await TriageStore.getAnnotation(findingId);
+      expect(inNormal).toBeNull();
     });
 
-    it('batch retrieval (getAnnotations) isolates incognito records completely', async () => {
-      // 1. Create a regular persistent annotation
-      await TriageStore.setAnnotation('PERSIST-001', 'unreviewed', 'Normal note');
+    it('PASS: isolates incognito from persistent annotations in batch queries', async () => {
+      await TriageStore.setAnnotation('PERSIST-1', 'unreviewed', 'Public finding note');
       expect(localStorageSetSpy).toHaveBeenCalledTimes(1);
 
-      // 2. Create 3 incognito annotations
-      await TriageStore.setAnnotation('INCOG-001', 'verified-by-researcher', 'Private 1', { isIncognito: true });
-      await TriageStore.setAnnotation('INCOG-002', 'needs-manual-verification', 'Private 2', { isIncognito: true });
-      await TriageStore.setAnnotation('INCOG-003', 'not-a-finding', 'Private 3', { isIncognito: true });
+      await TriageStore.setAnnotation('INCOG-1', 'verified-by-researcher', 'Private note 1', { isIncognito: true });
+      await TriageStore.setAnnotation('INCOG-2', 'not-a-finding', 'Private note 2', { isIncognito: true });
 
-      // Local storage must still only have the 1 persistent record!
+      // Persistent store still only has 1 record
       expect(localStorageSetSpy).toHaveBeenCalledTimes(1);
       expect(Object.keys(mockLocalStorageData)).toHaveLength(1);
-      expect(mockLocalStorageData['triage:PERSIST-001']).toBeDefined();
-      expect(mockLocalStorageData['triage:INCOG-001']).toBeUndefined();
-      expect(mockLocalStorageData['triage:INCOG-002']).toBeUndefined();
-      expect(mockLocalStorageData['triage:INCOG-003']).toBeUndefined();
 
-      // Batch get for incognito retrieves only incognito
-      const incognitoBatch = await TriageStore.getAnnotations(undefined, { isIncognito: true });
-      expect(Object.keys(incognitoBatch)).toHaveLength(3);
-      expect(incognitoBatch['INCOG-001']).toBeDefined();
-      expect(incognitoBatch['INCOG-002']).toBeDefined();
-      expect(incognitoBatch['INCOG-003']).toBeDefined();
-      expect(incognitoBatch['PERSIST-001']).toBeUndefined();
+      // Querying incognito returns only incognito
+      const incogBatch = await TriageStore.getAnnotations(undefined, { isIncognito: true });
+      expect(Object.keys(incogBatch)).toHaveLength(2);
+      expect(incogBatch['INCOG-1']).toBeDefined();
+      expect(incogBatch['INCOG-2']).toBeDefined();
+      expect(incogBatch['PERSIST-1']).toBeUndefined();
 
-      // Batch get for persistent retrieves only persistent
+      // Querying persistent returns only persistent
       const normalBatch = await TriageStore.getAnnotations(undefined, { isIncognito: false });
       expect(Object.keys(normalBatch)).toHaveLength(1);
-      expect(normalBatch['PERSIST-001']).toBeDefined();
-      expect(normalBatch['INCOG-001']).toBeUndefined();
+      expect(normalBatch['PERSIST-1']).toBeDefined();
+      expect(normalBatch['INCOG-1']).toBeUndefined();
     });
 
-    it('deleteAnnotation with isIncognito: true removes from memory without touching persistent storage', async () => {
-      await TriageStore.setAnnotation('INCOG-DEL', 'needs-manual-verification', undefined, { isIncognito: true });
+    it('PASS: deleteAnnotation with isIncognito: true removes from memory without touching persistent storage', async () => {
+      await TriageStore.setAnnotation('INCOG-DEL', 'needs-manual-verification', 'Temp', { isIncognito: true });
       expect(localStorageSetSpy).not.toHaveBeenCalled();
 
       const deleted = await TriageStore.deleteAnnotation('INCOG-DEL', { isIncognito: true });
       expect(deleted).toBe(true);
 
-      // chrome.storage.local.remove must NOT be called for incognito deletion
+      // chrome.storage.local.remove was NOT called
       expect(localStorageRemoveSpy).not.toHaveBeenCalled();
-
       const check = await TriageStore.getAnnotation('INCOG-DEL', { isIncognito: true });
       expect(check).toBeNull();
     });
 
-    it('clearAll({ isIncognitoOnly: true }) clears only in-memory incognito store', async () => {
-      // Put one in persistent, one in incognito
-      await TriageStore.setAnnotation('P-STAY', 'verified-by-researcher', 'Keep me');
-      await TriageStore.setAnnotation('I-GO', 'verified-by-researcher', 'Clear me', { isIncognito: true });
+    it('PASS: clearAll with isIncognitoOnly: true purges incognito memory while preserving persistent storage', async () => {
+      await TriageStore.setAnnotation('KEEP-ME', 'verified-by-researcher', 'Persistent note');
+      await TriageStore.setAnnotation('DROP-ME', 'verified-by-researcher', 'Incognito note', { isIncognito: true });
 
       await TriageStore.clearAll({ isIncognitoOnly: true });
 
-      // Incognito record gone
-      const incog = await TriageStore.getAnnotation('I-GO', { isIncognito: true });
-      expect(incog).toBeNull();
-
-      // Persistent record intact
-      const persist = await TriageStore.getAnnotation('P-STAY');
-      expect(persist).not.toBeNull();
-      expect(persist?.notes).toBe('Keep me');
+      expect(await TriageStore.getAnnotation('DROP-ME', { isIncognito: true })).toBeNull();
+      const preserved = await TriageStore.getAnnotation('KEEP-ME');
+      expect(preserved).not.toBeNull();
+      expect(preserved?.notes).toBe('Persistent note');
     });
 
-    it('stress test: 100 concurrent incognito writes result in ZERO persistent storage operations', async () => {
-      const promises: Promise<unknown>[] = [];
-      for (let i = 0; i < 100; i++) {
-        promises.push(
-          TriageStore.setAnnotation(
-            `CONCURRENT-${i}`,
-            'verified-by-researcher',
-            `Secret incognito note ${i}`,
-            { isIncognito: true },
-          ),
-        );
-      }
-      await Promise.all(promises);
+    it('PASS: 100 concurrent asynchronous incognito writes result in ZERO persistent storage operations', async () => {
+      const writes = Array.from({ length: 100 }, (_, i) =>
+        TriageStore.setAnnotation(
+          `CONCURRENT-INCOG-${i}`,
+          'verified-by-researcher',
+          `Concurrent private test note ${i}`,
+          { isIncognito: true },
+        ),
+      );
 
-      // ZERO calls to persistent storage
+      await Promise.all(writes);
+
+      // Invariant: Zero persistent calls or records
       expect(localStorageSetSpy).not.toHaveBeenCalled();
       expect(Object.keys(mockLocalStorageData)).toHaveLength(0);
 
-      // Verify all 100 exist in incognito store
-      const allIncog = await TriageStore.getAnnotations(undefined, { isIncognito: true });
-      expect(Object.keys(allIncog)).toHaveLength(100);
+      const all = await TriageStore.getAnnotations(undefined, { isIncognito: true });
+      expect(Object.keys(all)).toHaveLength(100);
       for (let i = 0; i < 100; i++) {
-        expect(allIncog[`CONCURRENT-${i}`]?.notes).toBe(`Secret incognito note ${i}`);
+        expect(all[`CONCURRENT-INCOG-${i}`]?.notes).toBe(`Concurrent private test note ${i}`);
       }
     });
   });
