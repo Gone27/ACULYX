@@ -86,6 +86,109 @@ var DEFAULT_SETTINGS = {
 	reducedMotion: "system"
 };
 //#endregion
+//#region src/shared/write-barrier.ts
+/**
+* write-barrier.ts
+*
+* Provides shared synchronization, write barrier, and epoch tracking
+* for all storage and settings operations across the extension.
+* Eliminates race conditions during full data reset and guarantees
+* linearizability across async tasks without circular imports.
+*/
+var KeyedAsyncMutex = class {
+	locks = /* @__PURE__ */ new Map();
+	async runExclusive(key, fn) {
+		const currentLock = this.locks.get(key) ?? Promise.resolve();
+		let release;
+		const nextLock = new Promise((resolve) => {
+			release = resolve;
+		});
+		const tail = currentLock.then(() => nextLock, () => nextLock);
+		this.locks.set(key, tail);
+		try {
+			await currentLock;
+			return await fn();
+		} finally {
+			release();
+			if (this.locks.get(key) === tail) this.locks.delete(key);
+		}
+	}
+	isLocked(key) {
+		return this.locks.has(key);
+	}
+};
+var storageMutex = new KeyedAsyncMutex();
+var StorageWriteBarrier = class {
+	activeWrites = /* @__PURE__ */ new Set();
+	barrierPromise = null;
+	releaseBarrier = null;
+	async enter() {
+		if (this.barrierPromise !== null) await this.barrierPromise;
+	}
+	track(promise) {
+		this.activeWrites.add(promise);
+		const cleanup = () => {
+			this.activeWrites.delete(promise);
+		};
+		promise.then(cleanup, cleanup);
+		return promise;
+	}
+	async closeBarrierAndDrain() {
+		if (this.barrierPromise === null) {
+			let release;
+			this.barrierPromise = new Promise((resolve) => {
+				release = resolve;
+			});
+			this.releaseBarrier = release;
+		}
+		while (this.activeWrites.size > 0) await Promise.allSettled(Array.from(this.activeWrites));
+	}
+	openBarrier() {
+		if (this.releaseBarrier !== null) {
+			const release = this.releaseBarrier;
+			this.releaseBarrier = null;
+			this.barrierPromise = null;
+			release();
+		}
+	}
+	isClosed() {
+		return this.barrierPromise !== null;
+	}
+	getActiveCount() {
+		return this.activeWrites.size;
+	}
+};
+var storageWriteBarrier = new StorageWriteBarrier();
+var storageResetEpoch = 0;
+var epochChangeListeners = /* @__PURE__ */ new Set();
+function onEpochChange(listener) {
+	epochChangeListeners.add(listener);
+	return () => {
+		epochChangeListeners.delete(listener);
+	};
+}
+function notifyEpochChange() {
+	for (const listener of epochChangeListeners) try {
+		listener(storageResetEpoch);
+	} catch {}
+}
+function getStorageResetEpoch() {
+	return storageResetEpoch;
+}
+function setStorageResetEpoch(epoch) {
+	storageResetEpoch = epoch;
+	notifyEpochChange();
+}
+function incrementStorageResetEpoch() {
+	storageResetEpoch++;
+	notifyEpochChange();
+	return storageResetEpoch;
+}
+function isStorageEpochStale(epoch) {
+	if (epoch === void 0) return false;
+	return epoch !== storageResetEpoch;
+}
+//#endregion
 //#region src/shared/settings.ts
 /**
 * settings.ts
@@ -330,7 +433,16 @@ var SettingsService = {
 				const raw = (await chrome.storage.local.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS];
 				if (typeof raw === "object" && raw !== null && typeof raw["schemaVersion"] === "number" && raw["schemaVersion"] > 2) throw new UnsupportedSchemaError(raw["schemaVersion"]);
 				const migrated = migrateSettings(raw);
-				if (!(typeof raw === "object" && raw !== null && raw["schemaVersion"] === 2)) await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+				if (!(typeof raw === "object" && raw !== null && raw["schemaVersion"] === 2)) {
+					const opEpoch = getStorageResetEpoch();
+					if (!isStorageEpochStale(opEpoch)) {
+						await storageWriteBarrier.enter();
+						if (!isStorageEpochStale(opEpoch)) {
+							const writePromise = chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+							await storageWriteBarrier.track(writePromise);
+						}
+					}
+				}
 				cachedSettings = migrated;
 				settingsTransitionPipeline.setLastAppliedSettings(migrated);
 				return { ...migrated };
@@ -375,18 +487,31 @@ var SettingsService = {
 	/**
 	* Validates and applies a patch to current settings, writes to storage, and returns updated settings.
 	*/
-	async updateSettings(patch) {
+	async updateSettings(patch, epoch) {
 		ensureStorageListener();
+		const opEpoch = epoch ?? getStorageResetEpoch();
+		if (isStorageEpochStale(opEpoch)) return this.getCachedSettings();
+		await storageWriteBarrier.enter();
+		if (isStorageEpochStale(opEpoch)) return this.getCachedSettings();
 		if (typeof chrome !== "undefined" && typeof chrome.storage !== "undefined" && typeof chrome.storage.local !== "undefined") {
-			const raw = (await chrome.storage.local.get(STORAGE_KEYS.SETTINGS))[STORAGE_KEYS.SETTINGS];
+			const data = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+			if (isStorageEpochStale(opEpoch)) return this.getCachedSettings();
+			const raw = data[STORAGE_KEYS.SETTINGS];
 			if (typeof raw === "object" && raw !== null && typeof raw["schemaVersion"] === "number" && raw["schemaVersion"] > 2) throw new UnsupportedSchemaError(raw["schemaVersion"]);
 		}
+		const current = await this.whenReady();
+		if (isStorageEpochStale(opEpoch)) return this.getCachedSettings();
 		const merged = migrateSettings({
-			...await this.whenReady(),
+			...current,
 			...patch,
 			schemaVersion: 2
 		});
-		if (typeof chrome !== "undefined" && typeof chrome.storage !== "undefined" && typeof chrome.storage.local !== "undefined") await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: merged });
+		if (typeof chrome !== "undefined" && typeof chrome.storage !== "undefined" && typeof chrome.storage.local !== "undefined") {
+			if (isStorageEpochStale(opEpoch)) return this.getCachedSettings();
+			const setPromise = chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: merged });
+			await storageWriteBarrier.track(setPromise);
+		}
+		if (isStorageEpochStale(opEpoch)) return this.getCachedSettings();
 		return await settingsTransitionPipeline.transition(merged, "storage");
 	},
 	/**
@@ -1130,85 +1255,6 @@ function checkSubdomainTrust(finalHop, cookies, alwaysSensitive = [], alwaysIgno
 }
 //#endregion
 //#region src/shared/storage.ts
-var KeyedAsyncMutex = class {
-	locks = /* @__PURE__ */ new Map();
-	async runExclusive(key, fn) {
-		const currentLock = this.locks.get(key) ?? Promise.resolve();
-		let release;
-		const nextLock = new Promise((resolve) => {
-			release = resolve;
-		});
-		const tail = currentLock.then(() => nextLock, () => nextLock);
-		this.locks.set(key, tail);
-		try {
-			await currentLock;
-			return await fn();
-		} finally {
-			release();
-			if (this.locks.get(key) === tail) this.locks.delete(key);
-		}
-	}
-	isLocked(key) {
-		return this.locks.has(key);
-	}
-};
-var storageMutex = new KeyedAsyncMutex();
-var StorageWriteBarrier = class {
-	activeWrites = /* @__PURE__ */ new Set();
-	barrierPromise = null;
-	releaseBarrier = null;
-	async enter() {
-		if (this.barrierPromise !== null) await this.barrierPromise;
-	}
-	track(promise) {
-		this.activeWrites.add(promise);
-		const cleanup = () => {
-			this.activeWrites.delete(promise);
-		};
-		promise.then(cleanup, cleanup);
-		return promise;
-	}
-	async closeBarrierAndDrain() {
-		if (this.barrierPromise === null) {
-			let release;
-			this.barrierPromise = new Promise((resolve) => {
-				release = resolve;
-			});
-			this.releaseBarrier = release;
-		}
-		while (this.activeWrites.size > 0) await Promise.allSettled(Array.from(this.activeWrites));
-	}
-	openBarrier() {
-		if (this.releaseBarrier !== null) {
-			const release = this.releaseBarrier;
-			this.releaseBarrier = null;
-			this.barrierPromise = null;
-			release();
-		}
-	}
-	isClosed() {
-		return this.barrierPromise !== null;
-	}
-	getActiveCount() {
-		return this.activeWrites.size;
-	}
-};
-var storageWriteBarrier = new StorageWriteBarrier();
-var storageResetEpoch = 0;
-function getStorageResetEpoch() {
-	return storageResetEpoch;
-}
-function setStorageResetEpoch(epoch) {
-	storageResetEpoch = epoch;
-}
-function incrementStorageResetEpoch() {
-	storageResetEpoch++;
-	return storageResetEpoch;
-}
-function isStorageEpochStale(epoch) {
-	if (epoch === void 0) return false;
-	return epoch !== storageResetEpoch;
-}
 var storageHealth = {
 	isDegraded: false,
 	lastError: null,
@@ -1772,8 +1818,19 @@ var LocalStorage = {
 		const result = await chrome.storage.local.get(STORAGE_KEYS.ONBOARDING_DISMISSED);
 		return Boolean(result[STORAGE_KEYS.ONBOARDING_DISMISSED]);
 	},
-	async setOnboardingDismissed(dismissed) {
-		await chrome.storage.local.set({ [STORAGE_KEYS.ONBOARDING_DISMISSED]: dismissed });
+	async setOnboardingDismissed(dismissed, epoch) {
+		const opEpoch = epoch ?? getStorageResetEpoch();
+		if (isStorageEpochStale(opEpoch)) return;
+		await storageWriteBarrier.enter();
+		if (isStorageEpochStale(opEpoch)) return;
+		try {
+			if (isStorageEpochStale(opEpoch)) return;
+			const writePromise = chrome.storage.local.set({ [STORAGE_KEYS.ONBOARDING_DISMISSED]: dismissed });
+			await storageWriteBarrier.track(writePromise);
+		} catch (err) {
+			recordStorageFailure(err);
+			throw err;
+		}
 	},
 	async deleteOriginData(origin) {
 		await this.purgeOriginData(origin);
@@ -1814,8 +1871,8 @@ var LocalStorage = {
 			throw err;
 		}
 	},
-	async resetAllData() {
-		incrementStorageResetEpoch();
+	async resetAllData(options) {
+		if (options?.skipEpochIncrement !== true) incrementStorageResetEpoch();
 		await storageWriteBarrier.closeBarrierAndDrain();
 		try {
 			await chrome.storage.local.clear();
@@ -1898,6 +1955,6 @@ function sendToBackground(msg) {
 	});
 }
 //#endregion
-export { GRADE_THRESHOLDS as A, sanitizeUrlForStorage as C, settingsTransitionPipeline as D, resolveCookieOverlaps as E, SEVERITY_ORDER as F, SIDEPANEL_PORT_NAME as I, POPUP_PORT_NAME as M, RESTRICTED_SCHEMES as N, BADGE_COLORS as O, SCORE_VERSION as P, sanitizeEvidence as S, normalizeCookieList as T, originFromUrl as _, SessionStorage as a, redactUrlPath as b, setStorageResetEpoch as c, checkDuplicateHeaders as d, extractSetCookieHeaders as f, normalizeHeaders as g, isSensitiveCookie as h, LocalStorage as i, MAINTENANCE_ALARM as j, DEFAULT_SETTINGS as k, checkSubdomainTrust as l, headersDiffer as m, portSend as n, getStorageResetEpoch as o, hasCspBypassProtection as p, sendToBackground as r, incrementStorageResetEpoch as s, PortRegistry as t, registrableDomain as u, parseCspDirectives as v, SettingsService as w, sanitizeCspPolicyForStorage as x, redactHeaderValue as y };
+export { DEFAULT_SETTINGS as A, resolveCookieOverlaps as C, onEpochChange as D, incrementStorageResetEpoch as E, SCORE_VERSION as F, SEVERITY_ORDER as I, SIDEPANEL_PORT_NAME as L, MAINTENANCE_ALARM as M, POPUP_PORT_NAME as N, setStorageResetEpoch as O, RESTRICTED_SCHEMES as P, normalizeCookieList as S, getStorageResetEpoch as T, redactUrlPath as _, SessionStorage as a, sanitizeUrlForStorage as b, checkDuplicateHeaders as c, headersDiffer as d, isSensitiveCookie as f, redactHeaderValue as g, parseCspDirectives as h, LocalStorage as i, GRADE_THRESHOLDS as j, BADGE_COLORS as k, extractSetCookieHeaders as l, originFromUrl as m, portSend as n, checkSubdomainTrust as o, normalizeHeaders as p, sendToBackground as r, registrableDomain as s, PortRegistry as t, hasCspBypassProtection as u, sanitizeCspPolicyForStorage as v, settingsTransitionPipeline as w, SettingsService as x, sanitizeEvidence as y };
 
-//# sourceMappingURL=messaging-BvANQDmr.js.map
+//# sourceMappingURL=messaging-CAY63kjk.js.map

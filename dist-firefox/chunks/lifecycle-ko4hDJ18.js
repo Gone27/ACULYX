@@ -1,4 +1,4 @@
-import { C as sanitizeUrlForStorage, _ as originFromUrl, a as SessionStorage, b as redactUrlPath, g as normalizeHeaders, i as LocalStorage, j as MAINTENANCE_ALARM, m as headersDiffer, w as SettingsService, y as redactHeaderValue } from "./messaging-BvANQDmr.js";
+import { M as MAINTENANCE_ALARM, _ as redactUrlPath, a as SessionStorage, b as sanitizeUrlForStorage, d as headersDiffer, g as redactHeaderValue, i as LocalStorage, m as originFromUrl, p as normalizeHeaders, x as SettingsService } from "./messaging-CAY63kjk.js";
 //#region src/background/generations.ts
 /**
 * generations.ts
@@ -835,4 +835,4 @@ async function hydrateFromSession() {
 //#endregion
 export { tabGenerations as C, setTabGeneration as S, isModeCaptureAllowed as _, captureMap as a, getTabGeneration as b, incognitoTabIds as c, PermissionsService as d, hasAllSitesCoverage as f, reconcilePermissionsOnStartup as g, reconcilePermissionsOnRemoved as h, tabStates as i, registerCaptureListeners as l, patternFromOrigin as m, initLifecycle as n, clearInFlightCaptures as o, isBroadGrant as p, originAuthBaselines as r, inFlightRequests as s, hydrateFromSession as t, CapturePolicy as u, isRestrictedUrl as v, incrementTabGeneration as x, clearTabGenerations as y };
 
-//# sourceMappingURL=lifecycle-CVNvjeon.js.map
+//# sourceMappingURL=lifecycle-ko4hDJ18.js.map

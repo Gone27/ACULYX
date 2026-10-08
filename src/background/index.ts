@@ -36,6 +36,7 @@ import {
   getStorageResetEpoch,
   incrementStorageResetEpoch,
   setStorageResetEpoch,
+  onEpochChange,
 } from '../shared/storage';
 import { PortRegistry, portSend } from '../shared/messaging';
 import { BroadcastCoalescer, WriteBatcher } from '../shared/coalescer';
@@ -123,6 +124,10 @@ export class TabActionQueue {
 export const tabActionQueue = new TabActionQueue();
 export let currentResetEpoch = getStorageResetEpoch();
 
+onEpochChange((newEpoch: number): void => {
+  currentResetEpoch = newEpoch;
+});
+
 export function setCurrentResetEpoch(epoch: number): void {
   currentResetEpoch = epoch;
   setStorageResetEpoch(epoch);
@@ -208,7 +213,7 @@ const broadcastCoalescer = new BroadcastCoalescer<TabState>(
   (tabId, state) => portRegistry.broadcast(tabId, { type: 'TAB_STATE_UPDATE', state }),
   100,
 );
-const writeBatcher = new WriteBatcher(2);
+export const writeBatcher = new WriteBatcher(2);
 export const badgeTrackedTabs = new Set<number>();
 
 const pendingServiceWorkerReports = new Map<number, {
@@ -1109,9 +1114,11 @@ export async function executeResetAllData(): Promise<void> {
   clearTabGenerations();
 
   await clearBadgesOnAllTabs();
-  await LocalStorage.resetAllData();
+  await LocalStorage.resetAllData({ skipEpochIncrement: true });
   currentSettings = { ...DEFAULT_SETTINGS, monitoringMode: 'off' };
-  await SettingsService.updateSettings(currentSettings);
+  currentResetEpoch = getStorageResetEpoch();
+  await SettingsService.updateSettings(currentSettings, currentResetEpoch);
+  currentResetEpoch = getStorageResetEpoch();
 
   portRegistry.broadcastAll({
     type: 'SETTINGS_CHANGED',

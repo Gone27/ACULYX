@@ -1,7 +1,7 @@
-import { F as SEVERITY_ORDER, M as POPUP_PORT_NAME, i as LocalStorage, r as sendToBackground, w as SettingsService } from "./messaging-BvANQDmr.js";
-import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CVNvjeon.js";
+import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CAY63kjk.js";
+import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-ko4hDJ18.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-CaPqIvdZ.js";
+import { t as applyAppearance } from "./appearance-IYq7xGfR.js";
 //#region src/shared/filters.ts
 /**
 * Pure presentation selector to filter findings by allowed severity levels.
@@ -1144,4 +1144,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Dr1NtBvn.js.map
+//# sourceMappingURL=popup.html-PUFELy4X.js.map

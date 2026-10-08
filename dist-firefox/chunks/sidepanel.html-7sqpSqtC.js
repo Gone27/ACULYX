@@ -1,6 +1,6 @@
-import { I as SIDEPANEL_PORT_NAME, r as sendToBackground, u as registrableDomain } from "./messaging-BvANQDmr.js";
+import { L as SIDEPANEL_PORT_NAME, r as sendToBackground, s as registrableDomain } from "./messaging-CAY63kjk.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { n as bootstrapAppearance, t as applyAppearance } from "./appearance-CaPqIvdZ.js";
+import { n as bootstrapAppearance, t as applyAppearance } from "./appearance-IYq7xGfR.js";
 //#region node_modules/d3-force/src/center.js
 function center_default(x, y) {
 	var nodes, strength = 1;
@@ -1190,4 +1190,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 //#endregion
 
-//# sourceMappingURL=sidepanel.html-CJeRYMZo.js.map
+//# sourceMappingURL=sidepanel.html-7sqpSqtC.js.map

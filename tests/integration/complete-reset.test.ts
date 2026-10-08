@@ -148,6 +148,8 @@ import {
   onHopComplete,
   tabGenerations,
   badgeTrackedTabs,
+  currentResetEpoch,
+  writeBatcher,
 } from '../../src/background/index';
 import { tabStates, originAuthBaselines } from '../../src/background/lifecycle';
 import {
@@ -158,7 +160,8 @@ import {
 } from '../../src/background/capture';
 import type { PartialCapture } from '../../src/background/capture';
 import { CapturePolicy } from '../../src/background/capture-policy';
-import { LocalStorage, getStorageResetEpoch } from '../../src/shared/storage';
+import { SessionStorage, LocalStorage, getStorageResetEpoch } from '../../src/shared/storage';
+import { SettingsService } from '../../src/shared/settings';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 import type { TabState, AuthBaseline, Hop } from '../../src/shared/types';
 
@@ -626,5 +629,138 @@ describe('Complete Reset Integration', () => {
         k.startsWith('graph:'),
     );
     expect(localKeys).toHaveLength(0);
+  });
+
+  it('synchronizes background and storage epochs after reset and allows fresh post-reset capture to persist without worker restart', async () => {
+    // 1. Configure active monitoring before reset
+    CapturePolicy.setSnapshotForTesting({
+      ready: true,
+      revision: 1,
+      mode: 'all-sites',
+      broadGrantActive: true,
+      grantedOrigins: new Set(),
+    });
+
+    // 2. Perform full reset
+    await executeResetAllData();
+
+    // 3. Assert background epoch and storage epoch match exactly (no divergence!)
+    const finalStorageEpoch = getStorageResetEpoch();
+    expect(currentResetEpoch).toBe(finalStorageEpoch);
+
+    // 4. Re-enable monitoring to simulate normal post-reset usage
+    (chrome.permissions.getAll as Mock).mockResolvedValue({ origins: ['<all_urls>'] });
+    await SettingsService.updateSettings({
+      ...DEFAULT_SETTINGS,
+      monitoringMode: 'all-sites',
+    });
+    CapturePolicy.setSnapshotForTesting({
+      ready: true,
+      revision: 2,
+      mode: 'all-sites',
+      broadGrantActive: true,
+      grantedOrigins: new Set(['<all_urls>']),
+    });
+
+    // 5. Simulate a fresh post-reset capture on tab 55
+    const tabId = 55;
+    const origin = 'https://fresh-post-reset.com';
+    const postResetHop: Hop = {
+      requestId: 'post-reset-req-1',
+      url: `${origin}/dashboard`,
+      status: 200,
+      headers: {
+        'content-type': 'text/html',
+        'strict-transport-security': 'max-age=31536000; includeSubDomains',
+      },
+      rawHeaders: [
+        { name: 'Content-Type', value: 'text/html' },
+        { name: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+      ],
+      fromCache: false,
+      isHstsUpgrade: false,
+      capturedAt: 'onResponseStarted',
+      headersDiffer: false,
+      timestamp: Date.now(),
+      redirectCount: 0,
+    };
+
+    // Ensure tabs.get resolves incognito: false so it is positively regular
+    (chrome.tabs.get as Mock).mockResolvedValue({ id: tabId, incognito: false });
+
+    await onHopComplete(tabId, postResetHop);
+
+    // Flush writeBatcher and wait for persistence to settle
+    writeBatcher.flushNow(tabId);
+    await new Promise((r) => setTimeout(r, 60));
+
+    // 6. Assert that fresh post-reset state successfully persisted without restarting the worker!
+    expect(tabStates.has(tabId)).toBe(true);
+    expect(mockSessionStorageData[`tab:${tabId}`]).toBeDefined();
+
+    const savedState = await SessionStorage.getTabState(tabId);
+    expect(savedState).not.toBeNull();
+    expect(savedState?.tabId).toBe(tabId);
+
+    const history = await LocalStorage.getOriginHistory(origin);
+    expect(history.length).toBeGreaterThan(0);
+    expect(history[0]?.score).toBeDefined();
+  });
+
+  it('drains and invalidates concurrent SettingsService writes during reset, preserving default off settings', async () => {
+    // 1. Initial settings state: all-sites monitoring
+    await SettingsService.updateSettings({
+      ...DEFAULT_SETTINGS,
+      monitoringMode: 'all-sites',
+      retainHistoryDays: 30,
+    });
+
+    let pauseSettingsPromiseResolve!: () => void;
+    const pauseSettingsPromise = new Promise<void>((resolve) => {
+      pauseSettingsPromiseResolve = resolve;
+    });
+
+    let settingsWriteEntered = false;
+    (chrome.storage.local.set as Mock).mockImplementation(async (items: Record<string, unknown>) => {
+      // Pause specifically when saving settings with retainHistoryDays = 30
+      if ('settings' in items) {
+        const s = items['settings'] as { retainHistoryDays?: number };
+        if (s?.retainHistoryDays === 30) {
+          settingsWriteEntered = true;
+          await pauseSettingsPromise;
+        }
+      }
+      Object.assign(mockLocalStorageData, items);
+      return Promise.resolve();
+    });
+
+    // 2. Launch concurrent settings update that will pause inside set()
+    const delayedSettingsPromise = SettingsService.updateSettings({
+      ...DEFAULT_SETTINGS,
+      monitoringMode: 'all-sites',
+      retainHistoryDays: 30,
+    });
+
+    // Wait until set() is entered and paused
+    await vi.waitFor(() => {
+      expect(settingsWriteEntered).toBe(true);
+    });
+
+    // 3. Initiate full reset while the settings write is in flight
+    const resetPromise = executeResetAllData();
+
+    // Give a brief tick to ensure resetAllData is waiting in closeBarrierAndDrain
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 4. Resume the paused settings write
+    pauseSettingsPromiseResolve();
+
+    // Both operations must resolve cleanly
+    await Promise.all([delayedSettingsPromise, resetPromise]);
+
+    // 5. Verify default/off settings remain authoritative and were not overwritten by the delayed write
+    const finalSettings = await SettingsService.getSettings();
+    expect(finalSettings.monitoringMode).toBe('off');
+    expect(finalSettings.retainHistoryDays).toBe(DEFAULT_SETTINGS.retainHistoryDays);
   });
 });

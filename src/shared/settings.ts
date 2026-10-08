@@ -11,6 +11,11 @@
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
 import type { Severity, SettingsV2 } from './types';
+import {
+  storageWriteBarrier,
+  getStorageResetEpoch,
+  isStorageEpochStale,
+} from './write-barrier';
 
 // ---------------------------------------------------------------------------
 // Helpers: normalization and validation
@@ -404,7 +409,14 @@ export const SettingsService = {
           raw !== null &&
           (raw as Record<string, unknown>)['schemaVersion'] === 2;
         if (!hasSchemaV2) {
-          await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+          const opEpoch = getStorageResetEpoch();
+          if (!isStorageEpochStale(opEpoch)) {
+            await storageWriteBarrier.enter();
+            if (!isStorageEpochStale(opEpoch)) {
+              const writePromise = chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: migrated });
+              await storageWriteBarrier.track(writePromise);
+            }
+          }
         }
 
         cachedSettings = migrated;
@@ -464,14 +476,26 @@ export const SettingsService = {
   /**
    * Validates and applies a patch to current settings, writes to storage, and returns updated settings.
    */
-  async updateSettings(patch: Partial<SettingsV2>): Promise<SettingsV2> {
+  async updateSettings(patch: Partial<SettingsV2>, epoch?: number): Promise<SettingsV2> {
     ensureStorageListener();
+    const opEpoch = epoch ?? getStorageResetEpoch();
+    if (isStorageEpochStale(opEpoch)) {
+      return this.getCachedSettings();
+    }
+    await storageWriteBarrier.enter();
+    if (isStorageEpochStale(opEpoch)) {
+      return this.getCachedSettings();
+    }
+
     if (
       typeof chrome !== 'undefined' &&
       typeof chrome.storage !== 'undefined' &&
       typeof chrome.storage.local !== 'undefined'
     ) {
       const data = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+      if (isStorageEpochStale(opEpoch)) {
+        return this.getCachedSettings();
+      }
       const raw: unknown = data[STORAGE_KEYS.SETTINGS];
       if (
         typeof raw === 'object' &&
@@ -484,6 +508,9 @@ export const SettingsService = {
     }
 
     const current = await this.whenReady();
+    if (isStorageEpochStale(opEpoch)) {
+      return this.getCachedSettings();
+    }
     const merged = migrateSettings({ ...current, ...patch, schemaVersion: 2 });
 
     if (
@@ -491,7 +518,15 @@ export const SettingsService = {
       typeof chrome.storage !== 'undefined' &&
       typeof chrome.storage.local !== 'undefined'
     ) {
-      await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: merged });
+      if (isStorageEpochStale(opEpoch)) {
+        return this.getCachedSettings();
+      }
+      const setPromise = chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: merged });
+      await storageWriteBarrier.track(setPromise);
+    }
+
+    if (isStorageEpochStale(opEpoch)) {
+      return this.getCachedSettings();
     }
 
     return await settingsTransitionPipeline.transition(merged, 'storage');

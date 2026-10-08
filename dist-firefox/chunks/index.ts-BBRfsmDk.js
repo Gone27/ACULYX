@@ -1,5 +1,5 @@
-import { A as GRADE_THRESHOLDS, C as sanitizeUrlForStorage, D as settingsTransitionPipeline, I as SIDEPANEL_PORT_NAME, M as POPUP_PORT_NAME, N as RESTRICTED_SCHEMES, O as BADGE_COLORS, P as SCORE_VERSION, S as sanitizeEvidence, _ as originFromUrl, a as SessionStorage, c as setStorageResetEpoch, d as checkDuplicateHeaders, f as extractSetCookieHeaders, h as isSensitiveCookie, i as LocalStorage, k as DEFAULT_SETTINGS, l as checkSubdomainTrust, n as portSend, o as getStorageResetEpoch, p as hasCspBypassProtection, s as incrementStorageResetEpoch, t as PortRegistry, u as registrableDomain, v as parseCspDirectives, w as SettingsService, x as sanitizeCspPolicyForStorage } from "./messaging-BvANQDmr.js";
-import { C as tabGenerations, S as setTabGeneration, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-CVNvjeon.js";
+import { A as DEFAULT_SETTINGS, D as onEpochChange, E as incrementStorageResetEpoch, F as SCORE_VERSION, L as SIDEPANEL_PORT_NAME, N as POPUP_PORT_NAME, O as setStorageResetEpoch, P as RESTRICTED_SCHEMES, T as getStorageResetEpoch, a as SessionStorage, b as sanitizeUrlForStorage, c as checkDuplicateHeaders, f as isSensitiveCookie, h as parseCspDirectives, i as LocalStorage, j as GRADE_THRESHOLDS, k as BADGE_COLORS, l as extractSetCookieHeaders, m as originFromUrl, n as portSend, o as checkSubdomainTrust, s as registrableDomain, t as PortRegistry, u as hasCspBypassProtection, v as sanitizeCspPolicyForStorage, w as settingsTransitionPipeline, x as SettingsService, y as sanitizeEvidence } from "./messaging-CAY63kjk.js";
+import { C as tabGenerations, S as setTabGeneration, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-ko4hDJ18.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -3719,6 +3719,9 @@ var TabActionQueue = class {
 };
 var tabActionQueue = new TabActionQueue();
 var currentResetEpoch = getStorageResetEpoch();
+onEpochChange((newEpoch) => {
+	currentResetEpoch = newEpoch;
+});
 function setCurrentResetEpoch(epoch) {
 	currentResetEpoch = epoch;
 	setStorageResetEpoch(epoch);
@@ -4323,12 +4326,14 @@ async function executeResetAllData() {
 	incognitoTabIds.clear();
 	clearTabGenerations();
 	await clearBadgesOnAllTabs();
-	await LocalStorage.resetAllData();
+	await LocalStorage.resetAllData({ skipEpochIncrement: true });
 	currentSettings = {
 		...DEFAULT_SETTINGS,
 		monitoringMode: "off"
 	};
-	await SettingsService.updateSettings(currentSettings);
+	currentResetEpoch = getStorageResetEpoch();
+	await SettingsService.updateSettings(currentSettings, currentResetEpoch);
+	currentResetEpoch = getStorageResetEpoch();
 	portRegistry.broadcastAll({
 		type: "SETTINGS_CHANGED",
 		settings: currentSettings
@@ -4790,6 +4795,6 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 	});
 });
 //#endregion
-export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, currentResetEpoch, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, recordThirdPartyBlocked, resolveTabPrivacy, sessionHydrationReady, setCurrentResetEpoch, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations };
+export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, currentResetEpoch, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, recordThirdPartyBlocked, resolveTabPrivacy, sessionHydrationReady, setCurrentResetEpoch, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations, writeBatcher };
 
-//# sourceMappingURL=index.ts-zMNMkIgO.js.map
+//# sourceMappingURL=index.ts-BBRfsmDk.js.map
