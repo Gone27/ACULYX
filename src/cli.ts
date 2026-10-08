@@ -309,7 +309,7 @@ export function formatSarif(report: CliReport): SarifLog {
         driver: {
           name: 'ACULYX',
           version: packageInfo.version,
-          informationUri: 'https://github.com/Gone27/Cookie-and-header-reader-extention',
+          informationUri: 'https://github.com/Gone27/ACULYX',
           rules: ruleList.map(([ruleId, finding]) => ({
             id: ruleId,
             name: ruleId,

@@ -166,7 +166,7 @@ tests/
 ACULYX is developed, authored, and owned by **Dhyan Patel**.
 
 - **Author**: Dhyan Patel
-- **Official Repository**: [github.com/Gone27/Cookie-and-header-reader-extention](https://github.com/Gone27/Cookie-and-header-reader-extention)
+- **Official Repository**: [github.com/Gone27/ACULYX](https://github.com/Gone27/ACULYX)
 - **Provenance Record**: See [`docs/PROVENANCE.md`](docs/PROVENANCE.md) for cryptographic asset checksums and build verification instructions.
 
 ---

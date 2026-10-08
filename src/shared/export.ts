@@ -103,7 +103,7 @@ export function generateSarif(state: TabState): SarifLog {
           driver: {
             name: 'ACULYX',
             version: '2.0.0',
-            informationUri: 'https://github.com/Gone27/Cookie-and-header-reader-extention',
+            informationUri: 'https://github.com/Gone27/ACULYX',
             rules: ruleList.map(([ruleId, finding]) => ({
               id: ruleId,
               name: ruleId,

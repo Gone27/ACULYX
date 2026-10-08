@@ -2,7 +2,7 @@
 
 **Author & Copyright Owner**: Dhyan Patel  
 **Product**: ACULYX — Header & Cookie Security Checker  
-**Canonical Repository**: `https://github.com/Gone27/Cookie-and-header-reader-extention`  
+**Canonical Repository**: `https://github.com/Gone27/ACULYX`  
 **License**: Apache-2.0 (Code) | Proprietary Trademark & Brand Assets (Dhyan Patel)
 
 ---
@@ -33,8 +33,8 @@ The master visual identity assets were created by Dhyan Patel and recorded with 
 ## 3. Official Release Verification & Integrity
 
 Official binary builds of ACULYX for Chrome and Firefox are published from tagged commits on GitHub:
-- **Repository**: `https://github.com/Gone27/Cookie-and-header-reader-extention`
-- **Releases**: `https://github.com/Gone27/Cookie-and-header-reader-extention/releases`
+- **Repository**: `https://github.com/Gone27/ACULYX`
+- **Releases**: `https://github.com/Gone27/ACULYX/releases`
 
 Every official release artifact includes:
 1. Git release tag signed by the author.

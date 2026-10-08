@@ -59,4 +59,4 @@ ACULYX is open source under the Apache 2.0 license. You can audit the codebase d
 For questions regarding this privacy policy or ACULYX security practices:
 - **Author & Maintainer:** Dhyan Patel
 - **Email:** Dhyanpatel884@gmail.com
-- **Repository:** https://github.com/Gone27/Cookie-and-header-reader-extention
+- **Repository:** https://github.com/Gone27/ACULYX
