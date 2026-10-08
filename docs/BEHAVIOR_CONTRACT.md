@@ -1,6 +1,6 @@
-# SecCheck Authoritative Behavior Contract: Modes, Permissions, Capture Gating, Runtime Architecture, and Data Lifecycle
+# ACULYX Authoritative Behavior Contract: Modes, Permissions, Capture Gating, Runtime Architecture, and Data Lifecycle
 
-This document is the binding architectural and behavioral specification for SecCheck (Header & Cookie Security Checker) across all workstreams (WS0 through WS7). All extension components—including the background service worker, content scripts, popup, Options page, side panel, sandbox proof-of-concept generators, and standalone CLI—must strictly adhere to the contracts, state transitions, and invariants defined herein.
+This document is the binding architectural and behavioral specification for ACULYX (Header & Cookie Security Checker) across all workstreams (WS0 through WS7). All extension components—including the background service worker, content scripts, popup, Options page, side panel, sandbox proof-of-concept generators, and standalone CLI—must strictly adhere to the contracts, state transitions, and invariants defined herein.
 
 ---
 
@@ -20,7 +20,7 @@ This document is the binding architectural and behavioral specification for SecC
 
 ## 2. Monitoring Mode & Permission Contract
 
-SecCheck operates in one of three mutually exclusive monitoring modes: `per-site`, `all-sites`, and `off`.
+ACULYX operates in one of three mutually exclusive monitoring modes: `per-site`, `all-sites`, and `off`.
 
 | Mode | Runtime Capture Behavior | Permission & UI Contract |
 | :--- | :--- | :--- |
@@ -330,9 +330,9 @@ When the user updates custom cookie classifications (`sensitiveCookieNames` or `
 |                  [ 7. Standalone CLI (Independent Tool) ]               |
 |                                                                         |
 |  Independent Inputs:                                                    |
-|  - Target URL:        `seccheck --url <url>` (Explicit Network Fetch)   |
-|  - Offline HAR:       `seccheck --har <path.har>`                       |
-|  - Raw JSON Input:    `seccheck --input <path.json>`                    |
+|  - Target URL:        `aculyx --url <url>` (Explicit Network Fetch)     |
+|  - Offline HAR:       `aculyx --har <path.har>`                         |
+|  - Raw JSON Input:    `aculyx --input <path.json>`                      |
 |                                                                         |
 |                                   |                                     |
 |                                   v                                     |

@@ -132,7 +132,7 @@ export function assertNoSensitiveSecrets(state: TabState): void {
     for (const cookie of state.cookies) {
       if ('value' in cookie) {
         throw new Error(
-          `[SecCheck] Cookie value detected on ${cookie.name} — storage aborted.`
+          `[ACULYX] Cookie value detected on ${cookie.name} — storage aborted.`
         );
       }
     }
@@ -141,11 +141,11 @@ export function assertNoSensitiveSecrets(state: TabState): void {
   const checkUrlStr = (urlStr: string | null | undefined, context: string): void => {
     if (urlStr === null || urlStr === undefined || urlStr === '') return;
     if (urlStr.includes('?')) {
-      throw new Error(`[SecCheck] Unredacted query string detected in ${context} — storage aborted.`);
+      throw new Error(`[ACULYX] Unredacted query string detected in ${context} — storage aborted.`);
     }
     const match = urlStr.match(/:\/\/[^@/]+@/);
     if (match !== null) {
-      throw new Error(`[SecCheck] Unredacted credentials detected in ${context} — storage aborted.`);
+      throw new Error(`[ACULYX] Unredacted credentials detected in ${context} — storage aborted.`);
     }
 
     const checkSegments = (segments: string[]): void => {
@@ -162,13 +162,13 @@ export function assertNoSensitiveSecrets(state: TabState): void {
         const isEmail = /@/.test(seg);
 
         if (isUuid || isJwt || isLongOpaque || isEmail) {
-          throw new Error(`[SecCheck] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
+          throw new Error(`[ACULYX] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
         }
       }
     };
 
     if (urlStr.includes('#')) {
-      throw new Error(`[SecCheck] Unredacted URL fragment detected in ${context} — storage aborted.`);
+      throw new Error(`[ACULYX] Unredacted URL fragment detected in ${context} — storage aborted.`);
     }
 
     const tokens = urlStr.split(/[\s;]+/).filter(Boolean);
@@ -214,11 +214,11 @@ export function assertNoSensitiveSecrets(state: TabState): void {
         const lower = k.toLowerCase();
         if (lower === 'set-cookie' || lower === 'cookie') {
           if (hasUnredactedCookieValue(v, lower === 'set-cookie')) {
-            throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+            throw new Error(`[ACULYX] Unredacted ${k} header detected in ${context} — storage aborted.`);
           }
         } else if (lower === 'authorization' || lower === 'proxy-authorization') {
           if (v !== '[REDACTED]' && v !== '[redacted]') {
-            throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+            throw new Error(`[ACULYX] Unredacted ${k} header detected in ${context} — storage aborted.`);
           }
         }
       }
@@ -229,11 +229,11 @@ export function assertNoSensitiveSecrets(state: TabState): void {
         const lower = h.name.toLowerCase();
         if (lower === 'set-cookie' || lower === 'cookie') {
           if (hasUnredactedCookieValue(h.value, lower === 'set-cookie')) {
-            throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+            throw new Error(`[ACULYX] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
           }
         } else if (lower === 'authorization' || lower === 'proxy-authorization') {
           if (h.value !== '[REDACTED]' && h.value !== '[redacted]') {
-            throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+            throw new Error(`[ACULYX] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
           }
         }
       }

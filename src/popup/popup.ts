@@ -1,5 +1,5 @@
 /**
- * popup.ts — SecCheck popup logic
+ * popup.ts — ACULYX popup logic
  *
  * Rules enforced here:
  *  - ZERO innerHTML / outerHTML / insertAdjacentHTML
@@ -1094,7 +1094,7 @@ function wireExportButton(): void {
     } catch { /* leave as 'unknown' */ }
 
     const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const filename = `seccheck-${hostname}-${date}.json`;
+    const filename = `aculyx-${hostname}-${date}.json`;
 
     // Trigger download via a synthetic anchor click
     const a = document.createElement('a');
@@ -1120,7 +1120,7 @@ function generateMarkdownReport(state: TabState): string {
   md += `**Configuration Quality:** ${state.qualityGrade ?? 'A'} (${state.qualityScore ?? 100} / 100)  \n\n`;
 
   md += `## Executive Summary\n`;
-  md += `SecCheck conducted an automated, passive inspection of HTTP response headers and cookies for \`${state.origin}\`.\n\n`;
+  md += `ACULYX conducted an automated, passive inspection of HTTP response headers and cookies for \`${state.origin}\`.\n\n`;
 
   if (state.subdomainTrust.hasEscalationPath) {
     md += `> ⚠️ **Subdomain Escalation Path Detected:** Trust bridges exist between this site and its subdomains that could allow a compromised subdomain to compromise main-domain sessions or data.\n\n`;
@@ -1151,7 +1151,7 @@ function generateMarkdownReport(state: TabState): string {
     md += `\n`;
   }
 
-  md += `---\n*Generated locally by SecCheck Security Extension*\n`;
+  md += `---\n*Generated locally by ACULYX - Header & Cookie Security Checker*\n`;
   return md;
 }
 

@@ -1,7 +1,7 @@
-import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CAY63kjk.js";
-import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-ko4hDJ18.js";
+import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CTMeVYaN.js";
+import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CQzmjg6F.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-IYq7xGfR.js";
+import { t as applyAppearance } from "./appearance-Cjc7_Dji.js";
 //#region src/shared/filters.ts
 /**
 * Pure presentation selector to filter findings by allowed severity levels.
@@ -814,7 +814,7 @@ function wireExportButton() {
 			hostname = new URL(currentState.origin).hostname;
 		} catch {}
 		const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-		const filename = `seccheck-${hostname}-${date}.json`;
+		const filename = `aculyx-${hostname}-${date}.json`;
 		const a = document.createElement("a");
 		a.href = url;
 		a.download = filename;
@@ -832,7 +832,7 @@ function generateMarkdownReport(state) {
 	md += `**Overall Security Grade:** **${state.grade}** (${state.score} / 100)  \n\n`;
 	md += `**Configuration Quality:** ${state.qualityGrade ?? "A"} (${state.qualityScore ?? 100} / 100)  \n\n`;
 	md += `## Executive Summary\n`;
-	md += `SecCheck conducted an automated, passive inspection of HTTP response headers and cookies for \`${state.origin}\`.\n\n`;
+	md += `ACULYX conducted an automated, passive inspection of HTTP response headers and cookies for \`${state.origin}\`.\n\n`;
 	if (state.subdomainTrust.hasEscalationPath) md += `> ⚠️ **Subdomain Escalation Path Detected:** Trust bridges exist between this site and its subdomains that could allow a compromised subdomain to compromise main-domain sessions or data.\n\n`;
 	md += `## Key Findings (${state.findings.length} total)\n\n`;
 	if (state.findings.length === 0) md += `No security weaknesses detected. All standard headers and cookie protections are configured properly.\n\n`;
@@ -854,7 +854,7 @@ function generateMarkdownReport(state) {
 		}
 		md += `\n`;
 	}
-	md += `---\n*Generated locally by SecCheck Security Extension*\n`;
+	md += `---\n*Generated locally by ACULYX - Header & Cookie Security Checker*\n`;
 	return md;
 }
 function wireCopyReportButton() {
@@ -1144,4 +1144,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-PUFELy4X.js.map
+//# sourceMappingURL=popup.html-DrmMCqw-.js.map

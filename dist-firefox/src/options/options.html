@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SecCheck — Settings</title>
-  <script type="module" crossorigin src="/chunks/options.html-DdNBbWX9.js"></script>
-  <link rel="modulepreload" crossorigin href="/chunks/messaging-CAY63kjk.js">
-  <link rel="modulepreload" crossorigin href="/chunks/lifecycle-ko4hDJ18.js">
+  <title>ACULYX — Settings</title>
+  <script type="module" crossorigin src="/chunks/options.html-R7Z75edD.js"></script>
+  <link rel="modulepreload" crossorigin href="/chunks/messaging-CTMeVYaN.js">
+  <link rel="modulepreload" crossorigin href="/chunks/lifecycle-CQzmjg6F.js">
   <link rel="modulepreload" crossorigin href="/chunks/modulepreload-polyfill-BsPm7yBB.js">
-  <link rel="modulepreload" crossorigin href="/chunks/appearance-IYq7xGfR.js">
+  <link rel="modulepreload" crossorigin href="/chunks/appearance-Cjc7_Dji.js">
   <link rel="stylesheet" crossorigin href="/assets/appearance-B4qCr-e8.css">
-  <link rel="stylesheet" crossorigin href="/assets/options-RheM8tAP.css">
+  <link rel="stylesheet" crossorigin href="/assets/options-NWi_d-BS.css">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <!-- ── Sidebar navigation ─────────────────────────────────────── -->
     <nav class="settings-nav" role="navigation" aria-label="Settings sections">
       <div class="nav-brand">
-        <span class="brand brand-name">SecCheck</span>
+        <span class="brand brand-name">ACULYX</span>
         <span class="brand-sub">Settings</span>
       </div>
 
@@ -108,7 +108,7 @@
             class="nav-item"
             data-section="about"
             role="menuitem"
-            title="About &amp; Privacy"
+            title="About, Privacy &amp; Copyright"
           >
             <span class="nav-icon" aria-hidden="true">ℹ</span>
             <span class="nav-label">About</span>
@@ -206,7 +206,7 @@
 
         <!-- Version / privacy badge -->
         <div class="home-footer-row">
-          <span class="home-version-badge" id="home-version-badge">SecCheck v—</span>
+          <span class="home-version-badge" id="home-version-badge">ACULYX v—</span>
           <span class="home-privacy-badge">Analysis is local — nothing leaves your device</span>
         </div>
       </section>
@@ -216,7 +216,7 @@
            ════════════════════════════════════════════════════════════ -->
       <section class="settings-section" id="section-monitoring" hidden aria-labelledby="heading-monitoring">
         <h2 class="section-title" id="heading-monitoring">Monitoring &amp; Permissions</h2>
-        <p class="section-desc">Choose which sites SecCheck actively inspects HTTP headers and cookies on.</p>
+        <p class="section-desc">Choose which sites ACULYX actively inspects HTTP headers and cookies on.</p>
 
         <fieldset class="radio-group" id="monitoring-mode-group">
           <legend class="sr-only">Monitoring mode</legend>
@@ -500,31 +500,68 @@
       </section>
 
       <!-- ════════════════════════════════════════════════════════════
-           SECTION: About & Privacy
+           SECTION: About, Privacy & Copyright
            ════════════════════════════════════════════════════════════ -->
       <section class="settings-section" id="section-about" hidden aria-labelledby="heading-about">
-        <h2 class="section-title" id="heading-about">About &amp; Privacy</h2>
+        <h2 class="section-title" id="heading-about">About, Privacy &amp; Copyright</h2>
+
+        <div class="about-hero">
+          <img src="/assets/aculyx-wordmark-CWKKwQIw.png" alt="ACULYX: Header &amp; Cookie Security Checker" class="about-logo" width="340">
+          <p class="about-descriptor">Passive HTTP Header &amp; Cookie Security Analysis</p>
+        </div>
 
         <div class="about-block">
+          <div class="about-row">
+            <span class="about-label">Product</span>
+            <span class="about-value"><strong>ACULYX</strong> — Header &amp; Cookie Security Checker</span>
+          </div>
           <div class="about-row">
             <span class="about-label">Version</span>
             <span class="about-value" id="about-version">—</span>
           </div>
           <div class="about-row">
+            <span class="about-label">Author &amp; Owner</span>
+            <span class="about-value"><strong>Dhyan Patel</strong></span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Copyright</span>
+            <span class="about-value">Copyright &copy; 2024&ndash;2026 Dhyan Patel. All rights reserved.</span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Software license</span>
+            <span class="about-value">
+              Open source under the <strong>Apache License, Version 2.0</strong>. The underlying source code is fully auditable and verifiable.
+            </span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Brand &amp; trademark</span>
+            <span class="about-value">
+              <strong>ACULYX</strong>, the katana wordmark, and related brand marks are proprietary brand assets and trademarks of Dhyan Patel. The Apache 2.0 software license does not grant trademark or brand rights to use the ACULYX name or logo.
+            </span>
+          </div>
+          <div class="about-row">
             <span class="about-label">Data policy</span>
             <span class="about-value">
-              All analysis is performed <strong>entirely on your device</strong>. No header values, cookie names, URLs, or findings are ever transmitted to any server.
+              All analysis is performed <strong>entirely on your device</strong>. No header values, cookie names, URLs, or findings are ever transmitted to any server. Cookie values are never accessed, persisted, or exported.
             </span>
           </div>
           <div class="about-row">
             <span class="about-label">Network policy</span>
             <span class="about-value">
-              Extension pages enforce <code>connect-src 'none'</code> — the extension UI cannot make any outbound network requests.
+              Extension pages enforce <code>connect-src 'none'</code> &mdash; the extension UI cannot initiate any outbound network requests.
             </span>
           </div>
           <div class="about-row">
-            <span class="about-label">Source code</span>
-            <span class="about-value about-value--mono" id="about-source">github.com/Gone27/Cookie-and-header-reader-extention</span>
+            <span class="about-label">Official source</span>
+            <span class="about-value">
+              <a href="https://github.com/Gone27/Cookie-and-header-reader-extention" target="_blank" rel="noopener noreferrer" class="about-value--mono" id="about-source">github.com/Gone27/Cookie-and-header-reader-extention</a>
+            </span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Provenance</span>
+            <span class="about-value">
+              Official releases are signed and verifiable against tagged repository commits and published build attestations.
+            </span>
           </div>
         </div>
       </section>

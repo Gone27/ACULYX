@@ -16,7 +16,7 @@ import fixes from '../fixes.json';
 import packageInfo from '../package.json';
 import weights from '../src/rules/weights.json';
 
-describe('SecCheck CLI report', () => {
+describe('ACULYX CLI report', () => {
   it('attaches a rule-specific fix snippet to findings', () => {
     const report = buildCliReport({ url: 'https://example.com', headers: {} });
     const cspFinding = report.findings.find((finding) => finding.ruleId === 'CSP-001');
@@ -131,7 +131,7 @@ describe('SecCheck CLI report', () => {
     const run = sarif.runs[0];
 
     expect(sarif.version).toBe('2.1.0');
-    expect(run?.tool.driver).toMatchObject({ name: 'SecCheck', version: packageInfo.version });
+    expect(run?.tool.driver).toMatchObject({ name: 'ACULYX', version: packageInfo.version });
     expect(run?.results.length).toBeGreaterThan(0);
     expect(run?.results[0]).toHaveProperty('locations');
     expect(run?.tool.driver.rules.length).toBeGreaterThan(0);

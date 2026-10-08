@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notice": "Examples only. Review each change against the application's requirements before applying; SecCheck never edits server files.",
+  "notice": "Examples only. Review each change against the application's requirements before applying; ACULYX never edits server files.",
   "rules": {
     "HSTS-001": {
       "summary": "Enable HSTS for HTTPS responses.",
@@ -25,7 +25,7 @@
     "HSTS-005": {
       "summary": "Review HSTS preload if broad HTTPS enforcement is appropriate.",
       "snippet": "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
-      "note": "SecCheck checks basic response directives only and does not check the public preload list."
+      "note": "ACULYX checks basic response directives only and does not check the public preload list."
     },
     "CSP-001": {
       "summary": "Start with a restrictive Content Security Policy.",
@@ -63,7 +63,7 @@
     "CSP-008": {
       "summary": "Send CSP as a response header and review the meta policy separately.",
       "snippet": "Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'",
-      "note": "The detected meta policy contents are not evaluated by SecCheck."
+      "note": "The detected meta policy contents are not evaluated by ACULYX."
     },
     "CSP-009": {
       "summary": "Review bypass-prone script hosts and remove any that are not required.",

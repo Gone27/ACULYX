@@ -1,5 +1,5 @@
 /**
- * options.ts — SecCheck options page logic (Phase 3 redesign)
+ * options.ts — ACULYX options page logic
  *
  * Rules enforced here:
  *  - ZERO innerHTML / outerHTML / insertAdjacentHTML
@@ -86,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof chrome !== 'undefined' && typeof chrome.runtime !== 'undefined') {
     const manifest = chrome.runtime.getManifest();
     const versionEl = document.getElementById('home-version-badge');
-    if (versionEl) versionEl.textContent = `SecCheck v${manifest.version}`;
+    if (versionEl) versionEl.textContent = `ACULYX v${manifest.version}`;
     const aboutEl = document.getElementById('about-version');
     if (aboutEl) aboutEl.textContent = manifest.version;
   }
@@ -711,7 +711,7 @@ function wireDataManagement(): void {
   });
 
   btnClearAll.addEventListener('click', () => {
-    if (!confirm('Reset ALL local SecCheck data? This cannot be undone.')) return;
+    if (!confirm('Reset ALL local ACULYX data? This cannot be undone.')) return;
     void sendToBackground({ type: 'RESET_ALL_DATA' })
       .then(() => {
         showDataStatus('All data reset. Reloading…');

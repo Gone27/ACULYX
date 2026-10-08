@@ -278,14 +278,14 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       // 1. Visit options page and verify evaluation mode label
       const optionsPage = await context.newPage();
       await optionsPage.goto(`chrome-extension://${extensionId}/src/options/options.html`);
-      await expect(optionsPage.locator('.brand')).toContainText('SecCheck');
+      await expect(optionsPage.locator('.brand')).toContainText('ACULYX');
       await expect(optionsPage.locator('#section-pro')).toContainText('Evaluation Mode');
       await optionsPage.close();
 
       // 2. Visit popup page and verify UI elements
       const popupPage = await context.newPage();
       await popupPage.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-      await expect(popupPage.locator('.popup-title')).toContainText('SecCheck');
+      await expect(popupPage.locator('.popup-title')).toContainText('ACULYX');
       await expect(popupPage.locator('#settings-link')).toBeVisible();
       await expect(popupPage.locator('#open-graph-btn')).toBeAttached();
       await popupPage.close();

@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Security Checker</title>
+  <title>ACULYX</title>
   <link rel="stylesheet" href="../shared/design-tokens.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <!-- Header bar -->
   <header class="popup-header" role="banner">
-    <span class="popup-title">SecCheck</span>
+    <span class="popup-title">ACULYX</span>
     <a href="" id="settings-link" class="settings-icon" title="Settings" aria-label="Extension Settings">⚙</a>
   </header>
 
   <!-- 5. Onboarding Card (first-time visitors) -->
-  <div class="onboarding-card" id="onboarding-card" hidden role="region" aria-label="Welcome to SecCheck">
+  <div class="onboarding-card" id="onboarding-card" hidden role="region" aria-label="Welcome to ACULYX">
     <div class="onboarding-header">
-      <span class="onboarding-title">🛡️ Welcome to SecCheck</span>
+      <span class="onboarding-title">🛡️ Welcome to ACULYX</span>
       <button class="onboarding-close-btn" id="onboarding-close-btn" title="Dismiss" aria-label="Dismiss onboarding">✕</button>
     </div>
     <p class="onboarding-text">
@@ -62,7 +62,7 @@
 
   <!-- State-specific messages (CSS shows only the active one) -->
   <div class="state-message state-not-monitored">
-    <p>SecCheck is not monitoring this site.</p>
+    <p>ACULYX is not monitoring this site.</p>
   </div>
   <div class="state-message state-permission-denied">
     <p>Permission was denied. Click "Monitor this site" to try again.</p>
@@ -155,7 +155,7 @@
 
   <!-- Footer with export actions -->
   <footer class="popup-footer" role="contentinfo">
-    <span class="privacy-note">Analysis is local — nothing leaves your device.</span>
+    <span class="privacy-note">ACULYX analysis is local — nothing leaves your device.</span>
     <div class="export-actions" id="export-actions">
       <!-- 4. Export JSON & Copy Markdown report buttons -->
       <button class="export-btn" id="export-btn" hidden aria-label="Export findings as JSON">Export JSON</button>

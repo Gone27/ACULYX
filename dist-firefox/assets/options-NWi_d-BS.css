@@ -1,5 +1,5 @@
 /* =============================================================
-   SecCheck Options page styles
+   ACULYX Options page styles
    Matches the dark theme used by the popup.
    ============================================================= */
 
@@ -927,11 +927,40 @@ body {
 .grade-f { background: var(--sc-grade-f); }
 
 /* ── About section ───────────────────────────────────────────────── */
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 16px;
+  margin-bottom: 24px;
+  background: var(--sc-bg-card, var(--bg-card));
+  border: 1px solid var(--sc-border, var(--border));
+  border-radius: var(--sc-radius-lg);
+}
+.about-logo {
+  max-width: 320px;
+  width: 100%;
+  height: auto;
+  border-radius: var(--sc-radius-md);
+  margin-bottom: 12px;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
+}
+.about-descriptor {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sc-accent, #6366f1);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 0;
+}
 .about-block { display: flex; flex-direction: column; gap: 16px; }
-.about-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; font-size: 13px; }
+.about-row { display: grid; grid-template-columns: 160px 1fr; gap: 12px; font-size: 13px; }
 .about-label { font-weight: 600; color: var(--sc-text-muted, var(--text-muted)); }
 .about-value { color: var(--sc-text, var(--text)); line-height: 1.6; }
 .about-value--mono { font-family: var(--sc-font-mono); font-size: 12px; word-break: break-all; color: var(--sc-text-code); }
+.about-value a { color: var(--sc-accent); text-decoration: none; }
+.about-value a:hover { text-decoration: underline; }
 
 /* ── Unsaved changes dialog ──────────────────────────────────────── */
 dialog {

@@ -1,6 +1,6 @@
 # Manual QA Verification Checklist
 
-This document provides a comprehensive manual QA checklist for the SecCheck extension to ensure features behave as expected across Edge Cases, MV3 Lifecycle limits, and Privacy requirements.
+This document provides a comprehensive manual QA checklist for the ACULYX extension to ensure features behave as expected across Edge Cases, MV3 Lifecycle limits, and Privacy requirements.
 
 ## 1. Permission and UI Flow
 - [ ] **Native consent UI**

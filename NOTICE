@@ -1,0 +1,32 @@
+ACULYX: Header & Cookie Security Checker
+Copyright 2024–2026 Dhyan Patel
+
+This product includes software developed and authored by Dhyan Patel.
+
+========================================================================
+TRADEMARK & BRAND ASSET NOTICE
+========================================================================
+
+"ACULYX", the ACULYX katana logo, and associated visual design assets
+are trademarks and proprietary brand assets of Dhyan Patel.
+
+The Apache License, Version 2.0 (the "License") governing the underlying
+source code and software does NOT grant permission to use the trade names,
+trademarks, service marks, or product names of the Licensor, except as
+required for reasonable and customary use in describing the origin of
+the Work and reproducing the content of this NOTICE file.
+
+Derivative works, forks, and redistributions must not use the name
+"ACULYX" or the ACULYX logo to endorse, promote, or identify such
+derivative products without prior express written permission from
+Dhyan Patel.
+
+========================================================================
+ATTRIBUTION & THIRD-PARTY NOTICES
+========================================================================
+
+This project incorporates the following open-source dependencies:
+- csp_evaluator (Apache-2.0) - Copyright Google LLC
+- d3-force (ISC) - Copyright Mike Bostock
+- vite (MIT) - Copyright Yuxi (Evan) You and Vite contributors
+- vitest (MIT) - Copyright Anthony Fu and Vitest contributors

@@ -6,6 +6,9 @@
   "engines": {
     "node": "^22.12.0 || >=24.0.0"
   },
+  "description": "ACULYX: Header & Cookie Security Checker",
+  "author": "Dhyan Patel",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -14,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "aculyx": "tsx src/cli.ts",
     "seccheck": "tsx src/cli.ts",
     "lint": "eslint src tests",
     "lint:fix": "eslint src tests --fix"

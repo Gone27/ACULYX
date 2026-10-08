@@ -1,190 +1,177 @@
-# Header & Cookie Security Checker
+<p align="center">
+  <img src="docs/assets/aculyx-wordmark.png" alt="ACULYX: Header & Cookie Security Checker" width="700">
+</p>
 
-A Chrome (Manifest V3) extension that passively observes security headers and cookies as you browse, reports findings in real time, and keeps everything local — nothing leaves your device.
+<p align="center">
+  <strong>Passive HTTP Header &amp; Cookie Security Analysis for Chromium &amp; Firefox</strong><br>
+  <em>Created and authored by Dhyan Patel</em>
+</p>
 
-Since analysis observes the browser's own responses, it can inspect pages you reach after signing in, once you grant access to that origin. It does not bypass authentication or crawl unvisited pages.
+<p align="center">
+  <a href="#features">Features</a> &bull;
+  <a href="#privacy--zero-telemetry">Privacy</a> &bull;
+  <a href="#cli-usage">CLI</a> &bull;
+  <a href="#development--testing">Development</a> &bull;
+  <a href="#license--trademark">License</a> &bull;
+  <a href="docs/PROVENANCE.md">Provenance</a>
+</p>
 
-## Main Features
+---
 
-- **Live In-Browser Analysis**: Audits headers and cookies in real-time as you navigate. Inspects authenticated pages locally without requiring external crawls or bypassing authentication.
-- **Two-Stage Redirect Tracking**: Captures headers before and after browser processing to detect internal HSTS upgrades and redirect degradation (headers present on one hop but dropped on the next).
-- **Cookie Jar Correlation (Phase 2)**: Correlates `Set-Cookie` response headers with the live browser cookie jar. Cookies present in the jar but absent from the current response's headers are marked as **unknown origin** (possibly JS-set or set by a prior navigation). Also detects CHIPS (partitioning) and persistence issues, without ever storing sensitive cookie values.
-- **Cookie Name Overrides**: Customise sensitive/ignored cookie heuristics via the extension's options page.
-- **Scoring & Historical Trends**: Computes a strict A-F grade with penalties based on a versioned weighting model. Tracks per-origin score trends over time in a local graphical timeline.
-- **CLI & CI Integrations**: Export findings to JSON, Markdown, or GitHub-compatible SARIF 2.1.0 formats. Supports offline HAR file analysis and CI severity thresholds (`--fail-on high`).
-- **Zero-Telemetry Privacy**: Analysis is completely local. The extension uses `connect-src 'none'` to guarantee no data leaves the browser.
+## Overview
 
+**ACULYX** is a local-first, privacy-preserving browser extension built on Manifest V3 for Chromium and Firefox. It passively inspects HTTP security headers, cookie attributes, and subresource API communications as you browse, computing a real-time security grade and actionable remediation guidance without sending any data off your machine.
 
-- **Cache Checks**: Ensures responses setting cookies enforce Cache-Control: no-store.
-- **Coverage Indicator**: Tracks expected vs captured hops to show if service workers or caches intercepted traffic.
-- **Configuration-Quality Sub-Score**: Separates security risks from best-practice hygiene in the UI.
-- **Audit Exports & HAR Import**: Export findings to JSON, Markdown, or SARIF. Import offline HAR files with Set-Cookie redaction.
-- **CSP Host Heuristics**: Warns on allowlisted hosts known to host JSONP endpoints or angular libraries.
+Because ACULYX evaluates traffic within the browser's own authenticated network context, it audits internal endpoints, dashboards, and logged-in states without requiring credential storage, active crawling, or synthetic penetration probes.
 
-## Main Rules Evaluated
+---
 
-The engine evaluates responses against over a dozen targeted security rules. Key checks include:
+## Features
 
-- **Transport Security (HSTS)**: Checks for `Strict-Transport-Security`, `includeSubDomains`, and ensures `max-age` is sufficient for preload readiness.
-- **Content Security (CSP)**: Flags missing policies, `unsafe-inline`/`unsafe-eval` in script directives, wildcard origins, and missing framing (`frame-ancestors`) or `base-uri` protections. Warns on weak hosts (heuristic).
-- **Cookie Security**: Flags missing `Secure` or `HttpOnly` flags on sensitive tokens (detected via regex heuristics or user overrides), validates `__Host-`/`__Secure-` prefixes, and checks `SameSite` enforcement.
-- **Subdomain Trust & CORS**: Detects wildcard or null `Access-Control-Allow-Origin` on API responses, credentialed CORS wildcards, and overly permissive subdomain cookie scoping (e.g., setting a sensitive cookie to `.example.com` instead of a specific host).
-- **Information Leakage**: Detects known product/version strings (e.g., `Express 4.x`, `PHP/8.1`, `nginx/1.24`) in headers like `Server` and `X-Powered-By`.
-- **Legacy & Cache**: Flags deprecated headers (`X-XSS-Protection`) and ensures responses setting cookies enforce `Cache-Control: no-store`.
-- **Subresource Integrity (SRI)**: Verifies that `<script>` and `<link rel="stylesheet">` tags in the HTML payload use `integrity` attributes.
-## Privacy
+- **Real-Time Passive Inspection**: Evaluates response headers and cookie configurations continuously during active navigation.
+- **Two-Stage Redirect Tracking**: Observes headers at `onHeadersReceived` and `onResponseStarted` across every redirect hop to catch intermediate header stripping and internal HSTS upgrades.
+- **Privacy-Safe Cookie Jar Correlation**: Cross-references `Set-Cookie` response headers with the live browser cookie jar to identify prefix compliance (`__Host-`, `__Secure-`), missing `HttpOnly`/`Secure` flags, `SameSite` misconfigurations, and CHIPS partitioning. **Cookie values are never accessed, persisted, or exported.**
+- **Deep CSP Evaluation**: Leverages Google's `csp_evaluator` to detect script execution bypasses, JSONP endpoints, missing nonces/hashes, wildcard origins, and dangerous fallback directives.
+- **Subdomain Trust & Escalation**: Identifies dangerous subdomain trust bridges where wildcard cookies (`domain=.example.com`) or permissive CORS configurations expose parent-domain sessions to subdomain compromise.
+- **Attack Surface Graph**: Interactive, bounded D3-force graph mapping same-apex origin relationships, discovered endpoints, and cookie scoping trees.
+- **Auth Posture & History Diffing**: Tracks origin security posture across sessions, highlighting newly introduced header regressions or resolved security weaknesses upon authentication state changes.
+- **Cross-Surface Adaptive UI**: Unified cyberpunk-inspired interface across the Popup, full-page Options dashboard, and Firefox-compatible Side Panel, featuring custom theme tokens, compact densities, and reduced-motion accessibility.
+- **Developer CLI & CI/CD Pipeline**: Standalone CLI (`npm run aculyx`) supporting live URL audits, offline JSON/HAR inspection, regression diffs, and GitHub Actions-ready SARIF 2.1.0 output with configurable exit codes (`--fail-on high`).
 
-- Cookie values are not accessed, persisted, displayed, or exported by this extension. Chrome's `cookies.getAll()` API returns cookie objects that include a `value` property; this extension reads only metadata fields and never accesses `cookie.value`.
-- The extension manifest declares `connect-src 'none'` in its Content Security Policy, making outbound network requests from extension pages impossible (and easily verifiable in the source).
-- No remote code, no analytics, no telemetry.
-- **Local persistence**: All storage is strictly on-device:
-  - `chrome.storage.session`: Live tab state and temporary API endpoint captures (LRU capped at 50 per tab, with URL credentials/query tokens stripped).
-  - `chrome.storage.local`: User settings, historical domain scores, authentication diffs (`AuthDiffRecord` storing only compact finding metadata and score deltas; no session tokens or passwords), and attack-surface graphs (bounded at 100 nodes / 150 edges and pruned according to history retention rules).
-- **Evaluation Mode**: Exploring the multi-session attack surface graph is enabled locally via "Evaluation Mode" in Settings; there are no external billing or authentication servers.
-- **CLI network contact**: The CLI `--url` mode intentionally contacts the target URL to fetch headers. This is the only operation that sends a network request outside the browser.
+---
 
-## Permissions
+## Privacy & Zero-Telemetry Guarantee
 
-The extension requests **no host permissions at install time.** Access is granted per-site or globally through an explicit user action:
+ACULYX is built on strict fail-closed privacy invariants:
 
-- **Per-site (default):** click "Monitor this site" in the popup → grants access to that origin only
-- **All sites:** toggle in the Options page → grants `<all_urls>`
+1. **No Sensitive Value Storage**: Extension code never reads `cookie.value`, authorization credentials, bearer tokens, or URL query parameters. All query parameters (`?`) and fragments (`#`) are stripped before URLs enter session state, storage, or exports.
+2. **Strict Network Isolation**: Extension pages declare `connect-src 'none'` in their Content Security Policy. The extension runtime cannot make outbound HTTP/WebSocket requests.
+3. **100% Local Processing**: All evaluation, scoring, D3 graphing, and report generation execute locally on your device.
+4. **Isolated Incognito Handling**: Incognito and private browsing events never touch persistent storage (`localStorage`), history records, or the attack-surface graph.
+5. **No Telemetry**: Zero analytics, zero crash reporting, zero tracking pixels, zero remote script loading.
 
-## Out of scope
+> [!NOTE]
+> The only command that contacts an external network endpoint is the standalone CLI when invoked with the explicit `--url` flag to fetch HTTP headers for terminal audit.
 
-The following are intentionally excluded:
+---
 
-- Active probing (sending crafted `Origin` headers, CORS fuzzing, exploitation)
-- TLS/cipher auditing
-- HSTS preload-list membership verification (the extension checks only basic preload header readiness)
-- Crawling pages the user hasn't visited
-- DOM/JS vulnerability analysis (XSS, etc.)
-- Any network request the user's own browsing didn't already make
+## Architecture & Rules Evaluated
 
-**Use only on sites you own or have permission to test.** Passive observation of your own browsing is harmless, but be mindful of the data you're handling.
+ACULYX audits network traffic against a versioned, defensive rule engine (`src/rules/`):
 
-## Development
+- **Transport Layer**: Strict-Transport-Security (HSTS), preload readiness, `includeSubDomains`, minimum one-year `max-age` verification.
+- **Content Security**: Content-Security-Policy (CSP), `default-src`, `script-src` nonces/hashes, `object-src 'none'`, `base-uri`, and `frame-ancestors`.
+- **Framing & Sniffing Protection**: X-Frame-Options (XFO) and X-Content-Type-Options (`nosniff`).
+- **Cookie Security**: Flags missing `Secure`, `HttpOnly`, `SameSite=Strict/Lax`, validates `__Host-` and `__Secure-` prefix requirements, and checks `Cache-Control: no-store` on responses issuing cookies.
+- **CORS & Cross-Origin Policies**: Cross-Origin-Opener-Policy (COOP), Cross-Origin-Embedder-Policy (COEP), Cross-Origin-Resource-Policy (CORP), and `Access-Control-Allow-Origin` null/wildcard misuse on API responses.
+- **Subresource Integrity (SRI)**: Scans HTML scripts and stylesheets for cryptographic hash integrity attributes (`sha384`/`sha512`).
+- **Information Disclosure**: Detects product and server version leakage in `Server`, `X-Powered-By`, and generator headers.
+
+---
+
+## CLI Usage
+
+ACULYX provides an offline-first CLI tool for local audits and CI/CD pipelines:
+
+```bash
+# Live URL audit
+npm run aculyx -- --url https://example.com --format markdown
+
+# Offline inspection of pre-captured JSON or HAR
+npm run aculyx -- --input audit.json --format sarif --fail-on high
+npm run aculyx -- --har capture.har --url https://example.com/api --format json
+
+# Baseline regression diff
+npm run aculyx -- --input current.json --diff baseline.json --format markdown
+
+# Legacy compatibility alias
+npm run seccheck -- --url https://example.com
+```
+
+### Exit Codes
+- `0`: All checks passed below `--fail-on` threshold.
+- `1`: One or more findings met or exceeded the failure threshold (default: `high`).
+- `2`: Invalid CLI arguments or malformed input data.
+
+---
+
+## Development & Testing
 
 ### Prerequisites
-
 - Node.js ≥ 22.12.0
 - npm ≥ 10
 
-### Setup
-
+### Installation & Builds
 ```bash
+# Install dependencies
 npm install
-```
 
-### Development build (with HMR)
+# Build Chrome MV3 extension (outputs to dist/)
+npm run build
 
-```bash
+# Build Firefox MV3 extension (outputs to dist-firefox/)
+npm run build:firefox
+
+# Development mode with HMR
 npm run dev
 ```
 
-Load the unpacked extension from `dist/` in `chrome://extensions`.
-
-### Production build
-
-```bash
-npm run build
-```
-
-### Firefox production build
+### Quality & Verification Gates
+ACULYX enforces a strict zero-tolerance gate policy:
 
 ```bash
-npm run build:firefox
-```
-
-### Type checking
-
-```bash
+# 1. Typecheck (zero TypeScript errors)
 npm run typecheck
-```
 
-### Linting
+# 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
+npm run lint -- --max-warnings=0
 
-```bash
-npm run lint
-```
-
-### Unit tests (rule engine)
-
-```bash
+# 3. Unit & Integration Tests (454 tests across 32 test suites)
 npm test
+
+# 4. Playwright End-to-End Tests (persistent Chromium context)
+npm run test:e2e
+
+# 5. Dependency Audit (zero vulnerabilities at low level)
+npm audit --audit-level=low
 ```
 
-### CLI audit
-
-See [CLI usage](docs/CLI.md) for URL scans, offline input, and CI exit thresholds.
-
-**Note:** The CLI does not read extension configuration, so custom cookie override lists (`alwaysSensitive`, `alwaysIgnore`) configured in the browser will not be applied to CLI scans.
-
-Exit codes: `0` means no finding met the threshold, `1` means a finding met or exceeded `--fail-on`, and `2` means invalid input or a scan error. The default threshold is `high` (critical and high findings fail).
-
-### E2e tests (requires built extension)
-
-```bash
-npm run build && npm run test:e2e
-```
-
-### Property & Fuzz tests (Security)
-
-```bash
-npx vitest run tests/fuzz/property-fuzz.test.ts
-npx vitest run tests/security/artifact-scan.test.ts
-```
-
-### Manual QA
-Please refer to the [Manual QA Checklist](docs/MANUAL_QA.md) for verifying browser APIs, MV3 lifecycle constraints, privacy isolation, and visual accessibility.
+---
 
 ## Project Structure
 
 ```
 src/
-├── background/       # MV3 service worker — capture, correlate, orchestrate
-├── rules/            # Pure rule functions (zero browser APIs — fully unit-testable)
-│   ├── headers/      # One file per header family
-│   └── weights.json  # Versioned score weights (cited per rule against OWASP/MDN)
-├── popup/            # Badge popup — grade + top findings + "Monitor" button
-├── options/          # Settings page
-└── shared/           # Types, constants, messaging protocol, storage wrappers
+├── background/       # MV3 service worker — capture, write barrier, lifecycle
+├── content/          # Isolated page signal detectors (CSP, SRI)
+├── options/          # Full-page settings & About/Copyright dashboard
+├── popup/            # Extension action popup & live scoring interface
+├── rules/            # Pure TypeScript rule engine, weights, registry
+├── sandbox/          # Sandboxed iframe verification workspace
+├── shared/           # Appearance tokens, storage write-barrier, messaging
+└── sidepanel/        # Attack Surface Graph & entity relationship explorer
 tests/
-├── rules/            # Vitest fixture-driven unit tests
-│   └── fixtures/     # JSON: headers-in → expected finding IDs
-├── server/           # Express test server serving pages with deliberate header combos
-└── e2e/              # Playwright integration tests
+├── background/       # Permissions, state pipeline, capture listener tests
+├── e2e/              # Playwright browser integration tests
+├── fuzz/             # Property fuzzing and payload mutators
+├── integration/      # Write barrier races, reset drainage, canary leak suites
+├── rules/            # Header family fixtures and evaluation assertions
+└── shared/           # Storage envelopes, coalescing, and migration tests
 ```
 
-## Score Weights
+---
 
-Weights are in [`src/rules/weights.json`](src/rules/weights.json) and sourced from the [OWASP Secure Headers Project](https://owasp.org/www-project-secure-headers/) and [MDN HTTP Observatory](https://developer.mozilla.org/en-US/observatory). Each rule's penalty and rationale are documented inline.
+## Author & Ownership
 
-The `scoreVersion` field is stored with every result so historical comparisons remain valid after weight changes.
+ACULYX is developed, authored, and owned by **Dhyan Patel**.
 
-## Limitations
+- **Author**: Dhyan Patel
+- **Official Repository**: [github.com/Gone27/Cookie-and-header-reader-extention](https://github.com/Gone27/Cookie-and-header-reader-extention)
+- **Provenance Record**: See [`docs/PROVENANCE.md`](docs/PROVENANCE.md) for cryptographic asset checksums and build verification instructions.
 
-- **Restricted pages** (`chrome://`, the Web Store, `about:`) cannot be inspected — the extension shows an explicit "restricted" state rather than a misleading empty report
-- **Cache and service-worker responses** are flagged with a coverage warning; the headers shown are "what the browser received from cache," not necessarily the current server headers
-- **HSTS preloaded sites** redirect internally before any request leaves the browser, so the HTTP→HTTPS hop is invisible; Chrome's `Non-Authoritative-Reason: HSTS` header is used to label these hops
-- **Meta-tag CSP** is detected and collected, but its policy contents are not evaluated against HTTP response header directives; the popup and report call out this coverage limit
-- **Subresource & API capture** passively observes first-party and third-party XHR/fetch endpoints; findings are displayed in a dedicated API section and do not alter the top-level document security grade
-- **Embedded content** is not inspected: only top-level (`main_frame`) navigation responses and same-session XHR/fetch calls are captured, so third-party iframe document headers are outside the audit
-- **CSP analysis is heuristic** — the tool flags known-weak patterns but cannot prove a policy is secure
-- **Scores are opinionated** — weights are documented and versioned, not objective truth
+---
 
-## Roadmap
+## License & Trademark
 
-| Phase | Status | Deliverable |
-|---|---|---|
-| 1 | ✅ | Header capture, 8 header rules, badge, popup |
-| 2 | ✅ | Cookie store integration, cookie rules, cookie correlation & origin tracking, subdomain trust analysis |
-| 3 | ✅ | Score breakdown, JSON/Markdown audit reports, historical score trend |
-| 4 | ✅ | Side panel, redirect-chain analysis, SRI coverage, historical score trend, CI pipeline, full automated test suite (150+ tests), Firefox build, CLI/SARIF export, audit bundles & finding diffs |
-| 5 | ✅ | Attack surface graphing, history diffing, cross-browser compatibility |
-| 6 | ✅ | Rule engine separation, CLI refinement, CLI offline import/export |
-| 7 | ✅ | Release Confidence & Maintenance: CI security audits, property/fuzz tests, manifest integrity checks, Manual QA |
-
-## License
-
-Apache 2.0. Includes [csp-evaluator](https://github.com/nicktacular/csp-evaluator) (Apache 2.0 © Google LLC).
+- **Source Code**: Licensed under the **Apache License, Version 2.0** ([`LICENSE`](LICENSE)).
+- **Brand & Trademark**: The name **ACULYX**, the katana wordmark, and associated graphical marks are proprietary brand assets and trademarks of **Dhyan Patel**. The Apache 2.0 software license does not grant trademark or brand rights to use the ACULYX name or logo in derivative works or distributions without prior express written permission. See [`NOTICE`](NOTICE).

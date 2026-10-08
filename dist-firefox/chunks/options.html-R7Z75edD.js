@@ -1,7 +1,7 @@
-import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER, S as normalizeCookieList, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CAY63kjk.js";
-import { d as PermissionsService } from "./lifecycle-ko4hDJ18.js";
+import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER, S as normalizeCookieList, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CTMeVYaN.js";
+import { d as PermissionsService } from "./lifecycle-CQzmjg6F.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-IYq7xGfR.js";
+import { t as applyAppearance } from "./appearance-Cjc7_Dji.js";
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
 var modeRadios;
@@ -60,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	if (typeof chrome !== "undefined" && typeof chrome.runtime !== "undefined") {
 		const manifest = chrome.runtime.getManifest();
 		const versionEl = document.getElementById("home-version-badge");
-		if (versionEl) versionEl.textContent = `SecCheck v${manifest.version}`;
+		if (versionEl) versionEl.textContent = `ACULYX v${manifest.version}`;
 		const aboutEl = document.getElementById("about-version");
 		if (aboutEl) aboutEl.textContent = manifest.version;
 	}
@@ -522,7 +522,7 @@ function wireDataManagement() {
 		LocalStorage.deletePrivateRecords().then(() => showDataStatus("Private records cleared.")).catch((err) => showDataStatus(`Failed: ${String(err)}`, true));
 	});
 	btnClearAll.addEventListener("click", () => {
-		if (!confirm("Reset ALL local SecCheck data? This cannot be undone.")) return;
+		if (!confirm("Reset ALL local ACULYX data? This cannot be undone.")) return;
 		sendToBackground({ type: "RESET_ALL_DATA" }).then(() => {
 			showDataStatus("All data reset. Reloading…");
 			setTimeout(() => window.location.reload(), 1500);
@@ -633,4 +633,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-DdNBbWX9.js.map
+//# sourceMappingURL=options.html-R7Z75edD.js.map

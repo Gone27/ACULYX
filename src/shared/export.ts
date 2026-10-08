@@ -101,7 +101,7 @@ export function generateSarif(state: TabState): SarifLog {
       {
         tool: {
           driver: {
-            name: 'SecCheck',
+            name: 'ACULYX',
             version: '2.0.0',
             informationUri: 'https://github.com/Gone27/Cookie-and-header-reader-extention',
             rules: ruleList.map(([ruleId, finding]) => ({
@@ -200,7 +200,7 @@ export function exportMarkdownReport(state: TabState): string {
   md += `**Configuration Quality:** ${sanitized.qualityGrade ?? 'A'} (${sanitized.qualityScore ?? 100} / 100)  \n\n`;
 
   md += `## Executive Summary\n`;
-  md += `SecCheck conducted an automated, passive inspection of HTTP response headers and cookies for \`${sanitized.origin}\`.\n\n`;
+  md += `ACULYX conducted an automated, passive inspection of HTTP response headers and cookies for \`${sanitized.origin}\`.\n\n`;
 
   if (sanitized.subdomainTrust.hasEscalationPath) {
     md += `> ⚠️ **Subdomain Escalation Path Detected:** Trust bridges exist between this site and its subdomains that could allow a compromised subdomain to compromise main-domain sessions or data.\n\n`;
@@ -249,7 +249,7 @@ export function exportMarkdownReport(state: TabState): string {
     md += `\n`;
   }
 
-  md += `---\n*Generated locally by SecCheck Security Extension*\n`;
+  md += `---\n*Generated locally by ACULYX - Header & Cookie Security Checker*\n`;
   return md;
 }
 

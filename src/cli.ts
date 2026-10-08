@@ -260,7 +260,7 @@ export function buildCliReport(input: CliInput): CliReport {
 
 export function formatMarkdown(report: CliReport): string {
   const lines = [
-    `# SecCheck audit: ${report.target}`,
+    `# ACULYX audit: ${report.target}`,
     '',
     `**Grade:** ${report.grade}  `,
     `**Score:** ${report.score}/100  `,
@@ -307,7 +307,7 @@ export function formatSarif(report: CliReport): SarifLog {
     runs: [{
       tool: {
         driver: {
-          name: 'SecCheck',
+          name: 'ACULYX',
           version: packageInfo.version,
           informationUri: 'https://github.com/Gone27/Cookie-and-header-reader-extention',
           rules: ruleList.map(([ruleId, finding]) => ({
@@ -590,14 +590,18 @@ async function loadInput(options: { input?: string | undefined; har?: string | u
   return { url: response.url, status: response.status, headers, cookies: [] };
 }
 
-const usage = `SecCheck CLI
+const usage = `ACULYX CLI
+Header & Cookie Security Checker
 
 Usage:
-  npm run seccheck -- --url https://example.com [--format json|markdown|sarif] [--fail-on critical|high|medium|low|info|never]
-  npm run seccheck -- --input audit.json [--format json|markdown|sarif] [--fail-on ...]
-  npm run seccheck -- --har capture.har --url https://example.com/path [--format json|markdown|sarif] [--fail-on ...]
-  npm run seccheck -- --input current.json --diff baseline.json [--format json|markdown]
-  npm run seccheck -- --input audit.json --bundle
+  npm run aculyx -- --url https://example.com [--format json|markdown|sarif] [--fail-on critical|high|medium|low|info|never]
+  npm run aculyx -- --input audit.json [--format json|markdown|sarif] [--fail-on ...]
+  npm run aculyx -- --har capture.har --url https://example.com/path [--format json|markdown|sarif] [--fail-on ...]
+  npm run aculyx -- --input current.json --diff baseline.json [--format json|markdown]
+  npm run aculyx -- --input audit.json --bundle
+
+Legacy alias:
+  npm run seccheck -- [args]
 
 Input JSON: { "url": "https://example.com", "status": 200, "headers": {}, "cookies": [] }
 URL mode makes one explicit HTTP request and follows redirects. JSON and HAR input modes are offline; HAR mode selects the most recent exact URL match.
@@ -640,7 +644,7 @@ async function main(args: string[]): Promise<void> {
     const diff = computeFindingDiff(baselineReport, report);
     if (options.format === 'markdown') {
       const md = [
-        `# SecCheck Regression Diff: ${diff.target}`,
+        `# ACULYX Regression Diff: ${diff.target}`,
         '',
         `**Baseline Score:** ${diff.baselineScore ?? 'N/A'} -> **Current Score:** ${diff.currentScore} (Delta: ${diff.scoreDelta ?? 0})`,
         '',
@@ -680,7 +684,7 @@ async function main(args: string[]): Promise<void> {
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   void main(process.argv.slice(2)).catch((error: unknown) => {
-    process.stderr.write(`SecCheck CLI: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`ACULYX CLI: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 2;
   });
 }

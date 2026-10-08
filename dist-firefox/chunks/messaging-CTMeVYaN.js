@@ -1314,12 +1314,12 @@ function hasUnredactedCookieValue(headerStr, isSetCookie = false) {
 }
 function assertNoSensitiveSecrets(state) {
 	if (Array.isArray(state.cookies)) {
-		for (const cookie of state.cookies) if ("value" in cookie) throw new Error(`[SecCheck] Cookie value detected on ${cookie.name} — storage aborted.`);
+		for (const cookie of state.cookies) if ("value" in cookie) throw new Error(`[ACULYX] Cookie value detected on ${cookie.name} — storage aborted.`);
 	}
 	const checkUrlStr = (urlStr, context) => {
 		if (urlStr === null || urlStr === void 0 || urlStr === "") return;
-		if (urlStr.includes("?")) throw new Error(`[SecCheck] Unredacted query string detected in ${context} — storage aborted.`);
-		if (urlStr.match(/:\/\/[^@/]+@/) !== null) throw new Error(`[SecCheck] Unredacted credentials detected in ${context} — storage aborted.`);
+		if (urlStr.includes("?")) throw new Error(`[ACULYX] Unredacted query string detected in ${context} — storage aborted.`);
+		if (urlStr.match(/:\/\/[^@/]+@/) !== null) throw new Error(`[ACULYX] Unredacted credentials detected in ${context} — storage aborted.`);
 		const checkSegments = (segments) => {
 			for (const seg of segments) {
 				if (!seg || seg === "[id]" || seg === "[token]" || seg === "[redacted]") continue;
@@ -1329,10 +1329,10 @@ function assertNoSensitiveSecrets(state) {
 				const isJwt = /^eyJ/.test(seg) || /^eyJ/.test(stem);
 				const isLongOpaque = seg.length >= 20 || stem.length >= 20 || /^[0-9a-f]{16,}$/i.test(stem);
 				const isEmail = /@/.test(seg);
-				if (isUuid || isJwt || isLongOpaque || isEmail) throw new Error(`[SecCheck] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
+				if (isUuid || isJwt || isLongOpaque || isEmail) throw new Error(`[ACULYX] Unredacted sensitive token/path detected in ${context} — storage aborted.`);
 			}
 		};
-		if (urlStr.includes("#")) throw new Error(`[SecCheck] Unredacted URL fragment detected in ${context} — storage aborted.`);
+		if (urlStr.includes("#")) throw new Error(`[ACULYX] Unredacted URL fragment detected in ${context} — storage aborted.`);
 		const tokens = urlStr.split(/[\s;]+/).filter(Boolean);
 		for (const token of tokens) if (token.includes("/")) try {
 			checkSegments(new URL(token).pathname.split("/"));
@@ -1351,17 +1351,17 @@ function assertNoSensitiveSecrets(state) {
 		if (headers) for (const [k, v] of Object.entries(headers)) {
 			const lower = k.toLowerCase();
 			if (lower === "set-cookie" || lower === "cookie") {
-				if (hasUnredactedCookieValue(v, lower === "set-cookie")) throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+				if (hasUnredactedCookieValue(v, lower === "set-cookie")) throw new Error(`[ACULYX] Unredacted ${k} header detected in ${context} — storage aborted.`);
 			} else if (lower === "authorization" || lower === "proxy-authorization") {
-				if (v !== "[REDACTED]" && v !== "[redacted]") throw new Error(`[SecCheck] Unredacted ${k} header detected in ${context} — storage aborted.`);
+				if (v !== "[REDACTED]" && v !== "[redacted]") throw new Error(`[ACULYX] Unredacted ${k} header detected in ${context} — storage aborted.`);
 			}
 		}
 		if (rawHeaders) for (const h of rawHeaders) {
 			const lower = h.name.toLowerCase();
 			if (lower === "set-cookie" || lower === "cookie") {
-				if (hasUnredactedCookieValue(h.value, lower === "set-cookie")) throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+				if (hasUnredactedCookieValue(h.value, lower === "set-cookie")) throw new Error(`[ACULYX] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
 			} else if (lower === "authorization" || lower === "proxy-authorization") {
-				if (h.value !== "[REDACTED]" && h.value !== "[redacted]") throw new Error(`[SecCheck] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
+				if (h.value !== "[REDACTED]" && h.value !== "[redacted]") throw new Error(`[ACULYX] Unredacted ${h.name} rawHeader detected in ${context} — storage aborted.`);
 			}
 		}
 	};
@@ -1957,4 +1957,4 @@ function sendToBackground(msg) {
 //#endregion
 export { DEFAULT_SETTINGS as A, resolveCookieOverlaps as C, onEpochChange as D, incrementStorageResetEpoch as E, SCORE_VERSION as F, SEVERITY_ORDER as I, SIDEPANEL_PORT_NAME as L, MAINTENANCE_ALARM as M, POPUP_PORT_NAME as N, setStorageResetEpoch as O, RESTRICTED_SCHEMES as P, normalizeCookieList as S, getStorageResetEpoch as T, redactUrlPath as _, SessionStorage as a, sanitizeUrlForStorage as b, checkDuplicateHeaders as c, headersDiffer as d, isSensitiveCookie as f, redactHeaderValue as g, parseCspDirectives as h, LocalStorage as i, GRADE_THRESHOLDS as j, BADGE_COLORS as k, extractSetCookieHeaders as l, originFromUrl as m, portSend as n, checkSubdomainTrust as o, normalizeHeaders as p, sendToBackground as r, registrableDomain as s, PortRegistry as t, hasCspBypassProtection as u, sanitizeCspPolicyForStorage as v, settingsTransitionPipeline as w, SettingsService as x, sanitizeEvidence as y };
 
-//# sourceMappingURL=messaging-CAY63kjk.js.map
+//# sourceMappingURL=messaging-CTMeVYaN.js.map
