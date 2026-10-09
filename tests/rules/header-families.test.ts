@@ -132,5 +132,3 @@ describe('Modern policy and HSTS preload guidance', () => {
     expect(findings.find((finding) => finding.ruleId === 'HSTS-004')?.severity).toBe('info');
   });
 });
-
-

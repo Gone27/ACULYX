@@ -164,4 +164,3 @@ export function computeScore(findings: Finding[], fromCache = false): ScoreResul
     scoreVersion: SCORE_VERSION,
   };
 }
-

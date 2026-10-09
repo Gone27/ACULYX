@@ -1,7 +1,7 @@
 # Privacy Policy for ACULYX: Header & Cookie Security Checker
 
-**Effective Date:** September 25, 2026  
-**Last Updated:** October 8, 2026  
+**Effective Date:** September 25, 2026
+**Last Updated:** October 8, 2026
 **Author & Maintainer:** Dhyan Patel
 
 ## 1. Overview & Core Philosophy
@@ -26,7 +26,7 @@ When you choose to monitor an origin, ACULYX temporarily processes network heade
 - **Attack Surface Graph Persistence:** The extension analyzes permitted navigation hops, cookies, and API endpoints to map relationships between the apex domain and affiliated subdomains (`AttackSurfaceGraph`). Persisted graphs in `chrome.storage.local` are strictly bounded (maximum 100 nodes, 150 edges) and pruned during periodic maintenance sweeps.
 - **Evaluation Mode:** An optional user setting ("Evaluation Mode") unlocks exploration of the full accumulated multi-session attack surface graph. Evaluation mode operates entirely locally with no external licensing servers, payment gateways, or network telemetry.
 - **Sensitive URL Redaction:** All URL query parameters (`?`) and fragments (`#`) are stripped before storage or export, eliminating inadvertent leaks of OAuth `state`, session tokens, or emails.
-- **Local Storage (`chrome.storage.local` & `session`):** 
+- **Local Storage (`chrome.storage.local` & `session`):**
   - User configuration settings (e.g. per-site allowlist, severity filters, evaluation mode).
   - Historical domain scores and auth-diff records (pruned according to retention settings).
   - Attack surface graphs (bounded and pruned).

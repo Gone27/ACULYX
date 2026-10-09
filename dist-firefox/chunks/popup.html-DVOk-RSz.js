@@ -1,7 +1,7 @@
 import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, b as sanitizeUrlForStorage, g as redactHeaderValue, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-BeCmlDYm.js";
 import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-DkYubn-s.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-BuGLOsv_.js";
+import { t as applyAppearance } from "./appearance-B0GqRw0M.js";
 import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
 //#region src/shared/reporting/report-builder.ts
 var UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
@@ -1552,4 +1552,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Cwh2i_qD.js.map
+//# sourceMappingURL=popup.html-DVOk-RSz.js.map

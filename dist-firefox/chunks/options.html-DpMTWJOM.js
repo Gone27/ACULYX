@@ -2,7 +2,7 @@ import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER,
 import { d as PermissionsService } from "./lifecycle-DkYubn-s.js";
 import { t as normalizeScopeTarget } from "./normalize-BcYjnt_z.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-BuGLOsv_.js";
+import { t as applyAppearance } from "./appearance-B0GqRw0M.js";
 import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
 //#region src/shared/scope/validate.ts
 /**
@@ -884,4 +884,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-Bk7UrurM.js.map
+//# sourceMappingURL=options.html-DpMTWJOM.js.map

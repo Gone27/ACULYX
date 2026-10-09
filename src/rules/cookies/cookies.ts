@@ -26,15 +26,15 @@ function checkSecure(
 ): Finding | null {
   if (!isHttps) return null;
   if (cookie.secure) return null;
-  
+
   const { isSensitive, reason } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
   const isRegexHeuristic = reason === 'regex';
   const hasStrongSignal = cookie.httpOnly || reason === 'override' || reason === 'prefix';
-  
+
   const effectiveSeverity = isSensitive
     ? (isRegexHeuristic && !hasStrongSignal ? 'medium' : 'high')
     : 'low';
-    
+
   const heuristicLabel = isSensitive && isRegexHeuristic && !hasStrongSignal ? ' (name-based heuristic)' : '';
 
   return {
@@ -60,10 +60,10 @@ function checkHttpOnly(
 ): Finding | null {
   if (cookie.httpOnly) return null;
   if (cookie.setByJs === true) return null;
-  
+
   const { isSensitive, reason } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
   if (!isSensitive) return null;
-  
+
   const isRegexHeuristic = reason === 'regex';
   const hasStrongSignal = cookie.secure || reason === 'override' || reason === 'prefix';
   const heuristicLabel = isRegexHeuristic && !hasStrongSignal ? ' (name-based heuristic)' : '';

@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "vite build && playwright test",
     "aculyx": "tsx src/cli.ts",
     "seccheck": "tsx src/cli.ts",
     "lint": "eslint src tests",

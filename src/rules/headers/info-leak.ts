@@ -27,7 +27,7 @@ const LEAKY_HEADERS: readonly string[] = [
 ];
 
 /**
- * Matches explicit version numbers prefixed by a product or technology name 
+ * Matches explicit version numbers prefixed by a product or technology name
  * (e.g. "nginx/1.24.0", "Apache/2.4", "PHP/8.1", "Express 4.x")
  * or bare versions if the header implies it (e.g. X-AspNet-Version: 4.0.30319).
  */
@@ -36,7 +36,7 @@ const PRODUCT_VERSION_PATTERN = /(?:microsoft-iis|apache|nginx|php|express|rails
 
 /**
  * Returns true when the header value exposes a specific technology version.
- * Tightened to require product/version pairs, avoiding 
+ * Tightened to require product/version pairs, avoiding
  * false positives on simple numeric headers, UNLESS the header name explicitly implies a version.
  */
 function isLeaky(value: string, headerName: string): boolean {

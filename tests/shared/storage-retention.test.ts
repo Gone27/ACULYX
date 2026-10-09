@@ -288,4 +288,3 @@ describe('LocalStorage pruning and purging', () => {
     expect(mixedGraph.edges.some((e) => e.source === 'active.mixed.com')).toBe(true);
   });
 });
-

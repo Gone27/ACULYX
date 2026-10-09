@@ -455,4 +455,3 @@ describe('assertNoSensitiveSecrets & SessionStorage guard verification', () => {
     await expect(SessionStorage.setTabState(goodState)).resolves.toBeUndefined();
   });
 });
-

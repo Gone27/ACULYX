@@ -103,7 +103,7 @@ export function runRules(input: RuleInput): RuleOutput {
   }));
   findings.push(...redirectFindings);
   findings.push(...(input.captureFindings ?? []));
-  
+
   const headerFindings: Finding[] = [];
   headerFindings.push(...checkDuplicateHeaders(finalHop));
   headerFindings.push(...checkHsts(finalHop));
@@ -125,7 +125,7 @@ export function runRules(input: RuleInput): RuleOutput {
     input.cookieSettings?.alwaysSensitive,
     input.cookieSettings?.alwaysIgnore,
   ));
-  
+
   findings.push(...headerFindings.map((f) => ({ ...f, provenance: f.provenance ?? ('response-header' as const) })));
 
   const isHttps = finalHop.url.startsWith('https://');
@@ -224,7 +224,7 @@ export function runApiRules(
     sensitive,
     ignored,
   ));
-  
+
   return findings.map((f) => ({
     ...f,
     sourceUrl: apiHop.url,

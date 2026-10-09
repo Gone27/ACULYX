@@ -1,8 +1,8 @@
 # ACULYX Provenance & Ownership Record
 
-**Author & Copyright Owner**: Dhyan Patel  
-**Product**: ACULYX — Header & Cookie Security Checker  
-**Canonical Repository**: `https://github.com/Gone27/ACULYX`  
+**Author & Copyright Owner**: Dhyan Patel
+**Product**: ACULYX — Header & Cookie Security Checker
+**Canonical Repository**: `https://github.com/Gone27/ACULYX`
 **License**: Apache-2.0 (Code) | Proprietary Trademark & Brand Assets (Dhyan Patel)
 
 ---

@@ -258,4 +258,3 @@ describe('Home navigation cards & unsaved changes guard', () => {
     expect(navigatedTo).toBe('monitoring');
   });
 });
-

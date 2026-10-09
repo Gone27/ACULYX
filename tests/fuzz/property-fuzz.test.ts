@@ -58,7 +58,7 @@ describe('Property & Fuzz Tests', () => {
             reference: 'https://example.com',
           });
         }
-        
+
         const { score, grade } = computeScore(findings);
         expect(score).toBeGreaterThanOrEqual(0);
         expect(score).toBeLessThanOrEqual(100);

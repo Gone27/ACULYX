@@ -436,5 +436,3 @@ describe('SettingsTransitionPipeline and atomic transitions (WS1 1C)', () => {
     }
   });
 });
-
-

@@ -434,4 +434,3 @@ describe('WS1 1B: Truthful All-Sites Permission and Fallthrough Elimination', ()
     getSettingsSpy.mockRestore();
   });
 });
-

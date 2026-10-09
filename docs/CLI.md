@@ -23,7 +23,7 @@ npm run aculyx -- --input current.json --diff baseline.json --format markdown
 npm run seccheck -- --url https://example.com
 ```
 
-`--format` accepts `json`, `markdown`, or `sarif`.  
+`--format` accepts `json`, `markdown`, or `sarif`.
 `--fail-on` accepts `critical`, `high`, `medium`, `low`, `info`, or `never`; the default is `high`.
 
 ### Output Formats

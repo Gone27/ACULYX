@@ -451,33 +451,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const tbody = getEl<HTMLTableSectionElement>('node-list-body');
     // Clear existing rows
     while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-    
+
     for (const node of nodes) {
       const tr = document.createElement('tr');
       tr.setAttribute('role', 'row');
       tr.setAttribute('tabindex', '0');
       tr.setAttribute('aria-selected', 'false');
-      
+
       const tdHost = document.createElement('td');
       tdHost.textContent = node.hostname;
-      
+
       const tdRole = document.createElement('td');
       tdRole.textContent = node.isApex ? 'Apex' : 'Subdomain';
-      
+
       const tdGrade = document.createElement('td');
       tdGrade.className = 'grade-cell';
       tdGrade.textContent = node.grade !== undefined && node.score !== undefined
         ? `${node.grade} (${node.score})`
         : '—';
-      
+
       const tdSeen = document.createElement('td');
       tdSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
-      
+
       tr.appendChild(tdHost);
       tr.appendChild(tdRole);
       tr.appendChild(tdGrade);
       tr.appendChild(tdSeen);
-      
+
       // Keyboard activation
       tr.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -493,7 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.querySelectorAll('tr').forEach(r => r.setAttribute('aria-selected', 'false'));
         tr.setAttribute('aria-selected', 'true');
       });
-      
+
       tbody.appendChild(tr);
     }
   }

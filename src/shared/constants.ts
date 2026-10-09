@@ -105,4 +105,3 @@ export const DEFAULT_SETTINGS: SettingsV2 = {
   density: 'comfortable',
   reducedMotion: 'system',
 };
-

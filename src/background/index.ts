@@ -898,13 +898,13 @@ chrome.webNavigation.onBeforeNavigate.addListener(
     if (details.frameId !== 0) return;
 
     const { tabId } = details;
-    
+
     // Check tab incognito status
     void resolveTabPrivacy(tabId);
 
     incrementTabGeneration(tabId);
     tabActionQueue.clearTab(tabId);
-    
+
     broadcastCoalescer.clear(tabId);
     writeBatcher.clear(tabId);
 
@@ -1784,7 +1784,3 @@ if (
     });
   });
 }
-
-
-
-

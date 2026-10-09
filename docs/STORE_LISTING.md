@@ -23,7 +23,7 @@
 ## 4. Detailed Description
 
 ### 🛡️ Why ACULYX?
-Most security header checkers are remote online scanners that run outside your authenticated session or simple checklist extensions that overwhelm you with confusing warnings. 
+Most security header checkers are remote online scanners that run outside your authenticated session or simple checklist extensions that overwhelm you with confusing warnings.
 
 **ACULYX** is a developer- and security-focused browser extension designed for web developers, penetration testers, and security researchers. It passively evaluates HTTP response headers and live cookie configurations directly from within your browser as pages load — giving you an accurate, real-world security grade without sending a single byte of your browsing data over the network.
 

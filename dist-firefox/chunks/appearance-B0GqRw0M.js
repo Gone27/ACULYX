@@ -29,4 +29,4 @@ async function bootstrapAppearance(targetDocument = document) {
 //#endregion
 export { bootstrapAppearance as n, applyAppearance as t };
 
-//# sourceMappingURL=appearance-BuGLOsv_.js.map
+//# sourceMappingURL=appearance-B0GqRw0M.js.map

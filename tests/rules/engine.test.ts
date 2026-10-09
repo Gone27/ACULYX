@@ -676,5 +676,3 @@ describe('computeScore', () => {
     expect(score).toBeGreaterThanOrEqual(95);
   });
 });
-
-

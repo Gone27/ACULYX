@@ -2346,7 +2346,7 @@ var LEAKY_HEADERS = [
 	"x-generator"
 ];
 /**
-* Matches explicit version numbers prefixed by a product or technology name 
+* Matches explicit version numbers prefixed by a product or technology name
 * (e.g. "nginx/1.24.0", "Apache/2.4", "PHP/8.1", "Express 4.x")
 * or bare versions if the header implies it (e.g. X-AspNet-Version: 4.0.30319).
 */
@@ -2354,7 +2354,7 @@ var VERSION_PATTERN = /[0-9]+\.[0-9]+/;
 var PRODUCT_VERSION_PATTERN = /(?:microsoft-iis|apache|nginx|php|express|rails|django|laravel|node|openresty|litespeed|envoy|caddy|haproxy|tomcat|jetty|glassfish|jboss|weblogic|websphere)[\/\s-]*v?[0-9]+\.[0-9x]+/i;
 /**
 * Returns true when the header value exposes a specific technology version.
-* Tightened to require product/version pairs, avoiding 
+* Tightened to require product/version pairs, avoiding
 * false positives on simple numeric headers, UNLESS the header name explicitly implies a version.
 */
 function isLeaky(value, headerName) {
@@ -5025,4 +5025,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, currentResetEpoch, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, recordThirdPartyBlocked, resolveTabPrivacy, sessionHydrationReady, setCurrentResetEpoch, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations, writeBatcher };
 
-//# sourceMappingURL=index.ts-B8odQgoG.js.map
+//# sourceMappingURL=index.ts-CNr00wRt.js.map

@@ -7,7 +7,7 @@
 export class BroadcastCoalescer<T> {
   private pending = new Map<number, T>(); // tabId → last value
   private timers = new Map<number, ReturnType<typeof setTimeout>>();
-  
+
   constructor(
     private readonly flush: (tabId: number, value: T) => void,
     private readonly intervalMs: number = 100,

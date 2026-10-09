@@ -227,9 +227,9 @@ export function buildCliReport(input: CliInput): CliReport {
     timestamp: Date.now(),
     redirectCount: 0,
   };
-  const result = runRules({ 
-    hops: [hop], 
-    cookies: validated.cookies, 
+  const result = runRules({
+    hops: [hop],
+    cookies: validated.cookies,
     origin: validated.url.origin,
     cookieSettings: { alwaysSensitive: [], alwaysIgnore: [] }
   });

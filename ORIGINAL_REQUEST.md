@@ -298,8 +298,8 @@ At the end of each workstream, report:
 
 # Teamwork Project Prompt — SecCheck Master Verification & Settings Redesign
 
-> Status: Launched  
-> Goal: Multi-agent execution across Phase 0 through Phase 5  
+> Status: Launched
+> Goal: Multi-agent execution across Phase 0 through Phase 5
 > Requested team: Multi-agent team (Integration Owner + Functional, Privacy, Performance, Settings UX agents)
 
 You are the multi-agent teamwork coordinator and integration owner for SecCheck, a local-first Manifest V3 browser extension with Chrome and Firefox builds, a separate CLI, header/cookie/API analysis, page signals, history/authentication diffs, an attack-surface graph, popup, Options page, and side panel.
