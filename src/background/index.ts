@@ -1542,6 +1542,14 @@ chrome.runtime.onMessage.addListener(
         });
         return false;
       }
+      if (state.scopeStatus !== 'in-scope') {
+        sendResponse({
+          type: 'GENERATE_POC_RESPONSE',
+          success: false,
+          error: 'Active verification sandbox requires target to be explicitly in-scope under an active scope profile.',
+        });
+        return false;
+      }
 
       const pocUrl = chrome.runtime.getURL('src/sandbox/poc.html') +
         `?target=${encodeURIComponent(state.url)}&type=${encodeURIComponent(message.pocType)}`;

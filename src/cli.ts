@@ -514,6 +514,90 @@ export function shouldFail(findings: Finding[], failOn: string): boolean {
   });
 }
 
+export function isPrivateOrLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '0.0.0.0' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === 'metadata.google.internal' ||
+    host === 'instance-data'
+  ) {
+    return true;
+  }
+
+  // IPv4 ranges: 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 0.0.0.0/8
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4Match) {
+    const a = Number(ipv4Match[1]);
+    const b = Number(ipv4Match[2]);
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 0) return true;
+  }
+
+  // IPv6 link-local / unique-local
+  if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
+    return true;
+  }
+
+  return false;
+}
+
+export async function safeFetchTarget(
+  targetUrl: URL,
+  options?: { allowPrivateIps?: boolean | undefined; maxRedirects?: number | undefined },
+): Promise<{ url: string; status: number; headers: Record<string, string> }> {
+  const allowPrivate = options?.allowPrivateIps ?? false;
+  const maxRedirects = options?.maxRedirects ?? 5;
+
+  let currentUrl = targetUrl;
+  let response: Response;
+  let redirectCount = 0;
+
+  while (true) {
+    if (!allowPrivate && isPrivateOrLocalHost(currentUrl.hostname)) {
+      throw new Error(
+        `SSRF Protection: Access to private or local network target (${currentUrl.hostname}) is blocked. Pass --allow-private-ips to permit local development auditing.`
+      );
+    }
+
+    response = await fetch(currentUrl, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (location === null || location.length === 0) break;
+
+      redirectCount++;
+      if (redirectCount > maxRedirects) {
+        throw new Error(`Exceeded maximum redirect limit of ${maxRedirects}.`);
+      }
+
+      currentUrl = new URL(location, currentUrl);
+      if (currentUrl.protocol !== 'http:' && currentUrl.protocol !== 'https:') {
+        throw new Error(`Disallowed redirect protocol: ${currentUrl.protocol}`);
+      }
+      continue;
+    }
+    break;
+  }
+
+  const headers = redactResponseHeaders(response.headers);
+  return {
+    url: currentUrl.href,
+    status: response.status,
+    headers,
+  };
+}
+
 interface CliOptions {
   input?: string | undefined;
   har?: string | undefined;
@@ -522,6 +606,7 @@ interface CliOptions {
   bundle: boolean;
   format: 'json' | 'markdown' | 'sarif';
   failOn: string;
+  allowPrivateIps: boolean;
   help: boolean;
 }
 
@@ -530,12 +615,14 @@ function parseArguments(args: string[]): CliOptions {
     bundle: false,
     format: 'json',
     failOn: 'high',
+    allowPrivateIps: false,
     help: false,
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') options.help = true;
     else if (argument === '--bundle') options.bundle = true;
+    else if (argument === '--allow-private-ips') options.allowPrivateIps = true;
     else if (
       argument === '--input' ||
       argument === '--har' ||
@@ -562,7 +649,7 @@ function parseArguments(args: string[]): CliOptions {
   return options;
 }
 
-async function loadInput(options: { input?: string | undefined; har?: string | undefined; url?: string | undefined }): Promise<CliInput> {
+async function loadInput(options: { input?: string | undefined; har?: string | undefined; url?: string | undefined; allowPrivateIps?: boolean }): Promise<CliInput> {
   if (options.input !== undefined) {
     const parsed: unknown = JSON.parse(await readFile(resolve(options.input), 'utf8'));
     const input = requireRecord(parsed, 'Input file');
@@ -585,16 +672,15 @@ async function loadInput(options: { input?: string | undefined; har?: string | u
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     throw new Error('Only http:// and https:// targets can be audited.');
   }
-  const response = await fetch(target, { signal: AbortSignal.timeout(15_000) });
-  const headers = redactResponseHeaders(response.headers);
-  return { url: response.url, status: response.status, headers, cookies: [] };
+  const fetched = await safeFetchTarget(target, { allowPrivateIps: options.allowPrivateIps });
+  return { url: fetched.url, status: fetched.status, headers: fetched.headers, cookies: [] };
 }
 
 const usage = `ACULYX CLI
 Header & Cookie Security Checker
 
 Usage:
-  npm run aculyx -- --url https://example.com [--format json|markdown|sarif] [--fail-on critical|high|medium|low|info|never]
+  npm run aculyx -- --url https://example.com [--allow-private-ips] [--format json|markdown|sarif] [--fail-on critical|high|medium|low|info|never]
   npm run aculyx -- --input audit.json [--format json|markdown|sarif] [--fail-on ...]
   npm run aculyx -- --har capture.har --url https://example.com/path [--format json|markdown|sarif] [--fail-on ...]
   npm run aculyx -- --input current.json --diff baseline.json [--format json|markdown]
@@ -604,7 +690,7 @@ Legacy alias:
   npm run seccheck -- [args]
 
 Input JSON: { "url": "https://example.com", "status": 200, "headers": {}, "cookies": [] }
-URL mode makes one explicit HTTP request and follows redirects. JSON and HAR input modes are offline; HAR mode selects the most recent exact URL match.
+URL mode makes one explicit HTTP request and follows redirects. Private/local IPs are blocked by default for SSRF protection; use --allow-private-ips for local development. JSON and HAR input modes are offline; HAR mode selects the most recent exact URL match.
 Cookie inputs must contain attributes only; cookie values are rejected.\n`;
 const helpExitCodes = `Exit codes:
   0  No finding met --fail-on (or in --diff mode, no new regression met --fail-on).

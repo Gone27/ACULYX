@@ -41,11 +41,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dedicated sidepanel powered by `d3-force` interactive SVG visualization mapping apex domains, subdomains, and trust vectors (CSP, Cookie `Domain=`, CORS `Access-Control-Allow-Origin`).
 - **Client-Side Verification Sandbox (PoC Generator)**:
   - MV3 sandboxed verification environment (`src/sandbox/poc.html`) for defensive security verification with ethical authorization gating.
+  - Scope Gating: Verification sandbox generation (`GENERATE_POC`) strictly enforces `state.scopeStatus === 'in-scope'` under an active scope profile.
+- **Bug-Bounty Scope Engine (`src/shared/scope/`)**:
+  - Pure, deterministic scope evaluation supporting globs (`*.example.com`), CIDR blocks, exact host:port pairs, and regex patterns.
+  - IDNA lowercase host normalization, trailing dot removal, and explicit port preservation (no silent port stripping).
+  - Strict exclusion precedence: exclusion rules always override inclusion rules.
+  - Immediate background tab reclassification: modifying or activating a scope profile immediately updates `scopeStatus` (`in-scope`, `out-of-scope`, `unknown`) across active tabs.
+- **Researcher Triage Management (`src/shared/reporting/triage-store.ts`)**:
+  - Decoupled triage store maintaining review states (`unreviewed`, `needs-manual-verification`, `verified-by-researcher`, `not-reproducible`, `not-a-finding`).
+  - Pre-storage secret sanitization: triage notes are scrubbed using `redactAllSecrets` and capped to 5,000 characters before writing to disk (`chrome.storage.local`).
+  - Ephemeral memory isolation: private and incognito triage annotations never touch persistent storage.
+- **Bug-Bounty Report Builder & Secret Redaction (`src/shared/reporting/report-builder.ts`)**:
+  - One-click Markdown and JSON report drafting tailored for bug-bounty platforms (HackerOne, Bugcrowd).
+  - Generates deterministic reproduction steps, preconditions, expected vs observed behavior, impact narratives, and remediation guidance.
+  - Multi-pass secret scrubbers: credentials in URLs, sensitive path segments (`/tenant-reset/`, `/password-reset/`), query tokens (`auth_token`, `state`, `code_verifier`), raw headers (`Authorization`, `Set-Cookie`), JWTs, UUIDs, and canaries are scrubbed across all export fields.
+- **CLI SSRF Protection & Safe Redirect Following (`src/cli.ts`)**:
+  - Blocks loopback, private IPv4 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`), IPv6 local, and cloud metadata (`169.254.169.254`) requests and redirects by default.
+  - Added `--allow-private-ips` flag for authorized local development auditing.
 
 ### Changed
 - **Score Versioning**: Bumped `SCORE_VERSION` to `1.7.0` to reflect rule registry and semantic CSP enhancements.
 - **Dependency Security**: Added `"overrides": { "source-map-js": "^1.2.2" }` to resolve `GHSA-68fv-2mgg-jv7q` (`source-map-js@1.2.1`). `npm audit --audit-level=low` reports 0 vulnerabilities.
-- **Firefox MV3 Compatibility**: Maintained release Gecko ID `seccheck@security-checker.local` and synchronized Firefox manifests in `dist-firefox/`.
+- **Firefox MV3 Compatibility**: Aligned release Gecko ID to `aculyx@security-checker.local` in `manifest.firefox.json` and build scripts, synchronizing Firefox manifests in `dist-firefox/`.
 
 ### Fixed
 - **Settings Re-scoring Race**: Fixed delta detection when storage change events arrived prior to port messages.

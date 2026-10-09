@@ -26,7 +26,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 // 3. Firefox MV3 adjustments
 manifest.browser_specific_settings = {
   gecko: {
-    id: "seccheck@security-checker.local",
+    id: "aculyx@security-checker.local",
     strict_min_version: "109.0"
   }
 };

@@ -76,3 +76,4 @@ jobs:
 - **Offline Modes**: JSON and HAR input modes perform zero external network requests.
 - **Cookie Value Rejection**: Cookie inputs containing a `value` field are rejected immediately. Only cookie metadata attributes (`name`, `domain`, `secure`, `httpOnly`, `sameSite`, `partitioned`) are evaluated.
 - **Redaction**: All `Set-Cookie` header values in HAR/JSON inputs are redacted before evaluation.
+- **SSRF Protection & Private IP Blocking**: When auditing live targets via `--url`, direct requests and intermediate redirect hops to private IPv4 ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`), IPv6 local addresses (`[::1]`, `fe80::/10`, `fc00::/7`), and cloud metadata IP (`169.254.169.254`) are blocked by default. Pass `--allow-private-ips` for local development servers (`http://localhost:3000`).

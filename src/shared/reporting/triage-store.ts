@@ -10,8 +10,10 @@
  */
 
 import type { ResearcherReviewState, TriageAnnotation } from './types';
+import { redactAllSecrets } from './report-builder';
 
 export const TRIAGE_STORAGE_PREFIX = 'triage:';
+export const MAX_TRIAGE_NOTE_LENGTH = 5000;
 
 export const VALID_REVIEW_STATES: readonly ResearcherReviewState[] = [
   'unreviewed',
@@ -96,10 +98,16 @@ export class TriageStore {
       throw new Error(`Invalid ResearcherReviewState: ${String(state)}`);
     }
 
+    let sanitizedNotes: string | undefined;
+    if (typeof notes === 'string' && notes.trim().length > 0) {
+      const capped = notes.trim().slice(0, MAX_TRIAGE_NOTE_LENGTH);
+      sanitizedNotes = redactAllSecrets(capped);
+    }
+
     const annotation: TriageAnnotation = {
       findingId,
       state,
-      notes: typeof notes === 'string' && notes.trim().length > 0 ? notes.trim() : undefined,
+      notes: sanitizedNotes,
       updatedAt: Date.now(),
     };
 

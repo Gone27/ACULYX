@@ -35,8 +35,11 @@ Because ACULYX evaluates traffic within the browser's own authenticated network 
 - **Subdomain Trust & Escalation**: Identifies dangerous subdomain trust bridges where wildcard cookies (`domain=.example.com`) or permissive CORS configurations expose parent-domain sessions to subdomain compromise.
 - **Attack Surface Graph**: Interactive, bounded D3-force graph mapping same-apex origin relationships, discovered endpoints, and cookie scoping trees.
 - **Auth Posture & History Diffing**: Tracks origin security posture across sessions, highlighting newly introduced header regressions or resolved security weaknesses upon authentication state changes.
-- **Cross-Surface Adaptive UI**: Unified cyberpunk-inspired interface across the Popup, full-page Options dashboard, and Firefox-compatible Side Panel, featuring custom theme tokens, compact densities, and reduced-motion accessibility.
-- **Developer CLI & CI/CD Pipeline**: Standalone CLI (`npm run aculyx`) supporting live URL audits, offline JSON/HAR inspection, regression diffs, and GitHub Actions-ready SARIF 2.1.0 output with configurable exit codes (`--fail-on high`).
+- **Bug-Bounty Scope Engine**: Declarative host, pattern, and port matching (`*.example.com`, `host:port`) with exclusion precedence, immediately classifying tabs as `in-scope`, `out-of-scope`, or `unknown`.
+- **Researcher Triage & Notes**: Decoupled triage annotations (`unreviewed`, `needs-manual-verification`, `verified-by-researcher`, `not-reproducible`, `not-a-finding`) with automatic secret/cookie redaction and length caps before storage.
+- **Bug-Bounty Report Generator**: One-click Markdown and JSON report drafting with deterministic reproduction steps, preconditions, impact narratives, and comprehensive secret/canary sanitization.
+- **Scoped PoC Verification Sandbox**: Client-side verification sandbox strictly gated to targets confirmed `in-scope` under an active profile.
+- **Developer CLI & CI/CD Pipeline**: Standalone CLI (`npm run aculyx`) supporting live URL audits with SSRF safeguards, offline JSON/HAR inspection, regression diffs, and GitHub Actions-ready SARIF 2.1.0 output with configurable exit codes (`--fail-on high`).
 
 ---
 
@@ -126,10 +129,10 @@ npm run typecheck
 # 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
 npm run lint -- --max-warnings=0
 
-# 3. Unit & Integration Tests (454 tests across 32 test suites)
+# 3. Unit & Integration Tests (633+ tests across 41 test suites)
 npm test
 
-# 4. Playwright End-to-End Tests (persistent Chromium context)
+# 4. Playwright End-to-End Tests (9 browser tests across 2 suites; auto-builds dist/)
 npm run test:e2e
 
 # 5. Dependency Audit (zero vulnerabilities at low level)

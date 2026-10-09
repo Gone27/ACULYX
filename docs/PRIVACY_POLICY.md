@@ -1,7 +1,7 @@
 # Privacy Policy for ACULYX: Header & Cookie Security Checker
 
 **Effective Date:** September 25, 2026
-**Last Updated:** October 8, 2026
+**Last Updated:** October 10, 2026
 **Author & Maintainer:** Dhyan Patel
 
 ## 1. Overview & Core Philosophy
@@ -24,10 +24,14 @@ When you choose to monitor an origin, ACULYX temporarily processes network heade
 - **API Endpoint Capture:** In-page API requests (`xmlhttprequest` and `fetch`) to first-party and permitted third-party endpoints are captured to evaluate CORS, MIME-sniffing, and security transport configurations. API endpoint states are strictly bounded (LRU capped at 50 per tab) in session storage. Query strings, auth tokens, and credential material in API URLs are automatically redacted before local display or storage.
 - **Authentication Posture Diffs (Auth-Diff Storage):** When logging in or out of a monitored site, ACULYX detects transitions based on metadata changes (such as sensitive cookie issuance or rotation). It records a high-level posture comparison (`AuthDiffRecord`) in `chrome.storage.local` to track how security headers and grades evolved between unauthenticated and authenticated states.
 - **Attack Surface Graph Persistence:** The extension analyzes permitted navigation hops, cookies, and API endpoints to map relationships between the apex domain and affiliated subdomains (`AttackSurfaceGraph`). Persisted graphs in `chrome.storage.local` are strictly bounded (maximum 100 nodes, 150 edges) and pruned during periodic maintenance sweeps.
+- **Scope Profiles:** User-configured authorized bug-bounty targets and exclusion patterns are stored in `chrome.storage.local`. Scope rules define matching criteria (`*.example.com`, `host:port`) and are never shared or transmitted off-device.
+- **Researcher Triage Notes & Review States:** Triage annotations (`unreviewed`, `needs-manual-verification`, `verified-by-researcher`, `not-reproducible`, `not-a-finding`) and researcher notes are stored in `chrome.storage.local`. Triage notes undergo automated token/cookie redaction and length capping (max 5,000 characters) before persistence. In incognito sessions, triage notes are held strictly in ephemeral in-memory storage and are never written to disk.
 - **Evaluation Mode:** An optional user setting ("Evaluation Mode") unlocks exploration of the full accumulated multi-session attack surface graph. Evaluation mode operates entirely locally with no external licensing servers, payment gateways, or network telemetry.
 - **Sensitive URL Redaction:** All URL query parameters (`?`) and fragments (`#`) are stripped before storage or export, eliminating inadvertent leaks of OAuth `state`, session tokens, or emails.
 - **Local Storage (`chrome.storage.local` & `session`):**
   - User configuration settings (e.g. per-site allowlist, severity filters, evaluation mode).
+  - Scope profiles and active bug-bounty target definitions.
+  - Researcher triage review states and sanitized notes.
   - Historical domain scores and auth-diff records (pruned according to retention settings).
   - Attack surface graphs (bounded and pruned).
   - Tab state cached in session storage to survive service worker idle cycles.
@@ -39,7 +43,10 @@ When you choose to monitor an origin, ACULYX temporarily processes network heade
 ACULYX operates under a strict principle of least privilege:
 - `webRequest` & `webNavigation`: Used passively to inspect HTTP response headers for top-level navigation and in-page API (`xmlhttprequest`/`fetch`) requests within monitored origins.
 - `cookies`: Used to inspect security flags (`Secure`, `HttpOnly`, `SameSite`) on cookies. Values are never accessed.
-- `storage`: Used to persist user settings and local score history on your device.
+- `storage`: Used to persist user settings, scope profiles, triage notes, and local score history on your device.
+- `tabs`: Used to query tab URLs, tab identifiers, and update action badges (`A`, `B`, `C`, `?`) based on live grading of active tabs.
+- `alarms`: Used to trigger periodic background maintenance sweeps (such as audit history pruning and cache expiration) without persistent background processes.
+- `sidePanel`: Used in Chromium to host the interactive Attack Surface Graph directly alongside your browser session.
 - `scripting` / `optional_host_permissions`: ACULYX requests host permissions **per-site on demand** when you explicitly click "Monitor this site".
 - `activeTab`: Supports interactions with the currently selected tab.
 

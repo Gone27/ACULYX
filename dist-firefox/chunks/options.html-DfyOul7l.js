@@ -3,7 +3,7 @@ import { d as PermissionsService } from "./lifecycle-DkYubn-s.js";
 import { t as normalizeScopeTarget } from "./normalize-BcYjnt_z.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
 import { t as applyAppearance } from "./appearance-B0GqRw0M.js";
-import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
+import { t as TriageStore } from "./triage-store-DZiYrkf7.js";
 //#region src/shared/scope/validate.ts
 /**
 * Validates a single scope rule.
@@ -884,4 +884,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-DpMTWJOM.js.map
+//# sourceMappingURL=options.html-DfyOul7l.js.map

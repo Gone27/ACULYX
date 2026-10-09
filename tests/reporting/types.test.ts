@@ -552,6 +552,30 @@ describe('Reporting & Researcher Triage Contracts (R0)', () => {
       const inPersistent = await TriageStore.getAnnotation('INCOGNITO-001');
       expect(inPersistent).toBeNull();
     });
+
+    it('redacts sensitive tokens and cookies from triage notes before persistence', async () => {
+      const dirtyNote = 'Tested with auth_token=CANARY_SECRET_12345 and Set-Cookie: session=MY_COOKIE_SECRET';
+      const annotation = await TriageStore.setAnnotation(
+        'LEAK-TEST-001',
+        'verified-by-researcher',
+        dirtyNote,
+      );
+
+      expect(annotation.notes).not.toContain('CANARY_SECRET_12345');
+      expect(annotation.notes).not.toContain('MY_COOKIE_SECRET');
+      expect(annotation.notes).toContain('[REDACTED]');
+    });
+
+    it('enforces maximum length cap on triage notes', async () => {
+      const longNote = 'A'.repeat(6000);
+      const annotation = await TriageStore.setAnnotation(
+        'LEN-TEST-001',
+        'verified-by-researcher',
+        longNote,
+      );
+
+      expect(annotation.notes?.length).toBeLessThanOrEqual(5000);
+    });
   });
 
   describe('ReportBuilder (R2 Implementation)', () => {

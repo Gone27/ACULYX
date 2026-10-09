@@ -11,6 +11,7 @@ import {
   computeFindingDiff,
   buildAuditBundle,
   verifyAuditBundle,
+  isPrivateOrLocalHost,
 } from '../src/cli';
 import fixes from '../fixes.json';
 import packageInfo from '../package.json';
@@ -268,5 +269,31 @@ describe('ACULYX CLI report', () => {
     expect(clean['set-cookie']).toBe('[redacted]');
     expect(clean['authorization']).toBe('[redacted]');
     expect(clean['x-custom']).toBe('safe');
+  });
+
+  describe('SSRF Protection & Host Validation', () => {
+    it('identifies private, local, and metadata IP ranges as private', () => {
+      expect(isPrivateOrLocalHost('localhost')).toBe(true);
+      expect(isPrivateOrLocalHost('sub.localhost')).toBe(true);
+      expect(isPrivateOrLocalHost('127.0.0.1')).toBe(true);
+      expect(isPrivateOrLocalHost('127.0.1.1')).toBe(true);
+      expect(isPrivateOrLocalHost('0.0.0.0')).toBe(true);
+      expect(isPrivateOrLocalHost('10.0.0.5')).toBe(true);
+      expect(isPrivateOrLocalHost('172.16.0.1')).toBe(true);
+      expect(isPrivateOrLocalHost('172.31.255.255')).toBe(true);
+      expect(isPrivateOrLocalHost('192.168.1.100')).toBe(true);
+      expect(isPrivateOrLocalHost('169.254.169.254')).toBe(true);
+      expect(isPrivateOrLocalHost('metadata.google.internal')).toBe(true);
+      expect(isPrivateOrLocalHost('[::1]')).toBe(true);
+      expect(isPrivateOrLocalHost('::1')).toBe(true);
+    });
+
+    it('identifies public internet hostnames and IPs as non-private', () => {
+      expect(isPrivateOrLocalHost('example.com')).toBe(false);
+      expect(isPrivateOrLocalHost('google.com')).toBe(false);
+      expect(isPrivateOrLocalHost('93.184.216.34')).toBe(false);
+      expect(isPrivateOrLocalHost('1.1.1.1')).toBe(false);
+      expect(isPrivateOrLocalHost('8.8.8.8')).toBe(false);
+    });
   });
 });

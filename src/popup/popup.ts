@@ -688,33 +688,49 @@ function buildFindingItem(finding: Finding): HTMLLIElement {
     const pocBtn = document.createElement('button');
     pocBtn.className = 'sandbox-poc-btn';
     pocBtn.textContent = '🧪 Clickjacking PoC';
-    pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
-    pocBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (currentTabId !== null) {
-        void sendToBackground({
-          type: 'GENERATE_POC',
-          tabId: currentTabId,
-          pocType: 'clickjacking',
-        });
-      }
-    });
+    const isInScope = currentState?.scopeStatus === 'in-scope';
+    if (!isInScope) {
+      pocBtn.disabled = true;
+      pocBtn.title = 'Active verification sandbox requires target to be explicitly in-scope under an active scope profile';
+      pocBtn.style.opacity = '0.5';
+      pocBtn.style.cursor = 'not-allowed';
+    } else {
+      pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
+      pocBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (currentTabId !== null) {
+          void sendToBackground({
+            type: 'GENERATE_POC',
+            tabId: currentTabId,
+            pocType: 'clickjacking',
+          });
+        }
+      });
+    }
     body.appendChild(pocBtn);
   } else if (finding.ruleId === 'SUB-006') {
     const pocBtn = document.createElement('button');
     pocBtn.className = 'sandbox-poc-btn';
     pocBtn.textContent = '🧪 COOP PoC';
-    pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
-    pocBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (currentTabId !== null) {
-        void sendToBackground({
-          type: 'GENERATE_POC',
-          tabId: currentTabId,
-          pocType: 'coop',
-        });
-      }
-    });
+    const isInScope = currentState?.scopeStatus === 'in-scope';
+    if (!isInScope) {
+      pocBtn.disabled = true;
+      pocBtn.title = 'Active verification sandbox requires target to be explicitly in-scope under an active scope profile';
+      pocBtn.style.opacity = '0.5';
+      pocBtn.style.cursor = 'not-allowed';
+    } else {
+      pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
+      pocBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (currentTabId !== null) {
+          void sendToBackground({
+            type: 'GENERATE_POC',
+            tabId: currentTabId,
+            pocType: 'coop',
+          });
+        }
+      });
+    }
     body.appendChild(pocBtn);
   }
 
