@@ -1,13 +1,13 @@
-import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, b as sanitizeUrlForStorage, g as redactHeaderValue, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-UuXgcwuP.js";
-import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CoWFP42o.js";
+import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, b as sanitizeUrlForStorage, g as redactHeaderValue, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-BeCmlDYm.js";
+import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-DkYubn-s.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-Cz81GdS9.js";
+import { t as applyAppearance } from "./appearance-BuGLOsv_.js";
 import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
 //#region src/shared/reporting/report-builder.ts
 var UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 var JWT_RE = /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g;
 var HEX_TOKEN_RE = /\b[0-9a-f]{32,}\b/gi;
-var CANARY_RE = /\b(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
+var CANARY_RE = /\b[a-zA-Z0-9_-]*(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
 /**
 * Sanitizes a URL for report inclusion by stripping credentials,
 * query strings, and fragments by default, and sanitizing path segments.
@@ -60,10 +60,13 @@ function redactAllSecrets(text) {
 	sanitized = sanitized.replace(/([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+):([^@/\s]+)@/g, "$1[REDACTED]:[REDACTED]@");
 	sanitized = sanitized.replace(/([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+)@/g, "$1[REDACTED]@");
 	sanitized = sanitized.replace(/(^|[\s"'<(])([a-zA-Z0-9_.-]+):([^@/\s:]+)@([a-zA-Z0-9.-]+)/g, "$1[REDACTED]:[REDACTED]@$4");
-	sanitized = sanitized.replace(/(\/(?:reset|token|auth|verify|confirm)\/)([^/\s?#]+)/gi, "$1[token]");
-	sanitized = sanitized.replace(/([?&][a-zA-Z0-9_.-]+=)([^&\s"'<>#]+)/g, "$1[REDACTED]");
+	sanitized = sanitized.replace(/(\/(?:[a-zA-Z0-9_.-]*(?:reset|token|auth|verify|confirm|session|secret|credential|passwd|password)[a-zA-Z0-9_.-]*)\/)([^/\s?#]+)/gi, "$1[token]");
+	sanitized = sanitized.replace(/([?&][a-zA-Z0-9_.~%-]+[=:])([^&\s"'<>#]+)/g, "$1[REDACTED]");
 	sanitized = sanitized.replace(/#([^\s"'<>)\]]+)/g, "#[REDACTED]");
-	sanitized = sanitized.replace(/\b(auth_token|token|access_token|refresh_token|id_token|secret|api_key|apikey|code_verifier|code_challenge|state|session|sessionid|passwd|password)\s*([:=])\s*([^\s,;'"<>&)]+)/gi, "$1$2[REDACTED]");
+	sanitized = sanitized.replace(/\b([a-zA-Z0-9_.~%-]*(?:auth|token|secret|api_?key|key|password|passwd|pwd|code_?verifier|code_?challenge|state|session|ticket|credential)[a-zA-Z0-9_.~%-]*)\s*([:=])(\s*)([^\s,;'"<>&)]+)/gi, (match, p1, p2, p3, p4) => {
+		if (p4 === "[REDACTED]" || p4 === "[token]" || p4 === "[id]") return match;
+		return `${p1}${p2}${p3}[REDACTED]`;
+	});
 	sanitized = sanitized.replace(JWT_RE, "[token]");
 	sanitized = sanitized.replace(UUID_RE, "[id]");
 	sanitized = sanitized.replace(HEX_TOKEN_RE, "[token]");
@@ -121,7 +124,7 @@ var RULE_KNOWLEDGE_BASE = {
 		references: ["https://portswigger.net/web-security/cors", "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS"]
 	}
 };
-var ReportBuilder = class {
+var ReportBuilder = class ReportBuilder {
 	/**
 	* Generates a complete BugBountyReportDraft from a scanner finding and optional context.
 	*/
@@ -174,46 +177,69 @@ var ReportBuilder = class {
 		return draft;
 	}
 	/**
+	* Deeply sanitizes all draft text fields, URLs, and collections as a final security boundary.
+	*/
+	static sanitizeDraft(draft) {
+		const clean = {
+			...draft,
+			title: redactAllSecrets(draft.title ?? ""),
+			target: sanitizeUrlForReport(draft.target ?? ""),
+			summary: redactAllSecrets(draft.summary ?? ""),
+			reproductionSteps: (draft.reproductionSteps ?? []).map((s) => redactAllSecrets(s)),
+			preconditions: (draft.preconditions ?? []).map((p) => redactAllSecrets(p)),
+			expectedBehavior: redactAllSecrets(draft.expectedBehavior ?? ""),
+			observedBehavior: redactAllSecrets(draft.observedBehavior ?? ""),
+			impact: redactAllSecrets(draft.impact ?? ""),
+			evidence: redactAllSecrets(draft.evidence ?? ""),
+			remediation: redactAllSecrets(draft.remediation ?? ""),
+			limitations: (draft.limitations ?? []).map((l) => redactAllSecrets(l))
+		};
+		if (draft.references !== void 0) clean.references = draft.references.map((r) => redactAllSecrets(r));
+		return clean;
+	}
+	/**
 	* Formats a BugBountyReportDraft into clean, submission-ready Markdown.
+	* Independently sanitizes caller-supplied and modified drafts.
 	*/
 	static formatReportAsMarkdown(draft) {
+		const cleanDraft = ReportBuilder.sanitizeDraft(draft);
 		const lines = [];
-		lines.push(`# ${draft.title}\n`);
+		lines.push(`# ${cleanDraft.title}\n`);
 		lines.push(`## Vulnerability Details`);
-		lines.push(`- **Target:** \`${draft.target}\``);
-		lines.push(`- **Severity:** **${draft.severity.toUpperCase()}**`);
-		if (draft.ruleId !== void 0 && draft.ruleId.length > 0) lines.push(`- **Rule ID:** \`${draft.ruleId}\``);
-		if (draft.cweId !== void 0 && draft.cweId.length > 0) lines.push(`- **CWE:** [${draft.cweId}](https://cwe.mitre.org/data/definitions/${draft.cweId.replace("CWE-", "")}.html)`);
-		if (draft.cvssScore !== void 0) lines.push(`- **CVSS Score:** ${draft.cvssScore.toFixed(1)}`);
-		if (draft.scopeStatus !== void 0) lines.push(`- **Scope Status:** \`${draft.scopeStatus}\``);
-		lines.push(`- **Researcher Review State:** \`${draft.reviewState}\`\n`);
+		lines.push(`- **Target:** \`${cleanDraft.target}\``);
+		lines.push(`- **Severity:** **${cleanDraft.severity.toUpperCase()}**`);
+		if (cleanDraft.ruleId !== void 0 && cleanDraft.ruleId.length > 0) lines.push(`- **Rule ID:** \`${cleanDraft.ruleId}\``);
+		if (cleanDraft.cweId !== void 0 && cleanDraft.cweId.length > 0) lines.push(`- **CWE:** [${cleanDraft.cweId}](https://cwe.mitre.org/data/definitions/${cleanDraft.cweId.replace("CWE-", "")}.html)`);
+		if (cleanDraft.cvssScore !== void 0) lines.push(`- **CVSS Score:** ${cleanDraft.cvssScore.toFixed(1)}`);
+		if (cleanDraft.scopeStatus !== void 0) lines.push(`- **Scope Status:** \`${cleanDraft.scopeStatus}\``);
+		lines.push(`- **Researcher Review State:** \`${cleanDraft.reviewState}\`\n`);
 		lines.push(`## Executive Summary`);
-		lines.push(`${draft.summary}\n`);
+		lines.push(`${cleanDraft.summary}\n`);
 		lines.push(`## Preconditions`);
-		for (const pre of draft.preconditions) lines.push(`- ${pre}`);
+		for (const pre of cleanDraft.preconditions) lines.push(`- ${pre}`);
 		lines.push("");
 		lines.push(`## Reproduction Steps`);
-		for (const step of draft.reproductionSteps) lines.push(`${step}`);
+		for (const step of cleanDraft.reproductionSteps) lines.push(`${step}`);
 		lines.push("");
 		lines.push(`## Expected vs Observed Behavior`);
-		lines.push(`**Expected:**\n${draft.expectedBehavior}\n`);
-		lines.push(`**Observed:**\n${draft.observedBehavior}\n`);
+		lines.push(`**Expected:**\n${cleanDraft.expectedBehavior}\n`);
+		lines.push(`**Observed:**\n${cleanDraft.observedBehavior}\n`);
 		lines.push(`## Sanitized Evidence`);
 		lines.push("```http");
-		lines.push(draft.evidence);
+		lines.push(cleanDraft.evidence);
 		lines.push("```\n");
 		lines.push(`## Security Impact`);
-		lines.push(`${draft.impact}\n`);
+		lines.push(`${cleanDraft.impact}\n`);
 		lines.push(`## Remediation`);
-		lines.push(`${draft.remediation}\n`);
-		if (draft.limitations.length > 0) {
+		lines.push(`${cleanDraft.remediation}\n`);
+		if (cleanDraft.limitations.length > 0) {
 			lines.push(`## Detection Limitations & Caveats`);
-			for (const lim of draft.limitations) lines.push(`- ${lim}`);
+			for (const lim of cleanDraft.limitations) lines.push(`- ${lim}`);
 			lines.push("");
 		}
-		if (draft.references !== void 0 && draft.references.length > 0) {
+		if (cleanDraft.references !== void 0 && cleanDraft.references.length > 0) {
 			lines.push(`## References`);
-			for (const ref of draft.references) lines.push(`- ${ref}`);
+			for (const ref of cleanDraft.references) lines.push(`- ${ref}`);
 			lines.push("");
 		}
 		lines.push(`---\n*Report generated by ACULYX Passive Bug-Bounty Scanner. URLs, headers, and reported fields have been processed by automated secret redaction; researchers must review all details prior to submission.*`);
@@ -221,9 +247,11 @@ var ReportBuilder = class {
 	}
 	/**
 	* Serializes a BugBountyReportDraft into formatted JSON string.
+	* Independently sanitizes caller-supplied and modified drafts.
 	*/
 	static formatReportAsJson(draft) {
-		return JSON.stringify(draft, null, 2);
+		const cleanDraft = ReportBuilder.sanitizeDraft(draft);
+		return JSON.stringify(cleanDraft, null, 2);
 	}
 };
 //#endregion
@@ -1524,4 +1552,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Da_8AzQE.js.map
+//# sourceMappingURL=popup.html-Cwh2i_qD.js.map

@@ -34,7 +34,7 @@ export class ScopeEngine {
 
   public setProfile(profile: ScopeProfile): void {
     this.profile = profile;
-    this.rules = [...profile.rules];
+    this.setRules(profile.rules ?? []);
   }
 
   public getProfile(): ScopeProfile | undefined {
@@ -42,7 +42,16 @@ export class ScopeEngine {
   }
 
   public setRules(rules: ScopeRule[]): void {
-    this.rules = [...rules];
+    this.rules = (rules ?? []).map((r) => {
+      const sanitized: ScopeRule = {
+        pattern: r.pattern,
+        type: r.type,
+      };
+      if (typeof r.description === 'string' && r.description.trim().length > 0) {
+        sanitized.description = r.description.trim();
+      }
+      return sanitized;
+    });
   }
 
   public getRules(): ScopeRule[] {
@@ -50,7 +59,14 @@ export class ScopeEngine {
   }
 
   public addRule(rule: ScopeRule): void {
-    this.rules.push(rule);
+    const sanitized: ScopeRule = {
+      pattern: rule.pattern,
+      type: rule.type,
+    };
+    if (typeof rule.description === 'string' && rule.description.trim().length > 0) {
+      sanitized.description = rule.description.trim();
+    }
+    this.rules.push(sanitized);
   }
 
   public removeRule(pattern: string): void {
@@ -96,7 +112,7 @@ export class ScopeEngine {
           status: 'out-of-scope',
           matchedPattern: rule.pattern,
           ruleType: 'exclude',
-          reason: (rule.description !== undefined && rule.description.length > 0)
+          reason: (typeof rule.description === 'string' && rule.description.trim().length > 0)
             ? `Target matches exclusion rule ${rule.pattern}: ${rule.description}`
             : `Target matches exclusion rule: ${rule.pattern}`,
         };
@@ -110,7 +126,7 @@ export class ScopeEngine {
           status: 'in-scope',
           matchedPattern: rule.pattern,
           ruleType: 'include',
-          reason: (rule.description !== undefined && rule.description.length > 0)
+          reason: (typeof rule.description === 'string' && rule.description.trim().length > 0)
             ? `Target matches inclusion rule ${rule.pattern}: ${rule.description}`
             : `Target matches inclusion rule: ${rule.pattern}`,
         };

@@ -6,6 +6,7 @@ import {
   resolveCookieOverlaps,
   SettingsService,
   SettingsTransitionPipeline,
+  settingsTransitionPipeline,
   UnsupportedSchemaError,
 } from '../../src/shared/settings';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
@@ -380,6 +381,56 @@ describe('SettingsTransitionPipeline and atomic transitions (WS1 1C)', () => {
       expect(SettingsService.getCachedSettings().theme).toBe('dark');
       expect(subscriber).toHaveBeenCalledTimes(1);
       expect(subscriber).toHaveBeenCalledWith(expect.objectContaining({ theme: 'dark' }));
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('migration sanitizes malformed scope profiles with description: null', () => {
+    const raw = {
+      ...DEFAULT_SETTINGS,
+      scopeProfiles: [
+        {
+          id: 'test-1',
+          name: 'Target Program',
+          rules: [
+            { pattern: 'example.com', type: 'include', description: null },
+            { pattern: '*.example.com', type: 'exclude', description: '  Valid description  ' },
+          ],
+        },
+      ],
+      activeScopeProfileId: 'test-1',
+    };
+    const migrated = migrateSettings(raw);
+    expect(migrated.scopeProfiles?.[0]?.rules?.[0]?.description).toBeUndefined();
+    expect(migrated.scopeProfiles?.[0]?.rules?.[1]?.description).toBe('Valid description');
+  });
+
+  it('transitionSettings notifies subscriber and passes new profile to onRescoreTabs hook (defect 4 regression)', async () => {
+    let observedActiveProfileInHook: string | null = 'not-called';
+    let observedActiveProfileInSubscriber: string | null = 'not-called';
+
+    const subscriber = vi.fn((s: SettingsV2) => {
+      observedActiveProfileInSubscriber = s.activeScopeProfileId ?? null;
+    });
+    const unsubscribe = SettingsService.onSettingsChanged(subscriber);
+
+    settingsTransitionPipeline.registerHooks({
+      onRescoreTabs: (_prev: SettingsV2, next: SettingsV2) => {
+        observedActiveProfileInHook = next.activeScopeProfileId ?? null;
+      },
+    });
+
+    try {
+      const initial = { ...DEFAULT_SETTINGS, activeScopeProfileId: 'old-profile' };
+      await settingsTransitionPipeline.transition(initial, 'storage');
+
+      const updated = { ...DEFAULT_SETTINGS, activeScopeProfileId: 'new-profile' };
+      await settingsTransitionPipeline.transition(updated, 'storage');
+
+      expect(observedActiveProfileInHook).toBe('new-profile');
+      expect(observedActiveProfileInSubscriber).toBe('new-profile');
+      expect(subscriber).toHaveBeenCalledWith(expect.objectContaining({ activeScopeProfileId: 'new-profile' }));
     } finally {
       unsubscribe();
     }

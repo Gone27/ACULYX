@@ -1,8 +1,8 @@
-import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER, S as normalizeCookieList, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-UuXgcwuP.js";
-import { d as PermissionsService } from "./lifecycle-CoWFP42o.js";
+import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER, S as normalizeCookieList, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-BeCmlDYm.js";
+import { d as PermissionsService } from "./lifecycle-DkYubn-s.js";
 import { t as normalizeScopeTarget } from "./normalize-BcYjnt_z.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-Cz81GdS9.js";
+import { t as applyAppearance } from "./appearance-BuGLOsv_.js";
 import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
 //#region src/shared/scope/validate.ts
 /**
@@ -21,6 +21,10 @@ function validateScopeRule(rule) {
 	if (r.type !== "include" && r.type !== "exclude") return {
 		valid: false,
 		error: "Rule type must be either \"include\" or \"exclude\""
+	};
+	if (r.description !== void 0 && r.description !== null && typeof r.description !== "string") return {
+		valid: false,
+		error: "Rule description must be a string if provided"
 	};
 	try {
 		normalizeScopeTarget(r.pattern);
@@ -880,4 +884,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-CdU4DVcL.js.map
+//# sourceMappingURL=options.html-Bk7UrurM.js.map

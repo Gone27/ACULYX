@@ -1,5 +1,5 @@
-import { A as DEFAULT_SETTINGS, D as onEpochChange, E as incrementStorageResetEpoch, F as SCORE_VERSION, L as SIDEPANEL_PORT_NAME, N as POPUP_PORT_NAME, O as setStorageResetEpoch, P as RESTRICTED_SCHEMES, T as getStorageResetEpoch, a as SessionStorage, b as sanitizeUrlForStorage, c as checkDuplicateHeaders, f as isSensitiveCookie, h as parseCspDirectives, i as LocalStorage, j as GRADE_THRESHOLDS, k as BADGE_COLORS, l as extractSetCookieHeaders, m as originFromUrl, n as portSend, o as checkSubdomainTrust, s as registrableDomain, t as PortRegistry, u as hasCspBypassProtection, v as sanitizeCspPolicyForStorage, w as settingsTransitionPipeline, x as SettingsService, y as sanitizeEvidence } from "./messaging-UuXgcwuP.js";
-import { C as tabGenerations, S as setTabGeneration, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-CoWFP42o.js";
+import { A as DEFAULT_SETTINGS, D as onEpochChange, E as incrementStorageResetEpoch, F as SCORE_VERSION, L as SIDEPANEL_PORT_NAME, N as POPUP_PORT_NAME, O as setStorageResetEpoch, P as RESTRICTED_SCHEMES, T as getStorageResetEpoch, a as SessionStorage, b as sanitizeUrlForStorage, c as checkDuplicateHeaders, f as isSensitiveCookie, h as parseCspDirectives, i as LocalStorage, j as GRADE_THRESHOLDS, k as BADGE_COLORS, l as extractSetCookieHeaders, m as originFromUrl, n as portSend, o as checkSubdomainTrust, s as registrableDomain, t as PortRegistry, u as hasCspBypassProtection, v as sanitizeCspPolicyForStorage, w as settingsTransitionPipeline, x as SettingsService, y as sanitizeEvidence } from "./messaging-BeCmlDYm.js";
+import { C as tabGenerations, S as setTabGeneration, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-DkYubn-s.js";
 import { t as normalizeScopeTarget } from "./normalize-BcYjnt_z.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
@@ -557,19 +557,31 @@ var ScopeEngine = class {
 	}
 	setProfile(profile) {
 		this.profile = profile;
-		this.rules = [...profile.rules];
+		this.setRules(profile.rules ?? []);
 	}
 	getProfile() {
 		return this.profile;
 	}
 	setRules(rules) {
-		this.rules = [...rules];
+		this.rules = (rules ?? []).map((r) => {
+			const sanitized = {
+				pattern: r.pattern,
+				type: r.type
+			};
+			if (typeof r.description === "string" && r.description.trim().length > 0) sanitized.description = r.description.trim();
+			return sanitized;
+		});
 	}
 	getRules() {
 		return [...this.rules];
 	}
 	addRule(rule) {
-		this.rules.push(rule);
+		const sanitized = {
+			pattern: rule.pattern,
+			type: rule.type
+		};
+		if (typeof rule.description === "string" && rule.description.trim().length > 0) sanitized.description = rule.description.trim();
+		this.rules.push(sanitized);
 	}
 	removeRule(pattern) {
 		this.rules = this.rules.filter((r) => r.pattern !== pattern);
@@ -604,13 +616,13 @@ var ScopeEngine = class {
 			status: "out-of-scope",
 			matchedPattern: rule.pattern,
 			ruleType: "exclude",
-			reason: rule.description !== void 0 && rule.description.length > 0 ? `Target matches exclusion rule ${rule.pattern}: ${rule.description}` : `Target matches exclusion rule: ${rule.pattern}`
+			reason: typeof rule.description === "string" && rule.description.trim().length > 0 ? `Target matches exclusion rule ${rule.pattern}: ${rule.description}` : `Target matches exclusion rule: ${rule.pattern}`
 		};
 		for (const rule of this.rules) if (rule.type === "include" && matchTarget(normTarget, rule)) return {
 			status: "in-scope",
 			matchedPattern: rule.pattern,
 			ruleType: "include",
-			reason: rule.description !== void 0 && rule.description.length > 0 ? `Target matches inclusion rule ${rule.pattern}: ${rule.description}` : `Target matches inclusion rule: ${rule.pattern}`
+			reason: typeof rule.description === "string" && rule.description.trim().length > 0 ? `Target matches inclusion rule ${rule.pattern}: ${rule.description}` : `Target matches inclusion rule: ${rule.pattern}`
 		};
 		return {
 			status: "unknown",
@@ -4060,11 +4072,12 @@ function debounceGraphMerge(apex, hostname, state, actionEpoch) {
 	}, 500);
 	graphDebounceTimers.set(apex, timer);
 }
-function recomputeTabState(tabId, state, actionEpoch) {
+function recomputeTabState(tabId, state, actionEpoch, settingsOverride) {
 	if (actionEpoch !== void 0 && currentResetEpoch !== actionEpoch) return;
 	if (CapturePolicy.getSnapshot().mode === "off") return;
+	const effectiveSettings = settingsOverride ?? currentSettings;
 	let activeProfile;
-	if (currentSettings.activeScopeProfileId !== void 0 && currentSettings.activeScopeProfileId !== null && currentSettings.activeScopeProfileId.length > 0 && currentSettings.scopeProfiles !== void 0) activeProfile = currentSettings.scopeProfiles.find((p) => p.id === currentSettings.activeScopeProfileId);
+	if (effectiveSettings.activeScopeProfileId !== void 0 && effectiveSettings.activeScopeProfileId !== null && effectiveSettings.activeScopeProfileId.length > 0 && effectiveSettings.scopeProfiles !== void 0) activeProfile = effectiveSettings.scopeProfiles.find((p) => p.id === effectiveSettings.activeScopeProfileId);
 	const result = runRules({
 		hops: state.hops,
 		cookies: state.cookies,
@@ -4072,8 +4085,8 @@ function recomputeTabState(tabId, state, actionEpoch) {
 		metaCspFound: state.coverage.metaCspFound,
 		captureFindings: state.captureFindings ?? [],
 		cookieSettings: {
-			alwaysSensitive: currentSettings.sensitiveCookieNames,
-			alwaysIgnore: currentSettings.ignoredCookieNames
+			alwaysSensitive: effectiveSettings.sensitiveCookieNames,
+			alwaysIgnore: effectiveSettings.ignoredCookieNames
 		},
 		scopeProfile: activeProfile
 	});
@@ -4087,6 +4100,11 @@ function recomputeTabState(tabId, state, actionEpoch) {
 		state.scopeStatus = void 0;
 		state.scopeReason = void 0;
 	}
+	if (state.apiEndpoints) for (const endpoint of state.apiEndpoints.values()) endpoint.findings = runApiRules(endpoint.lastHop, {
+		alwaysSensitive: effectiveSettings.sensitiveCookieNames,
+		alwaysIgnore: effectiveSettings.ignoredCookieNames,
+		scopeProfile: activeProfile
+	});
 	state.findings = result.findings;
 	state.score = result.score;
 	state.grade = result.grade;
@@ -4194,10 +4212,11 @@ async function clearBadgesOnAllTabs() {
 	})?.catch?.(() => void 0);
 }
 settingsTransitionPipeline.registerHooks({
-	onRescoreTabs: (_prev, _next) => {
+	onRescoreTabs: (_prev, next) => {
+		currentSettings = next;
 		const epoch = currentResetEpoch;
 		for (const [tabId, state] of Array.from(tabStates.entries())) {
-			recomputeTabState(tabId, state, epoch);
+			recomputeTabState(tabId, state, epoch, next);
 			writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state, epoch).catch(() => void 0));
 			broadcastCoalescer.push(tabId, state);
 		}
@@ -5006,4 +5025,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, currentResetEpoch, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, recordThirdPartyBlocked, resolveTabPrivacy, sessionHydrationReady, setCurrentResetEpoch, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations, writeBatcher };
 
-//# sourceMappingURL=index.ts-DQoY_A3g.js.map
+//# sourceMappingURL=index.ts-B8odQgoG.js.map

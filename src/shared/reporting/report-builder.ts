@@ -17,7 +17,7 @@ import { sanitizeUrlForStorage, redactHeaderValue } from '../../rules/utils';
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const JWT_RE = /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g;
 const HEX_TOKEN_RE = /\b[0-9a-f]{32,}\b/gi;
-const CANARY_RE = /\b(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
+const CANARY_RE = /\b[a-zA-Z0-9_-]*(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
 
 /**
  * Sanitizes a URL for report inclusion by stripping credentials,
@@ -107,15 +107,15 @@ export function redactAllSecrets(text: string): string {
     '$1[REDACTED]:[REDACTED]@$4',
   );
 
-  // 5. Redact sensitive path segments
+  // 5. Redact sensitive path segments (handles compound paths like /tenant-reset/, /password-reset/, etc.)
   sanitized = sanitized.replace(
-    /(\/(?:reset|token|auth|verify|confirm)\/)([^/\s?#]+)/gi,
+    /(\/(?:[a-zA-Z0-9_.-]*(?:reset|token|auth|verify|confirm|session|secret|credential|passwd|password)[a-zA-Z0-9_.-]*)\/)([^/\s?#]+)/gi,
     '$1[token]',
   );
 
-  // 6. Redact URL query parameter values in text
+  // 6. Redact URL query parameter values in text (including percent-encoded query param names)
   sanitized = sanitized.replace(
-    /([?&][a-zA-Z0-9_.-]+=)([^&\s"'<>#]+)/g,
+    /([?&][a-zA-Z0-9_.~%-]+[=:])([^&\s"'<>#]+)/g,
     '$1[REDACTED]',
   );
 
@@ -125,10 +125,15 @@ export function redactAllSecrets(text: string): string {
     '#[REDACTED]',
   );
 
-  // 8. Redact key-value token patterns in free text
+  // 8. Redact key-value token patterns in free text (supporting percent-encoding e.g. auth%5Ftoken=...)
   sanitized = sanitized.replace(
-    /\b(auth_token|token|access_token|refresh_token|id_token|secret|api_key|apikey|code_verifier|code_challenge|state|session|sessionid|passwd|password)\s*([:=])\s*([^\s,;'"<>&)]+)/gi,
-    '$1$2[REDACTED]',
+    /\b([a-zA-Z0-9_.~%-]*(?:auth|token|secret|api_?key|key|password|passwd|pwd|code_?verifier|code_?challenge|state|session|ticket|credential)[a-zA-Z0-9_.~%-]*)\s*([:=])(\s*)([^\s,;'"<>&)]+)/gi,
+    (match, p1: string, p2: string, p3: string, p4: string) => {
+      if (p4 === '[REDACTED]' || p4 === '[token]' || p4 === '[id]') {
+        return match;
+      }
+      return `${p1}${p2}${p3}[REDACTED]`;
+    },
   );
 
   // 9. Redact JWTs
@@ -346,63 +351,91 @@ export class ReportBuilder {
   }
 
   /**
+   * Deeply sanitizes all draft text fields, URLs, and collections as a final security boundary.
+   */
+  static sanitizeDraft(draft: BugBountyReportDraft): BugBountyReportDraft {
+    const clean: BugBountyReportDraft = {
+      ...draft,
+      title: redactAllSecrets(draft.title ?? ''),
+      target: sanitizeUrlForReport(draft.target ?? ''),
+      summary: redactAllSecrets(draft.summary ?? ''),
+      reproductionSteps: (draft.reproductionSteps ?? []).map((s) => redactAllSecrets(s)),
+      preconditions: (draft.preconditions ?? []).map((p) => redactAllSecrets(p)),
+      expectedBehavior: redactAllSecrets(draft.expectedBehavior ?? ''),
+      observedBehavior: redactAllSecrets(draft.observedBehavior ?? ''),
+      impact: redactAllSecrets(draft.impact ?? ''),
+      evidence: redactAllSecrets(draft.evidence ?? ''),
+      remediation: redactAllSecrets(draft.remediation ?? ''),
+      limitations: (draft.limitations ?? []).map((l) => redactAllSecrets(l)),
+    };
+
+    if (draft.references !== undefined) {
+      clean.references = draft.references.map((r) => redactAllSecrets(r));
+    }
+
+    return clean;
+  }
+
+  /**
    * Formats a BugBountyReportDraft into clean, submission-ready Markdown.
+   * Independently sanitizes caller-supplied and modified drafts.
    */
   static formatReportAsMarkdown(draft: BugBountyReportDraft): string {
+    const cleanDraft = ReportBuilder.sanitizeDraft(draft);
     const lines: string[] = [];
 
-    lines.push(`# ${draft.title}\n`);
+    lines.push(`# ${cleanDraft.title}\n`);
 
     lines.push(`## Vulnerability Details`);
-    lines.push(`- **Target:** \`${draft.target}\``);
-    lines.push(`- **Severity:** **${draft.severity.toUpperCase()}**`);
-    if (draft.ruleId !== undefined && draft.ruleId.length > 0) lines.push(`- **Rule ID:** \`${draft.ruleId}\``);
-    if (draft.cweId !== undefined && draft.cweId.length > 0) lines.push(`- **CWE:** [${draft.cweId}](https://cwe.mitre.org/data/definitions/${draft.cweId.replace('CWE-', '')}.html)`);
-    if (draft.cvssScore !== undefined) lines.push(`- **CVSS Score:** ${draft.cvssScore.toFixed(1)}`);
-    if (draft.scopeStatus !== undefined) lines.push(`- **Scope Status:** \`${draft.scopeStatus}\``);
-    lines.push(`- **Researcher Review State:** \`${draft.reviewState}\`\n`);
+    lines.push(`- **Target:** \`${cleanDraft.target}\``);
+    lines.push(`- **Severity:** **${cleanDraft.severity.toUpperCase()}**`);
+    if (cleanDraft.ruleId !== undefined && cleanDraft.ruleId.length > 0) lines.push(`- **Rule ID:** \`${cleanDraft.ruleId}\``);
+    if (cleanDraft.cweId !== undefined && cleanDraft.cweId.length > 0) lines.push(`- **CWE:** [${cleanDraft.cweId}](https://cwe.mitre.org/data/definitions/${cleanDraft.cweId.replace('CWE-', '')}.html)`);
+    if (cleanDraft.cvssScore !== undefined) lines.push(`- **CVSS Score:** ${cleanDraft.cvssScore.toFixed(1)}`);
+    if (cleanDraft.scopeStatus !== undefined) lines.push(`- **Scope Status:** \`${cleanDraft.scopeStatus}\``);
+    lines.push(`- **Researcher Review State:** \`${cleanDraft.reviewState}\`\n`);
 
     lines.push(`## Executive Summary`);
-    lines.push(`${draft.summary}\n`);
+    lines.push(`${cleanDraft.summary}\n`);
 
     lines.push(`## Preconditions`);
-    for (const pre of draft.preconditions) {
+    for (const pre of cleanDraft.preconditions) {
       lines.push(`- ${pre}`);
     }
     lines.push('');
 
     lines.push(`## Reproduction Steps`);
-    for (const step of draft.reproductionSteps) {
+    for (const step of cleanDraft.reproductionSteps) {
       lines.push(`${step}`);
     }
     lines.push('');
 
     lines.push(`## Expected vs Observed Behavior`);
-    lines.push(`**Expected:**\n${draft.expectedBehavior}\n`);
-    lines.push(`**Observed:**\n${draft.observedBehavior}\n`);
+    lines.push(`**Expected:**\n${cleanDraft.expectedBehavior}\n`);
+    lines.push(`**Observed:**\n${cleanDraft.observedBehavior}\n`);
 
     lines.push(`## Sanitized Evidence`);
     lines.push('```http');
-    lines.push(draft.evidence);
+    lines.push(cleanDraft.evidence);
     lines.push('```\n');
 
     lines.push(`## Security Impact`);
-    lines.push(`${draft.impact}\n`);
+    lines.push(`${cleanDraft.impact}\n`);
 
     lines.push(`## Remediation`);
-    lines.push(`${draft.remediation}\n`);
+    lines.push(`${cleanDraft.remediation}\n`);
 
-    if (draft.limitations.length > 0) {
+    if (cleanDraft.limitations.length > 0) {
       lines.push(`## Detection Limitations & Caveats`);
-      for (const lim of draft.limitations) {
+      for (const lim of cleanDraft.limitations) {
         lines.push(`- ${lim}`);
       }
       lines.push('');
     }
 
-    if (draft.references !== undefined && draft.references.length > 0) {
+    if (cleanDraft.references !== undefined && cleanDraft.references.length > 0) {
       lines.push(`## References`);
-      for (const ref of draft.references) {
+      for (const ref of cleanDraft.references) {
         lines.push(`- ${ref}`);
       }
       lines.push('');
@@ -415,8 +448,10 @@ export class ReportBuilder {
 
   /**
    * Serializes a BugBountyReportDraft into formatted JSON string.
+   * Independently sanitizes caller-supplied and modified drafts.
    */
   static formatReportAsJson(draft: BugBountyReportDraft): string {
-    return JSON.stringify(draft, null, 2);
+    const cleanDraft = ReportBuilder.sanitizeDraft(draft);
+    return JSON.stringify(cleanDraft, null, 2);
   }
 }

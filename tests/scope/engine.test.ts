@@ -76,4 +76,24 @@ describe('ScopeEngine', () => {
     const emptyEngine = new ScopeEngine([]);
     expect(emptyEngine.evaluate('https://example.com').status).toBe('unknown');
   });
+
+  it('does not throw when evaluating a profile with description: null (defect 3 regression)', () => {
+    const malformedProfile = {
+      id: 'malformed-profile',
+      name: 'Malformed Profile',
+      rules: [
+        { pattern: 'example.com', type: 'include', description: null },
+        { pattern: 'bad.example.com', type: 'exclude', description: null },
+      ],
+    } as unknown as ScopeProfile;
+    const engine = new ScopeEngine(malformedProfile);
+    expect(() => engine.evaluate('https://example.com/login')).not.toThrow();
+    const res = engine.evaluate('https://example.com/login');
+    expect(res.status).toBe('in-scope');
+    expect(res.reason).toBe('Target matches inclusion rule: example.com');
+
+    const resExclude = engine.evaluate('https://bad.example.com/login');
+    expect(resExclude.status).toBe('out-of-scope');
+    expect(resExclude.reason).toBe('Target matches exclusion rule: bad.example.com');
+  });
 });

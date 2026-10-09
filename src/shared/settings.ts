@@ -10,7 +10,7 @@
  */
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
-import type { Severity, SettingsV2, ScopeProfile } from './types';
+import type { Severity, SettingsV2, ScopeProfile, ScopeRule } from './types';
 import {
   storageWriteBarrier,
   getStorageResetEpoch,
@@ -203,8 +203,46 @@ export function migrateSettings(raw: unknown): SettingsV2 {
   const scopeProfiles: ScopeProfile[] = [];
   if (Array.isArray(obj.scopeProfiles)) {
     for (const item of obj.scopeProfiles) {
-      if (typeof item === 'object' && item !== null && typeof (item as ScopeProfile).id === 'string' && typeof (item as ScopeProfile).name === 'string' && Array.isArray((item as ScopeProfile).rules)) {
-        scopeProfiles.push(item as ScopeProfile);
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).id === 'string' &&
+        typeof (item as Record<string, unknown>).name === 'string' &&
+        Array.isArray((item as Record<string, unknown>).rules)
+      ) {
+        const rawProfile = item as Record<string, unknown>;
+        const rawRules = Array.isArray(rawProfile.rules) ? rawProfile.rules : [];
+        const sanitizedRules: ScopeRule[] = [];
+        for (const r of rawRules) {
+          if (
+            typeof r === 'object' &&
+            r !== null &&
+            typeof (r as Record<string, unknown>).pattern === 'string' &&
+            ((r as Record<string, unknown>).pattern as string).trim().length > 0
+          ) {
+            const ruleObj = r as Record<string, unknown>;
+            const rule: ScopeRule = {
+              pattern: ((ruleObj.pattern as string) ?? '').trim(),
+              type: ruleObj.type === 'exclude' ? 'exclude' : 'include',
+            };
+            if (typeof ruleObj.description === 'string' && ruleObj.description.trim().length > 0) {
+              rule.description = ruleObj.description.trim();
+            }
+            sanitizedRules.push(rule);
+          }
+        }
+        const profile: ScopeProfile = {
+          id: ((rawProfile.id as string) ?? '').trim(),
+          name: ((rawProfile.name as string) ?? '').trim(),
+          rules: sanitizedRules,
+        };
+        if (typeof rawProfile.notes === 'string' && rawProfile.notes.trim().length > 0) {
+          profile.notes = rawProfile.notes.trim();
+        }
+        if (typeof rawProfile.lastReviewed === 'number' && Number.isFinite(rawProfile.lastReviewed)) {
+          profile.lastReviewed = rawProfile.lastReviewed;
+        }
+        scopeProfiles.push(profile);
       }
     }
   }
@@ -326,6 +364,15 @@ export class SettingsTransitionPipeline {
     this.lastAppliedSettings = { ...validated };
     cachedSettings = { ...validated };
 
+    // Update subscribers first so all local caches and listeners are current BEFORE side-effect hooks run
+    for (const cb of listeners) {
+      try {
+        cb(validated);
+      } catch {
+        // Ignore listener errors
+      }
+    }
+
     // 5. Execution of Side Effects
     if (modeChanged && this.hooks.onModeChange) {
       await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
@@ -337,15 +384,6 @@ export class SettingsTransitionPipeline {
 
     if (this.hooks.onSettingsApplied) {
       await this.hooks.onSettingsApplied(validated);
-    }
-
-    // 6. Notify subscribers
-    for (const cb of listeners) {
-      try {
-        cb(validated);
-      } catch {
-        // Ignore listener errors
-      }
     }
 
     return { ...validated };

@@ -396,19 +396,26 @@ function debounceGraphMerge(apex: string, hostname: string, state: TabState, act
   graphDebounceTimers.set(apex, timer);
 }
 
-function recomputeTabState(tabId: number, state: TabState, actionEpoch?: number): void {
+function recomputeTabState(
+  tabId: number,
+  state: TabState,
+  actionEpoch?: number,
+  settingsOverride?: SettingsV2,
+): void {
   if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
   if (CapturePolicy.getSnapshot().mode === 'off') return;
 
+  const effectiveSettings = settingsOverride ?? currentSettings;
+
   let activeProfile: ScopeProfile | undefined;
   if (
-    currentSettings.activeScopeProfileId !== undefined &&
-    currentSettings.activeScopeProfileId !== null &&
-    currentSettings.activeScopeProfileId.length > 0 &&
-    currentSettings.scopeProfiles !== undefined
+    effectiveSettings.activeScopeProfileId !== undefined &&
+    effectiveSettings.activeScopeProfileId !== null &&
+    effectiveSettings.activeScopeProfileId.length > 0 &&
+    effectiveSettings.scopeProfiles !== undefined
   ) {
-    activeProfile = currentSettings.scopeProfiles.find(
-      (p) => p.id === currentSettings.activeScopeProfileId
+    activeProfile = effectiveSettings.scopeProfiles.find(
+      (p) => p.id === effectiveSettings.activeScopeProfileId
     );
   }
 
@@ -419,8 +426,8 @@ function recomputeTabState(tabId: number, state: TabState, actionEpoch?: number)
     metaCspFound: state.coverage.metaCspFound,
     captureFindings: state.captureFindings ?? [],
     cookieSettings: {
-      alwaysSensitive: currentSettings.sensitiveCookieNames,
-      alwaysIgnore: currentSettings.ignoredCookieNames,
+      alwaysSensitive: effectiveSettings.sensitiveCookieNames,
+      alwaysIgnore: effectiveSettings.ignoredCookieNames,
     },
     scopeProfile: activeProfile,
   });
@@ -436,6 +443,16 @@ function recomputeTabState(tabId: number, state: TabState, actionEpoch?: number)
   } else {
     state.scopeStatus = undefined;
     state.scopeReason = undefined;
+  }
+
+  if (state.apiEndpoints) {
+    for (const endpoint of state.apiEndpoints.values()) {
+      endpoint.findings = runApiRules(endpoint.lastHop, {
+        alwaysSensitive: effectiveSettings.sensitiveCookieNames,
+        alwaysIgnore: effectiveSettings.ignoredCookieNames,
+        scopeProfile: activeProfile,
+      });
+    }
   }
 
   state.findings = result.findings;
@@ -596,10 +613,11 @@ export async function clearBadgesOnAllTabs(): Promise<void> {
 
 // WS1 1C & 1D: Wire atomic settings transition side effects
 settingsTransitionPipeline.registerHooks({
-  onRescoreTabs: (_prev, _next) => {
+  onRescoreTabs: (_prev, next) => {
+    currentSettings = next;
     const epoch = currentResetEpoch;
     for (const [tabId, state] of Array.from(tabStates.entries())) {
-      recomputeTabState(tabId, state, epoch);
+      recomputeTabState(tabId, state, epoch, next);
       writeBatcher.schedule(tabId, () => SessionStorage.setTabState(state, epoch).catch(() => undefined));
       broadcastCoalescer.push(tabId, state);
     }

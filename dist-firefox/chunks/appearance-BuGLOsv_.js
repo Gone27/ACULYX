@@ -1,4 +1,4 @@
-import { i as LocalStorage } from "./messaging-UuXgcwuP.js";
+import { i as LocalStorage } from "./messaging-BeCmlDYm.js";
 //#region src/shared/appearance.ts
 /**
 * src/shared/appearance.ts — Unified appearance preferences application
@@ -29,4 +29,4 @@ async function bootstrapAppearance(targetDocument = document) {
 //#endregion
 export { bootstrapAppearance as n, applyAppearance as t };
 
-//# sourceMappingURL=appearance-Cz81GdS9.js.map
+//# sourceMappingURL=appearance-BuGLOsv_.js.map

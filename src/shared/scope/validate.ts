@@ -32,6 +32,10 @@ export function validateScopeRule(rule: unknown): ScopeValidationResult {
     return { valid: false, error: 'Rule type must be either "include" or "exclude"' };
   }
 
+  if (r.description !== undefined && r.description !== null && typeof r.description !== 'string') {
+    return { valid: false, error: 'Rule description must be a string if provided' };
+  }
+
   try {
     normalizeScopeTarget(r.pattern);
   } catch (err) {

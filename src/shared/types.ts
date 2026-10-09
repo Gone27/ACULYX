@@ -1,5 +1,5 @@
-import type { ScopeStatus, ScopeProfile } from './scope/contracts';
-export type { ScopeStatus, ScopeProfile };
+import type { ScopeStatus, ScopeProfile, ScopeRule } from './scope/contracts';
+export type { ScopeStatus, ScopeProfile, ScopeRule };
 
 // ─── Core enumerations ────────────────────────────────────────────────────────
 

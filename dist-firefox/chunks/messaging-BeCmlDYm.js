@@ -324,7 +324,28 @@ function migrateSettings(raw) {
 	const reducedMotion = typeof obj.reducedMotion === "string" && VALID_MOTIONS.has(obj.reducedMotion) ? obj.reducedMotion : "system";
 	const scopeProfiles = [];
 	if (Array.isArray(obj.scopeProfiles)) {
-		for (const item of obj.scopeProfiles) if (typeof item === "object" && item !== null && typeof item.id === "string" && typeof item.name === "string" && Array.isArray(item.rules)) scopeProfiles.push(item);
+		for (const item of obj.scopeProfiles) if (typeof item === "object" && item !== null && typeof item.id === "string" && typeof item.name === "string" && Array.isArray(item.rules)) {
+			const rawProfile = item;
+			const rawRules = Array.isArray(rawProfile.rules) ? rawProfile.rules : [];
+			const sanitizedRules = [];
+			for (const r of rawRules) if (typeof r === "object" && r !== null && typeof r.pattern === "string" && r.pattern.trim().length > 0) {
+				const ruleObj = r;
+				const rule = {
+					pattern: (ruleObj.pattern ?? "").trim(),
+					type: ruleObj.type === "exclude" ? "exclude" : "include"
+				};
+				if (typeof ruleObj.description === "string" && ruleObj.description.trim().length > 0) rule.description = ruleObj.description.trim();
+				sanitizedRules.push(rule);
+			}
+			const profile = {
+				id: (rawProfile.id ?? "").trim(),
+				name: (rawProfile.name ?? "").trim(),
+				rules: sanitizedRules
+			};
+			if (typeof rawProfile.notes === "string" && rawProfile.notes.trim().length > 0) profile.notes = rawProfile.notes.trim();
+			if (typeof rawProfile.lastReviewed === "number" && Number.isFinite(rawProfile.lastReviewed)) profile.lastReviewed = rawProfile.lastReviewed;
+			scopeProfiles.push(profile);
+		}
 	}
 	let activeScopeProfileId = null;
 	if (typeof obj.activeScopeProfileId === "string" && obj.activeScopeProfileId.trim().length > 0) activeScopeProfileId = obj.activeScopeProfileId.trim();
@@ -396,12 +417,12 @@ var SettingsTransitionPipeline = class {
 		const modeChanged = previous.monitoringMode !== validated.monitoringMode;
 		this.lastAppliedSettings = { ...validated };
 		cachedSettings = { ...validated };
-		if (modeChanged && this.hooks.onModeChange) await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
-		if ((cookieListsChanged || scopeProfileChanged) && this.hooks.onRescoreTabs) await this.hooks.onRescoreTabs(previous, validated);
-		if (this.hooks.onSettingsApplied) await this.hooks.onSettingsApplied(validated);
 		for (const cb of listeners) try {
 			cb(validated);
 		} catch {}
+		if (modeChanged && this.hooks.onModeChange) await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
+		if ((cookieListsChanged || scopeProfileChanged) && this.hooks.onRescoreTabs) await this.hooks.onRescoreTabs(previous, validated);
+		if (this.hooks.onSettingsApplied) await this.hooks.onSettingsApplied(validated);
 		return { ...validated };
 	}
 };
@@ -1970,4 +1991,4 @@ function sendToBackground(msg) {
 //#endregion
 export { DEFAULT_SETTINGS as A, resolveCookieOverlaps as C, onEpochChange as D, incrementStorageResetEpoch as E, SCORE_VERSION as F, SEVERITY_ORDER as I, SIDEPANEL_PORT_NAME as L, MAINTENANCE_ALARM as M, POPUP_PORT_NAME as N, setStorageResetEpoch as O, RESTRICTED_SCHEMES as P, normalizeCookieList as S, getStorageResetEpoch as T, redactUrlPath as _, SessionStorage as a, sanitizeUrlForStorage as b, checkDuplicateHeaders as c, headersDiffer as d, isSensitiveCookie as f, redactHeaderValue as g, parseCspDirectives as h, LocalStorage as i, GRADE_THRESHOLDS as j, BADGE_COLORS as k, extractSetCookieHeaders as l, originFromUrl as m, portSend as n, checkSubdomainTrust as o, normalizeHeaders as p, sendToBackground as r, registrableDomain as s, PortRegistry as t, hasCspBypassProtection as u, sanitizeCspPolicyForStorage as v, settingsTransitionPipeline as w, SettingsService as x, sanitizeEvidence as y };
 
-//# sourceMappingURL=messaging-UuXgcwuP.js.map
+//# sourceMappingURL=messaging-BeCmlDYm.js.map

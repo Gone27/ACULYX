@@ -96,6 +96,14 @@ describe('Empirical Challenger 2 — Secret Redaction & Incognito Isolation Stre
       expect(output).not.toContain('canary_leak_probe_secret_token_888');
       expect(output).toBe('[REDACTED]');
     });
+
+    it('PASS: redactAllSecrets redacts percent-encoded param keys and compound sub-path tokens (defect 1 regression)', () => {
+      const text = 'URL probe returned auth%5Ftoken=ZIP_CANARY_X91 and path /tenant-reset/ZIP_CANARY_X91';
+      const output = redactAllSecrets(text);
+      expect(output).not.toContain('ZIP_CANARY_X91');
+      expect(output).toContain('auth%5Ftoken=[REDACTED]');
+      expect(output).toContain('/tenant-reset/[token]');
+    });
   });
 
   describe('2. Secret Redaction: buildReportDraft Sink Leakage Stress Tests', () => {
@@ -234,6 +242,22 @@ describe('Empirical Challenger 2 — Secret Redaction & Incognito Isolation Stre
       // Verify report footer accurately reflects automated secret redaction
       expect(markdown).toContain('processed by automated secret redaction; researchers must review all details prior to submission');
       expect(markdown).not.toContain('strictly redacted');
+    });
+
+    it('PASS: formatReportAsJson and formatReportAsMarkdown independently sanitize modified draft fields (defect 2 regression)', () => {
+      const draft = ReportBuilder.buildReportDraft(createFinding('Clean evidence'));
+      // Simulate caller or draft editor adding sensitive tokens to draft fields
+      draft.title = 'Title with canary: ZIP_CANARY_X91';
+      draft.summary = 'Summary with auth%5Ftoken=ZIP_CANARY_X91 and /tenant-reset/ZIP_CANARY_X91';
+      draft.impact = 'Impact with token secret_token_999';
+
+      const json = ReportBuilder.formatReportAsJson(draft);
+      const markdown = ReportBuilder.formatReportAsMarkdown(draft);
+
+      expect(json).not.toContain('ZIP_CANARY_X91');
+      expect(json).not.toContain('secret_token_999');
+      expect(markdown).not.toContain('ZIP_CANARY_X91');
+      expect(markdown).not.toContain('secret_token_999');
     });
   });
 
