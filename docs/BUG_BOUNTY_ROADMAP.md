@@ -1,7 +1,7 @@
 # ACULYX — High-Confidence Bug-Bounty Scanner Roadmap
 
-**Prepared**: 2026-10-08  
-**Project baseline inspected**: repository at `86160ac`  
+**Prepared**: 2026-10-08
+**Project baseline inspected**: repository at `86160ac`
 **Purpose**: Improve ACULYX into a precise, smooth, evidence-first scanner for authorized bug-bounty work.
 
 ---

@@ -50,9 +50,9 @@ export function matchTarget(
     }
   }
 
-  // 2. Scheme match: if rule specifies a scheme, target must match
-  if (rule.scheme !== undefined && target.scheme !== undefined) {
-    if (rule.scheme !== target.scheme) {
+  // 2. Scheme match: if rule specifies a scheme, target must have the identical scheme (fail closed)
+  if (rule.scheme !== undefined) {
+    if (target.scheme === undefined || target.scheme !== rule.scheme) {
       return false;
     }
   }

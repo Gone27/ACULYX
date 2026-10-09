@@ -1,8 +1,38 @@
-import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER, S as normalizeCookieList, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CTMeVYaN.js";
-import { d as PermissionsService } from "./lifecycle-CQzmjg6F.js";
+import { A as DEFAULT_SETTINGS, C as resolveCookieOverlaps, I as SEVERITY_ORDER, S as normalizeCookieList, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-UuXgcwuP.js";
+import { d as PermissionsService } from "./lifecycle-CoWFP42o.js";
+import { t as normalizeScopeTarget } from "./normalize-BcYjnt_z.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-Cjc7_Dji.js";
+import { t as applyAppearance } from "./appearance-Cz81GdS9.js";
 import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
+//#region src/shared/scope/validate.ts
+/**
+* Validates a single scope rule.
+*/
+function validateScopeRule(rule) {
+	if (typeof rule !== "object" || rule === null) return {
+		valid: false,
+		error: "Rule must be an object"
+	};
+	const r = rule;
+	if (typeof r.pattern !== "string" || r.pattern.trim().length === 0) return {
+		valid: false,
+		error: "Rule pattern must be a non-empty string"
+	};
+	if (r.type !== "include" && r.type !== "exclude") return {
+		valid: false,
+		error: "Rule type must be either \"include\" or \"exclude\""
+	};
+	try {
+		normalizeScopeTarget(r.pattern);
+	} catch (err) {
+		return {
+			valid: false,
+			error: `Invalid rule pattern "${r.pattern}": ${err instanceof Error ? err.message : String(err)}`
+		};
+	}
+	return { valid: true };
+}
+//#endregion
 //#region src/options/options.ts
 var ALL_SEVERITIES = [...SEVERITY_ORDER];
 var modeRadios;
@@ -25,10 +55,15 @@ var navDirtyBadge;
 var unsavedDialog;
 var triageCountBadge;
 var btnClearTriage;
+var activeScopeProfileSelect;
+var scopeProfilesContainer;
+var btnAddScopeProfile;
 var currentMode = "per-site";
 var pendingNavSection = null;
 /** In-memory working copy of the allowedOrigins array. */
 var workingOrigins = [];
+var workingScopeProfiles = [];
+var workingActiveScopeProfileId = null;
 var initialSettingsSnapshot = "";
 var isDirty = false;
 document.addEventListener("DOMContentLoaded", () => {
@@ -52,6 +87,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	unsavedDialog = getEl("unsaved-dialog");
 	triageCountBadge = getEl("triage-count-badge");
 	btnClearTriage = getEl("btn-clear-triage");
+	activeScopeProfileSelect = getEl("active-scope-profile-select");
+	scopeProfilesContainer = getEl("scope-profiles-container");
+	btnAddScopeProfile = getEl("btn-add-scope-profile");
 	wireNav();
 	wireNavCards();
 	wireModeRadios();
@@ -63,6 +101,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	wireAppearanceLivePreview();
 	wireUnsavedDialog();
 	wireTriageManagement();
+	wireScopeManagement();
 	if (typeof chrome !== "undefined" && typeof chrome.runtime !== "undefined") {
 		const manifest = chrome.runtime.getManifest();
 		const versionEl = document.getElementById("home-version-badge");
@@ -78,6 +117,7 @@ var SECTION_IDS = [
 	"findings",
 	"cookies",
 	"history",
+	"scope",
 	"appearance",
 	"advanced",
 	"about"
@@ -222,6 +262,12 @@ async function loadAndPopulate() {
 	}
 	renderAllowlist();
 	await checkAndRenderBroadConflict();
+	workingScopeProfiles = settings.scopeProfiles !== void 0 ? settings.scopeProfiles.map((p) => ({
+		...p,
+		rules: p.rules.map((r) => ({ ...r }))
+	})) : [];
+	workingActiveScopeProfileId = settings.activeScopeProfileId ?? null;
+	renderScopeProfiles();
 	await refreshHomeView();
 	initialSettingsSnapshot = getFormStateString();
 	isDirty = false;
@@ -352,6 +398,8 @@ function readFormValues() {
 		sensitiveCookieNames: sensitive,
 		ignoredCookieNames: ignored,
 		evaluationMode: evalModeToggle.checked,
+		scopeProfiles: [...workingScopeProfiles],
+		activeScopeProfileId: workingActiveScopeProfileId,
 		theme,
 		density,
 		reducedMotion
@@ -545,6 +593,8 @@ function getFormStateString() {
 		sensitiveCookieNames: [...current.sensitiveCookieNames].sort(),
 		ignoredCookieNames: [...current.ignoredCookieNames].sort(),
 		evaluationMode: current.evaluationMode,
+		activeScopeProfileId: current.activeScopeProfileId ?? null,
+		scopeProfiles: current.scopeProfiles ?? [],
 		theme: current.theme ?? "system",
 		density: current.density ?? "comfortable",
 		reducedMotion: current.reducedMotion ?? "system"
@@ -629,6 +679,182 @@ function wireTriageManagement() {
 	});
 	refreshTriageCount();
 }
+function wireScopeManagement() {
+	activeScopeProfileSelect.addEventListener("change", () => {
+		workingActiveScopeProfileId = activeScopeProfileSelect.value.length > 0 ? activeScopeProfileSelect.value : null;
+		updateDirtyState();
+	});
+	btnAddScopeProfile.addEventListener("click", () => {
+		const newId = `profile-${Date.now()}`;
+		const newProfile = {
+			id: newId,
+			name: `Program ${workingScopeProfiles.length + 1}`,
+			rules: [{
+				pattern: "*.example.com",
+				type: "include"
+			}],
+			lastReviewed: Date.now()
+		};
+		workingScopeProfiles.push(newProfile);
+		if (workingActiveScopeProfileId === null || workingActiveScopeProfileId.length === 0) workingActiveScopeProfileId = newId;
+		renderScopeProfiles();
+		updateDirtyState();
+	});
+}
+function renderScopeProfiles() {
+	while (activeScopeProfileSelect.firstChild !== null) activeScopeProfileSelect.removeChild(activeScopeProfileSelect.firstChild);
+	const noneOpt = document.createElement("option");
+	noneOpt.value = "";
+	noneOpt.textContent = "(None — Global Unscoped Monitoring)";
+	activeScopeProfileSelect.appendChild(noneOpt);
+	for (const prof of workingScopeProfiles) {
+		const opt = document.createElement("option");
+		opt.value = prof.id;
+		opt.textContent = prof.name;
+		if (prof.id === workingActiveScopeProfileId) opt.selected = true;
+		activeScopeProfileSelect.appendChild(opt);
+	}
+	if (workingActiveScopeProfileId === null || workingActiveScopeProfileId.length === 0) noneOpt.selected = true;
+	while (scopeProfilesContainer.firstChild !== null) scopeProfilesContainer.removeChild(scopeProfilesContainer.firstChild);
+	if (workingScopeProfiles.length === 0) {
+		const emptyP = document.createElement("p");
+		emptyP.className = "field-hint";
+		emptyP.textContent = "No scope profiles defined yet. Click \"+ New Profile\" to configure authorized targets for a bounty program.";
+		scopeProfilesContainer.appendChild(emptyP);
+		return;
+	}
+	workingScopeProfiles.forEach((profile, profIdx) => {
+		const card = document.createElement("div");
+		card.className = "scope-profile-card field-row";
+		card.style.flexDirection = "column";
+		card.style.alignItems = "stretch";
+		card.style.border = "1px solid var(--border-color, #2a2e39)";
+		card.style.borderRadius = "6px";
+		card.style.padding = "12px";
+		card.style.marginBottom = "12px";
+		const headerDiv = document.createElement("div");
+		headerDiv.className = "flex-between";
+		headerDiv.style.display = "flex";
+		headerDiv.style.justifyContent = "space-between";
+		headerDiv.style.alignItems = "center";
+		headerDiv.style.marginBottom = "8px";
+		const nameInput = document.createElement("input");
+		nameInput.type = "text";
+		nameInput.className = "text-input";
+		nameInput.value = profile.name;
+		nameInput.placeholder = "Program / Profile Name";
+		nameInput.style.fontWeight = "bold";
+		nameInput.style.maxWidth = "240px";
+		nameInput.addEventListener("input", () => {
+			profile.name = nameInput.value.trim() || `Program ${profIdx + 1}`;
+			updateDirtyState();
+			const opt = activeScopeProfileSelect.querySelector(`option[value="${profile.id}"]`);
+			if (opt) opt.textContent = profile.name;
+		});
+		const delProfBtn = document.createElement("button");
+		delProfBtn.type = "button";
+		delProfBtn.className = "btn-danger btn-sm";
+		delProfBtn.textContent = "Delete Profile";
+		delProfBtn.addEventListener("click", () => {
+			workingScopeProfiles.splice(profIdx, 1);
+			if (workingActiveScopeProfileId === profile.id) workingActiveScopeProfileId = workingScopeProfiles[0]?.id ?? null;
+			renderScopeProfiles();
+			updateDirtyState();
+		});
+		headerDiv.appendChild(nameInput);
+		headerDiv.appendChild(delProfBtn);
+		card.appendChild(headerDiv);
+		const rulesTable = document.createElement("div");
+		rulesTable.className = "scope-rules-table";
+		profile.rules.forEach((rule, ruleIdx) => {
+			const row = document.createElement("div");
+			row.style.display = "flex";
+			row.style.alignItems = "center";
+			row.style.gap = "8px";
+			row.style.marginBottom = "4px";
+			const typeBadge = document.createElement("span");
+			typeBadge.textContent = rule.type.toUpperCase();
+			typeBadge.style.fontSize = "11px";
+			typeBadge.style.padding = "2px 6px";
+			typeBadge.style.borderRadius = "3px";
+			typeBadge.style.fontWeight = "bold";
+			typeBadge.style.color = "#fff";
+			typeBadge.style.backgroundColor = rule.type === "include" ? "#27ae60" : "#c0392b";
+			const patternSpan = document.createElement("code");
+			patternSpan.textContent = rule.pattern;
+			patternSpan.style.flex = "1";
+			const delRuleBtn = document.createElement("button");
+			delRuleBtn.type = "button";
+			delRuleBtn.className = "btn-sm btn-remove";
+			delRuleBtn.textContent = "×";
+			delRuleBtn.title = "Remove rule";
+			delRuleBtn.addEventListener("click", () => {
+				profile.rules.splice(ruleIdx, 1);
+				renderScopeProfiles();
+				updateDirtyState();
+			});
+			row.appendChild(typeBadge);
+			row.appendChild(patternSpan);
+			row.appendChild(delRuleBtn);
+			rulesTable.appendChild(row);
+		});
+		card.appendChild(rulesTable);
+		const addRuleDiv = document.createElement("div");
+		addRuleDiv.style.display = "flex";
+		addRuleDiv.style.alignItems = "center";
+		addRuleDiv.style.gap = "8px";
+		addRuleDiv.style.marginTop = "8px";
+		const rulePatternInput = document.createElement("input");
+		rulePatternInput.type = "text";
+		rulePatternInput.placeholder = "*.domain.com or host:port";
+		rulePatternInput.className = "text-input";
+		rulePatternInput.style.flex = "1";
+		const ruleTypeSelect = document.createElement("select");
+		ruleTypeSelect.className = "select-input";
+		const incOpt = document.createElement("option");
+		incOpt.value = "include";
+		incOpt.textContent = "Include";
+		const excOpt = document.createElement("option");
+		excOpt.value = "exclude";
+		excOpt.textContent = "Exclude";
+		ruleTypeSelect.appendChild(incOpt);
+		ruleTypeSelect.appendChild(excOpt);
+		const addRuleBtn = document.createElement("button");
+		addRuleBtn.type = "button";
+		addRuleBtn.className = "btn-secondary btn-sm";
+		addRuleBtn.textContent = "Add Rule";
+		const ruleErrorMsg = document.createElement("span");
+		ruleErrorMsg.style.color = "#e74c3c";
+		ruleErrorMsg.style.fontSize = "12px";
+		ruleErrorMsg.style.marginLeft = "8px";
+		addRuleBtn.addEventListener("click", () => {
+			ruleErrorMsg.textContent = "";
+			const pat = rulePatternInput.value.trim();
+			const typ = ruleTypeSelect.value;
+			const validRes = validateScopeRule({
+				pattern: pat,
+				type: typ
+			});
+			if (!validRes.valid) {
+				ruleErrorMsg.textContent = validRes.error ?? "Invalid rule pattern";
+				return;
+			}
+			profile.rules.push({
+				pattern: pat,
+				type: typ
+			});
+			rulePatternInput.value = "";
+			renderScopeProfiles();
+			updateDirtyState();
+		});
+		addRuleDiv.appendChild(rulePatternInput);
+		addRuleDiv.appendChild(ruleTypeSelect);
+		addRuleDiv.appendChild(addRuleBtn);
+		card.appendChild(addRuleDiv);
+		card.appendChild(ruleErrorMsg);
+		scopeProfilesContainer.appendChild(card);
+	});
+}
 function getEl(id) {
 	const el = document.getElementById(id);
 	if (!el) throw new Error(`Missing required element #${id}`);
@@ -654,4 +880,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined") 
 }
 //#endregion
 
-//# sourceMappingURL=options.html-DQo7OfJI.js.map
+//# sourceMappingURL=options.html-CdU4DVcL.js.map

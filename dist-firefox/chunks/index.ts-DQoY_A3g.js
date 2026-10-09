@@ -1,5 +1,6 @@
-import { A as DEFAULT_SETTINGS, D as onEpochChange, E as incrementStorageResetEpoch, F as SCORE_VERSION, L as SIDEPANEL_PORT_NAME, N as POPUP_PORT_NAME, O as setStorageResetEpoch, P as RESTRICTED_SCHEMES, T as getStorageResetEpoch, a as SessionStorage, b as sanitizeUrlForStorage, c as checkDuplicateHeaders, f as isSensitiveCookie, h as parseCspDirectives, i as LocalStorage, j as GRADE_THRESHOLDS, k as BADGE_COLORS, l as extractSetCookieHeaders, m as originFromUrl, n as portSend, o as checkSubdomainTrust, s as registrableDomain, t as PortRegistry, u as hasCspBypassProtection, v as sanitizeCspPolicyForStorage, w as settingsTransitionPipeline, x as SettingsService, y as sanitizeEvidence } from "./messaging-CTMeVYaN.js";
-import { C as tabGenerations, S as setTabGeneration, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-CQzmjg6F.js";
+import { A as DEFAULT_SETTINGS, D as onEpochChange, E as incrementStorageResetEpoch, F as SCORE_VERSION, L as SIDEPANEL_PORT_NAME, N as POPUP_PORT_NAME, O as setStorageResetEpoch, P as RESTRICTED_SCHEMES, T as getStorageResetEpoch, a as SessionStorage, b as sanitizeUrlForStorage, c as checkDuplicateHeaders, f as isSensitiveCookie, h as parseCspDirectives, i as LocalStorage, j as GRADE_THRESHOLDS, k as BADGE_COLORS, l as extractSetCookieHeaders, m as originFromUrl, n as portSend, o as checkSubdomainTrust, s as registrableDomain, t as PortRegistry, u as hasCspBypassProtection, v as sanitizeCspPolicyForStorage, w as settingsTransitionPipeline, x as SettingsService, y as sanitizeEvidence } from "./messaging-UuXgcwuP.js";
+import { C as tabGenerations, S as setTabGeneration, _ as isModeCaptureAllowed, a as captureMap, b as getTabGeneration, c as incognitoTabIds, f as hasAllSitesCoverage, g as reconcilePermissionsOnStartup, h as reconcilePermissionsOnRemoved, i as tabStates, l as registerCaptureListeners, n as initLifecycle, o as clearInFlightCaptures, p as isBroadGrant, r as originAuthBaselines, s as inFlightRequests, t as hydrateFromSession, u as CapturePolicy, v as isRestrictedUrl$1, x as incrementTabGeneration, y as clearTabGenerations } from "./lifecycle-CoWFP42o.js";
+import { t as normalizeScopeTarget } from "./normalize-BcYjnt_z.js";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
@@ -513,89 +514,6 @@ function registerPageSignalInjection() {
 	});
 }
 //#endregion
-//#region src/shared/scope/normalize.ts
-/**
-* Normalizes a hostname:
-* - Strips trailing dots
-* - Converts to lowercase
-* - Converts IDNA international domain names to ASCII punycode
-*/
-function normalizeHostname(rawHost) {
-	let cleaned = rawHost.trim().toLowerCase();
-	while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
-	if (cleaned.length === 0) throw new Error("Hostname cannot be empty");
-	if (cleaned.startsWith("[") && cleaned.endsWith("]")) return cleaned;
-	try {
-		return new URL(`http://${cleaned}`).hostname;
-	} catch {
-		return cleaned;
-	}
-}
-/**
-* Extracts and normalizes the scheme (e.g. 'https', 'http') from a URL string.
-* Returns undefined if no scheme is specified.
-*/
-function parseScheme(raw) {
-	const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.exec(raw.trim());
-	if (match && match[0]) return match[0].replace(/:\/\/$/, "").toLowerCase();
-}
-/**
-* Normalizes a scope target (URL, host pattern, or wildcard pattern)
-* into a NormalizedScopeTarget structure.
-*/
-function normalizeScopeTarget(raw) {
-	if (typeof raw !== "string" || raw.trim().length === 0) throw new Error("Scope target must be a non-empty string");
-	const trimmed = raw.trim();
-	const scheme = parseScheme(trimmed);
-	let authority = trimmed;
-	if (scheme !== void 0) authority = authority.slice(scheme.length + 3);
-	const pathIdx = authority.search(/[\/?#]/);
-	if (pathIdx !== -1) authority = authority.slice(0, pathIdx);
-	const atIdx = authority.lastIndexOf("@");
-	if (atIdx !== -1) authority = authority.slice(atIdx + 1);
-	let isWildcard = false;
-	let hostAndPort = authority;
-	if (hostAndPort.startsWith("*.")) {
-		isWildcard = true;
-		hostAndPort = hostAndPort.slice(2);
-	} else if (hostAndPort.startsWith("*")) {
-		isWildcard = true;
-		hostAndPort = hostAndPort.slice(1);
-		if (hostAndPort.startsWith(".")) hostAndPort = hostAndPort.slice(1);
-	}
-	let port;
-	let rawHost = hostAndPort;
-	if (hostAndPort.startsWith("[")) {
-		const closeBracket = hostAndPort.indexOf("]");
-		if (closeBracket === -1) throw new Error(`Malformed IPv6 host: ${hostAndPort}`);
-		rawHost = hostAndPort.slice(0, closeBracket + 1);
-		const afterBracket = hostAndPort.slice(closeBracket + 1);
-		if (afterBracket.startsWith(":")) {
-			const portStr = afterBracket.slice(1);
-			const parsedPort = Number(portStr);
-			if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) throw new Error(`Invalid port number: ${portStr}`);
-			port = parsedPort;
-		}
-	} else {
-		const colonIdx = hostAndPort.lastIndexOf(":");
-		if (colonIdx !== -1) {
-			rawHost = hostAndPort.slice(0, colonIdx);
-			const portStr = hostAndPort.slice(colonIdx + 1);
-			const parsedPort = Number(portStr);
-			if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) throw new Error(`Invalid port number: ${portStr}`);
-			port = parsedPort;
-		}
-	}
-	const hostname = normalizeHostname(rawHost);
-	return {
-		raw,
-		...scheme !== void 0 ? { scheme } : {},
-		hostname,
-		...port !== void 0 ? { port } : {},
-		isWildcard
-	};
-}
-//#endregion
 //#region src/shared/scope/matcher.ts
 /**
 * Checks whether targetHost is a true subdomain of parentHost.
@@ -620,8 +538,8 @@ function matchTarget(target, ruleInput) {
 	if (rule.port !== void 0) {
 		if (target.port !== rule.port) return false;
 	}
-	if (rule.scheme !== void 0 && target.scheme !== void 0) {
-		if (rule.scheme !== target.scheme) return false;
+	if (rule.scheme !== void 0) {
+		if (target.scheme === void 0 || target.scheme !== rule.scheme) return false;
 	}
 	if (rule.isWildcard) return isSubdomainOf(target.hostname, rule.hostname);
 	return target.hostname === rule.hostname;
@@ -1901,8 +1819,8 @@ function resolveEffective(directives, directive) {
 function sourceTokens(sourceList) {
 	return sourceList.split(/\s+/).filter((t) => t.length > 0);
 }
-function hasWildcardSource(sourceList, isModernStrict) {
-	if (isModernStrict) return false;
+function hasWildcardSource(sourceList, hasStrictDynamic) {
+	if (hasStrictDynamic) return false;
 	return sourceTokens(sourceList).some((token) => token === "*" || token === "http:" || token === "https:");
 }
 function findBypassProneHosts(sourceList) {
@@ -1987,8 +1905,8 @@ function checkCsp(finalHop, metaCspFound = false) {
 	});
 	const effectiveScriptSrc = resolveEffective(directives, "script-src");
 	if (effectiveScriptSrc !== void 0) {
-		const { isModernStrict } = hasCspBypassProtection(effectiveScriptSrc);
-		const bypassProneHosts = isModernStrict ? [] : findBypassProneHosts(effectiveScriptSrc);
+		const { isModernStrict, hasStrictDynamic } = hasCspBypassProtection(effectiveScriptSrc);
+		const bypassProneHosts = hasStrictDynamic ? [] : findBypassProneHosts(effectiveScriptSrc);
 		if (bypassProneHosts.length > 0) findings.push({
 			ruleId: "CSP-009",
 			category: "header",
@@ -2047,7 +1965,7 @@ function checkCsp(finalHop, metaCspFound = false) {
 			reference: REFERENCE$6,
 			limitations: fromCache ? ["Response served from cache."] : ["Passive policy inspection."]
 		});
-		if (hasWildcardSource(effectiveScriptSrc, isModernStrict)) findings.push({
+		if (hasWildcardSource(effectiveScriptSrc, hasStrictDynamic)) findings.push({
 			ruleId: "CSP-004",
 			category: "header",
 			severity: "medium",
@@ -2903,16 +2821,16 @@ function checkCors(hop) {
 	if (allowOrigin === "*") return [{
 		ruleId: "CORS-001",
 		category: "cors",
-		severity: "medium",
-		confidence: "deterministic",
+		severity: "info",
+		confidence: "heuristic",
 		provenance: "response-header",
-		outcome: fromCache ? "partial-coverage" : "fail",
-		title: "CORS allows every origin to read this response",
-		impact: "Any website can read this response through browser JavaScript; this is risky when the response contains non-public data.",
-		evidence: sanitizeEvidence(`Access-Control-Allow-Origin: *${credentials ? "; Access-Control-Allow-Credentials: true (credentials are ignored with wildcard origin)" : ""}`),
-		recommendation: "Replace the wildcard with an explicit allowlist of trusted origins when this response contains data that should not be public.",
+		outcome: "pass",
+		title: "CORS policy permits wildcard origin (Access-Control-Allow-Origin: *)",
+		impact: "Allows any website to read this response via browser JavaScript. Standard and safe for public APIs and resources; hazardous only if sensitive or authenticated user data is exposed.",
+		evidence: sanitizeEvidence(`Access-Control-Allow-Origin: *${credentials ? "; Access-Control-Allow-Credentials: true (ignored by browsers with wildcard origin)" : ""}`),
+		recommendation: "Verify that this endpoint exposes only public resources. If user-specific or sensitive data is returned, specify an explicit trusted origin instead of wildcard.",
 		reference: REF_CORS,
-		limitations: ["Passive observation of wildcard CORS; permissible for public endpoints, hazardous for sensitive endpoints."]
+		limitations: ["Passive observation: wildcard CORS is permissible for public endpoints, hazardous only for sensitive endpoints.", "Browsers reject credentialed requests (cookies/HTTP auth) when Access-Control-Allow-Origin is \"*\"."]
 	}];
 	return [];
 }
@@ -3408,7 +3326,7 @@ function runApiRules(apiHop, optionsOrSettings) {
 	const findings = [];
 	const sensitive = optionsOrSettings !== void 0 && "alwaysSensitive" in optionsOrSettings ? optionsOrSettings.alwaysSensitive : void 0;
 	const ignored = optionsOrSettings !== void 0 && "alwaysIgnore" in optionsOrSettings ? optionsOrSettings.alwaysIgnore : void 0;
-	const scopeEngine = optionsOrSettings !== void 0 && "scopeEngine" in optionsOrSettings ? optionsOrSettings.scopeEngine : void 0;
+	const scopeEngine = optionsOrSettings !== void 0 && "scopeEngine" in optionsOrSettings && optionsOrSettings.scopeEngine !== void 0 ? optionsOrSettings.scopeEngine : optionsOrSettings !== void 0 && "scopeProfile" in optionsOrSettings && optionsOrSettings.scopeProfile !== void 0 ? new ScopeEngine(optionsOrSettings.scopeProfile) : void 0;
 	findings.push(...checkCors(hopLike));
 	findings.push(...checkXcto(hopLike));
 	findings.push(...checkInfoLeak(hopLike));
@@ -4145,6 +4063,8 @@ function debounceGraphMerge(apex, hostname, state, actionEpoch) {
 function recomputeTabState(tabId, state, actionEpoch) {
 	if (actionEpoch !== void 0 && currentResetEpoch !== actionEpoch) return;
 	if (CapturePolicy.getSnapshot().mode === "off") return;
+	let activeProfile;
+	if (currentSettings.activeScopeProfileId !== void 0 && currentSettings.activeScopeProfileId !== null && currentSettings.activeScopeProfileId.length > 0 && currentSettings.scopeProfiles !== void 0) activeProfile = currentSettings.scopeProfiles.find((p) => p.id === currentSettings.activeScopeProfileId);
 	const result = runRules({
 		hops: state.hops,
 		cookies: state.cookies,
@@ -4154,10 +4074,19 @@ function recomputeTabState(tabId, state, actionEpoch) {
 		cookieSettings: {
 			alwaysSensitive: currentSettings.sensitiveCookieNames,
 			alwaysIgnore: currentSettings.ignoredCookieNames
-		}
+		},
+		scopeProfile: activeProfile
 	});
 	if (actionEpoch !== void 0 && currentResetEpoch !== actionEpoch) return;
 	if (CapturePolicy.getSnapshot().mode === "off") return;
+	if (activeProfile) {
+		const scopeRes = new ScopeEngine(activeProfile).evaluate(state.url || state.origin);
+		state.scopeStatus = scopeRes.status;
+		state.scopeReason = scopeRes.reason;
+	} else {
+		state.scopeStatus = void 0;
+		state.scopeReason = void 0;
+	}
 	state.findings = result.findings;
 	state.score = result.score;
 	state.grade = result.grade;
@@ -4985,9 +4914,12 @@ registerCaptureListeners((tabId, hop, isIncognito) => {
 		const targetOrigin = originFromUrl(apiHop.url);
 		const isFirstParty = state.origin === targetOrigin;
 		apiHop.isThirdParty = !isFirstParty;
+		let activeProfile;
+		if (currentSettings.activeScopeProfileId !== void 0 && currentSettings.activeScopeProfileId !== null && currentSettings.activeScopeProfileId.length > 0 && currentSettings.scopeProfiles !== void 0) activeProfile = currentSettings.scopeProfiles.find((p) => p.id === currentSettings.activeScopeProfileId);
 		const findings = runApiRules(apiHop, {
 			alwaysSensitive: currentSettings.sensitiveCookieNames,
-			alwaysIgnore: currentSettings.ignoredCookieNames
+			alwaysIgnore: currentSettings.ignoredCookieNames,
+			scopeProfile: activeProfile
 		});
 		if (!state.apiEndpoints) state.apiEndpoints = /* @__PURE__ */ new Map();
 		const endpointState = {
@@ -5074,4 +5006,4 @@ if (typeof chrome !== "undefined" && typeof chrome.permissions !== "undefined" &
 //#endregion
 export { TabActionQueue, badgeTrackedTabs, clearBadgesOnAllTabs, clearTabGenerations, currentResetEpoch, executeResetAllData, getTabGeneration, handleResetAllData, incrementTabGeneration, isDuplicateEvent, onHopComplete, pendingPrivacyLookups, pruneTransientStructures, recordThirdPartyBlocked, resolveTabPrivacy, sessionHydrationReady, setCurrentResetEpoch, setTabGeneration, settingsReady, startupReady, tabActionQueue, tabGenerations, writeBatcher };
 
-//# sourceMappingURL=index.ts-CsfA-KcM.js.map
+//# sourceMappingURL=index.ts-DQoY_A3g.js.map

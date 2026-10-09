@@ -19,87 +19,34 @@ const JWT_RE = /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g;
 const HEX_TOKEN_RE = /\b[0-9a-f]{32,}\b/gi;
 const CANARY_RE = /\b(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
 
-const SENSITIVE_QUERY_PARAMS = new Set([
-  'token',
-  'access_token',
-  'id_token',
-  'refresh_token',
-  'auth',
-  'authentication',
-  'api_key',
-  'apikey',
-  'key',
-  'secret',
-  'password',
-  'passwd',
-  'pwd',
-  'session',
-  'sessionid',
-  'sessid',
-  'sig',
-  'signature',
-  'code',
-  'ticket',
-  'credential',
-  'canary',
-]);
-
 /**
  * Sanitizes a URL for report inclusion by stripping credentials,
- * redacting sensitive path segments, filtering sensitive query parameters,
- * and removing fragments.
+ * query strings, and fragments by default, and sanitizing path segments.
  */
 export function sanitizeUrlForReport(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
   const trimmed = rawUrl.trim();
   if (trimmed.length === 0) return '';
 
-  // If already sanitized by sanitizeUrlForStorage, handle query params safely
   try {
     const parsed = new URL(trimmed);
     // Strip userinfo credentials
     parsed.username = '';
     parsed.password = '';
-    // Strip fragment
+    // Strip query strings and fragments by default in bug-bounty reports
+    parsed.search = '';
     parsed.hash = '';
 
-    // Redact sensitive query parameters
-    const searchParams = new URLSearchParams(parsed.search);
-    const keys = Array.from(searchParams.keys());
-    for (const key of keys) {
-      if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
-        searchParams.set(key, '[REDACTED]');
-      }
-    }
-    parsed.search = searchParams.toString();
-
     // Redact path
-    const sanitizedBase = sanitizeUrlForStorage(parsed.origin + parsed.pathname);
-    return parsed.search.length > 0
-      ? `${sanitizedBase}${parsed.search.startsWith('?') ? '' : '?'}${parsed.search}`
-      : sanitizedBase;
+    return sanitizeUrlForStorage(parsed.origin + parsed.pathname);
   } catch {
     // Relative URL or invalid URL format
     const noCreds = trimmed
       .replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, '')
       .replace(/^[^@/]+@/, '');
     const beforeHash = noCreds.split('#')[0] ?? '';
-    const parts = beforeHash.split('?');
-    const pathPart = sanitizeUrlForStorage(parts[0] ?? '');
-    if (parts.length > 1 && parts[1] !== undefined && parts[1].length > 0) {
-      try {
-        const sp = new URLSearchParams(parts[1]);
-        for (const k of Array.from(sp.keys())) {
-          if (SENSITIVE_QUERY_PARAMS.has(k.toLowerCase())) {
-            sp.set(k, '[REDACTED]');
-          }
-        }
-        return `${pathPart}?${sp.toString()}`;
-      } catch {
-        return pathPart;
-      }
-    }
-    return pathPart;
+    const beforeQuery = beforeHash.split('?')[0] ?? '';
+    return sanitizeUrlForStorage(beforeQuery);
   }
 }
 
@@ -166,22 +113,34 @@ export function redactAllSecrets(text: string): string {
     '$1[token]',
   );
 
-  // 6. Redact fragment secrets
+  // 6. Redact URL query parameter values in text
   sanitized = sanitized.replace(
-    /#(?:token|access_token|secret|canary|state|id)=[^&\s]+/gi,
+    /([?&][a-zA-Z0-9_.-]+=)([^&\s"'<>#]+)/g,
+    '$1[REDACTED]',
+  );
+
+  // 7. Redact URL fragments in text
+  sanitized = sanitized.replace(
+    /#([^\s"'<>)\]]+)/g,
     '#[REDACTED]',
   );
 
-  // 7. Redact JWTs
+  // 8. Redact key-value token patterns in free text
+  sanitized = sanitized.replace(
+    /\b(auth_token|token|access_token|refresh_token|id_token|secret|api_key|apikey|code_verifier|code_challenge|state|session|sessionid|passwd|password)\s*([:=])\s*([^\s,;'"<>&)]+)/gi,
+    '$1$2[REDACTED]',
+  );
+
+  // 9. Redact JWTs
   sanitized = sanitized.replace(JWT_RE, '[token]');
 
-  // 8. Redact UUIDs
+  // 10. Redact UUIDs
   sanitized = sanitized.replace(UUID_RE, '[id]');
 
-  // 9. Redact hex tokens
+  // 11. Redact hex tokens
   sanitized = sanitized.replace(HEX_TOKEN_RE, '[token]');
 
-  // 10. Redact known canary patterns
+  // 12. Redact known canary patterns
   sanitized = sanitized.replace(CANARY_RE, '[REDACTED]');
 
   return sanitized;
@@ -314,46 +273,54 @@ export class ReportBuilder {
       `3. Inspect the HTTP response headers and cookies returned by the server.`,
       `4. Verify the observed response for ${finding.ruleId}: "${sanitizedEvidence}".`,
       `5. Notice the absence of secure compliance configuration described below.`,
-    ];
+    ].map((step) => redactAllSecrets(step));
 
     const preconditions: string[] = [
       `Valid network access to ${target}.`,
       `Passive HTTP response inspection capabilities.`,
-    ];
+    ].map((pre) => redactAllSecrets(pre));
 
-    const observedBehavior =
+    const rawObserved =
       finding.evidence.length > 0
         ? `Server responded with: ${sanitizedEvidence}`
         : `Server omitted the required security control for rule ${finding.ruleId}.`;
+    const observedBehavior = redactAllSecrets(rawObserved);
 
-    const limitations: string[] = finding.limitations && finding.limitations.length > 0
+    const baseLimitations: string[] = finding.limitations && finding.limitations.length > 0
       ? [...finding.limitations]
       : [
           'Passive observation only; no intrusive payloads were transmitted.',
           'Intermediaries or reverse-proxies may alter response headers dynamically.',
         ];
+    const limitations = baseLimitations.map((lim) => redactAllSecrets(lim));
 
     const reviewState = options?.reviewState ?? 'unreviewed';
 
+    const rawSummary =
+      (finding.impact !== undefined && finding.impact.length > 0)
+        ? finding.impact
+        : `Passive analysis identified ${finding.title} (${finding.ruleId}) on target ${target}.`;
+
+    const rawImpact =
+      (finding.impact !== undefined && finding.impact.length > 0)
+        ? finding.impact
+        : 'Potential security exposure resulting from missing or improperly configured HTTP security controls.';
+
+    const rawRemediation = meta.remediation.length > 0 ? meta.remediation : finding.recommendation;
+
     const draft: BugBountyReportDraft = {
       id: `aculyx-${finding.ruleId.toLowerCase()}-${Date.now()}`,
-      title: `[${finding.severity.toUpperCase()}] ${finding.title} on ${target}`,
+      title: redactAllSecrets(`[${finding.severity.toUpperCase()}] ${finding.title} on ${target}`),
       severity: finding.severity,
       target,
-      summary:
-        (finding.impact !== undefined && finding.impact.length > 0)
-          ? finding.impact
-          : `Passive analysis identified ${finding.title} (${finding.ruleId}) on target ${target}.`,
+      summary: redactAllSecrets(rawSummary),
       reproductionSteps,
       preconditions,
-      expectedBehavior: meta.expectedBehavior,
+      expectedBehavior: redactAllSecrets(meta.expectedBehavior),
       observedBehavior,
-      impact:
-        (finding.impact !== undefined && finding.impact.length > 0)
-          ? finding.impact
-          : 'Potential security exposure resulting from missing or improperly configured HTTP security controls.',
+      impact: redactAllSecrets(rawImpact),
       evidence: sanitizedEvidence,
-      remediation: meta.remediation.length > 0 ? meta.remediation : finding.recommendation,
+      remediation: redactAllSecrets(rawRemediation),
       limitations,
       reviewState,
       updatedAt: Date.now(),
@@ -370,8 +337,9 @@ export class ReportBuilder {
     if (meta.cvssScore !== undefined) {
       draft.cvssScore = meta.cvssScore;
     }
-    if (meta.references.length > 0) {
-      draft.references = [...meta.references];
+    const rawRefs = meta.references.length > 0 ? meta.references : ((finding.reference !== undefined && finding.reference.length > 0) ? [finding.reference] : []);
+    if (rawRefs.length > 0) {
+      draft.references = rawRefs.map((ref) => redactAllSecrets(ref));
     }
 
     return draft;
@@ -440,7 +408,7 @@ export class ReportBuilder {
       lines.push('');
     }
 
-    lines.push(`---\n*Report generated by ACULYX Passive Bug-Bounty Scanner. All credentials and sensitive tokens were strictly redacted.*`);
+    lines.push(`---\n*Report generated by ACULYX Passive Bug-Bounty Scanner. URLs, headers, and reported fields have been processed by automated secret redaction; researchers must review all details prior to submission.*`);
 
     return lines.join('\n');
   }

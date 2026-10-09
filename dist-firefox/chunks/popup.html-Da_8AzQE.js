@@ -1,41 +1,16 @@
-import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, b as sanitizeUrlForStorage, g as redactHeaderValue, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-CTMeVYaN.js";
-import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CQzmjg6F.js";
+import { I as SEVERITY_ORDER, N as POPUP_PORT_NAME, b as sanitizeUrlForStorage, g as redactHeaderValue, i as LocalStorage, r as sendToBackground, x as SettingsService } from "./messaging-UuXgcwuP.js";
+import { _ as isModeCaptureAllowed, d as PermissionsService, m as patternFromOrigin } from "./lifecycle-CoWFP42o.js";
 import "./modulepreload-polyfill-BsPm7yBB.js";
-import { t as applyAppearance } from "./appearance-Cjc7_Dji.js";
+import { t as applyAppearance } from "./appearance-Cz81GdS9.js";
 import { t as TriageStore } from "./triage-store-BNdFsfqI.js";
 //#region src/shared/reporting/report-builder.ts
 var UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 var JWT_RE = /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g;
 var HEX_TOKEN_RE = /\b[0-9a-f]{32,}\b/gi;
 var CANARY_RE = /\b(?:canary|secret|token|password|passwd|apiKey|api_key)_[a-zA-Z0-9_-]+\b/gi;
-var SENSITIVE_QUERY_PARAMS = /* @__PURE__ */ new Set([
-	"token",
-	"access_token",
-	"id_token",
-	"refresh_token",
-	"auth",
-	"authentication",
-	"api_key",
-	"apikey",
-	"key",
-	"secret",
-	"password",
-	"passwd",
-	"pwd",
-	"session",
-	"sessionid",
-	"sessid",
-	"sig",
-	"signature",
-	"code",
-	"ticket",
-	"credential",
-	"canary"
-]);
 /**
 * Sanitizes a URL for report inclusion by stripping credentials,
-* redacting sensitive path segments, filtering sensitive query parameters,
-* and removing fragments.
+* query strings, and fragments by default, and sanitizing path segments.
 */
 function sanitizeUrlForReport(rawUrl) {
 	if (!rawUrl || typeof rawUrl !== "string") return "";
@@ -45,24 +20,12 @@ function sanitizeUrlForReport(rawUrl) {
 		const parsed = new URL(trimmed);
 		parsed.username = "";
 		parsed.password = "";
+		parsed.search = "";
 		parsed.hash = "";
-		const searchParams = new URLSearchParams(parsed.search);
-		const keys = Array.from(searchParams.keys());
-		for (const key of keys) if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) searchParams.set(key, "[REDACTED]");
-		parsed.search = searchParams.toString();
-		const sanitizedBase = sanitizeUrlForStorage(parsed.origin + parsed.pathname);
-		return parsed.search.length > 0 ? `${sanitizedBase}${parsed.search.startsWith("?") ? "" : "?"}${parsed.search}` : sanitizedBase;
+		return sanitizeUrlForStorage(parsed.origin + parsed.pathname);
 	} catch {
-		const parts = (trimmed.replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, "").replace(/^[^@/]+@/, "").split("#")[0] ?? "").split("?");
-		const pathPart = sanitizeUrlForStorage(parts[0] ?? "");
-		if (parts.length > 1 && parts[1] !== void 0 && parts[1].length > 0) try {
-			const sp = new URLSearchParams(parts[1]);
-			for (const k of Array.from(sp.keys())) if (SENSITIVE_QUERY_PARAMS.has(k.toLowerCase())) sp.set(k, "[REDACTED]");
-			return `${pathPart}?${sp.toString()}`;
-		} catch {
-			return pathPart;
-		}
-		return pathPart;
+		const beforeQuery = (trimmed.replace(/^[a-zA-Z0-9+.-]+:\/\/[^@/]+@/, "").replace(/^[^@/]+@/, "").split("#")[0] ?? "").split("?")[0] ?? "";
+		return sanitizeUrlForStorage(beforeQuery);
 	}
 }
 /**
@@ -98,7 +61,9 @@ function redactAllSecrets(text) {
 	sanitized = sanitized.replace(/([a-zA-Z0-9+.-]+:\/\/)([^@/\s:]+)@/g, "$1[REDACTED]@");
 	sanitized = sanitized.replace(/(^|[\s"'<(])([a-zA-Z0-9_.-]+):([^@/\s:]+)@([a-zA-Z0-9.-]+)/g, "$1[REDACTED]:[REDACTED]@$4");
 	sanitized = sanitized.replace(/(\/(?:reset|token|auth|verify|confirm)\/)([^/\s?#]+)/gi, "$1[token]");
-	sanitized = sanitized.replace(/#(?:token|access_token|secret|canary|state|id)=[^&\s]+/gi, "#[REDACTED]");
+	sanitized = sanitized.replace(/([?&][a-zA-Z0-9_.-]+=)([^&\s"'<>#]+)/g, "$1[REDACTED]");
+	sanitized = sanitized.replace(/#([^\s"'<>)\]]+)/g, "#[REDACTED]");
+	sanitized = sanitized.replace(/\b(auth_token|token|access_token|refresh_token|id_token|secret|api_key|apikey|code_verifier|code_challenge|state|session|sessionid|passwd|password)\s*([:=])\s*([^\s,;'"<>&)]+)/gi, "$1$2[REDACTED]");
 	sanitized = sanitized.replace(JWT_RE, "[token]");
 	sanitized = sanitized.replace(UUID_RE, "[id]");
 	sanitized = sanitized.replace(HEX_TOKEN_RE, "[token]");
@@ -174,24 +139,27 @@ var ReportBuilder = class {
 			`3. Inspect the HTTP response headers and cookies returned by the server.`,
 			`4. Verify the observed response for ${finding.ruleId}: "${sanitizedEvidence}".`,
 			`5. Notice the absence of secure compliance configuration described below.`
-		];
-		const preconditions = [`Valid network access to ${target}.`, `Passive HTTP response inspection capabilities.`];
-		const observedBehavior = finding.evidence.length > 0 ? `Server responded with: ${sanitizedEvidence}` : `Server omitted the required security control for rule ${finding.ruleId}.`;
-		const limitations = finding.limitations && finding.limitations.length > 0 ? [...finding.limitations] : ["Passive observation only; no intrusive payloads were transmitted.", "Intermediaries or reverse-proxies may alter response headers dynamically."];
+		].map((step) => redactAllSecrets(step));
+		const preconditions = [`Valid network access to ${target}.`, `Passive HTTP response inspection capabilities.`].map((pre) => redactAllSecrets(pre));
+		const observedBehavior = redactAllSecrets(finding.evidence.length > 0 ? `Server responded with: ${sanitizedEvidence}` : `Server omitted the required security control for rule ${finding.ruleId}.`);
+		const limitations = (finding.limitations && finding.limitations.length > 0 ? [...finding.limitations] : ["Passive observation only; no intrusive payloads were transmitted.", "Intermediaries or reverse-proxies may alter response headers dynamically."]).map((lim) => redactAllSecrets(lim));
 		const reviewState = options?.reviewState ?? "unreviewed";
+		const rawSummary = finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : `Passive analysis identified ${finding.title} (${finding.ruleId}) on target ${target}.`;
+		const rawImpact = finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : "Potential security exposure resulting from missing or improperly configured HTTP security controls.";
+		const rawRemediation = meta.remediation.length > 0 ? meta.remediation : finding.recommendation;
 		const draft = {
 			id: `aculyx-${finding.ruleId.toLowerCase()}-${Date.now()}`,
-			title: `[${finding.severity.toUpperCase()}] ${finding.title} on ${target}`,
+			title: redactAllSecrets(`[${finding.severity.toUpperCase()}] ${finding.title} on ${target}`),
 			severity: finding.severity,
 			target,
-			summary: finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : `Passive analysis identified ${finding.title} (${finding.ruleId}) on target ${target}.`,
+			summary: redactAllSecrets(rawSummary),
 			reproductionSteps,
 			preconditions,
-			expectedBehavior: meta.expectedBehavior,
+			expectedBehavior: redactAllSecrets(meta.expectedBehavior),
 			observedBehavior,
-			impact: finding.impact !== void 0 && finding.impact.length > 0 ? finding.impact : "Potential security exposure resulting from missing or improperly configured HTTP security controls.",
+			impact: redactAllSecrets(rawImpact),
 			evidence: sanitizedEvidence,
-			remediation: meta.remediation.length > 0 ? meta.remediation : finding.recommendation,
+			remediation: redactAllSecrets(rawRemediation),
 			limitations,
 			reviewState,
 			updatedAt: Date.now(),
@@ -201,7 +169,8 @@ var ReportBuilder = class {
 		if (finding.scopeStatus !== void 0) draft.scopeStatus = finding.scopeStatus;
 		if (meta.cweId !== void 0) draft.cweId = meta.cweId;
 		if (meta.cvssScore !== void 0) draft.cvssScore = meta.cvssScore;
-		if (meta.references.length > 0) draft.references = [...meta.references];
+		const rawRefs = meta.references.length > 0 ? meta.references : finding.reference !== void 0 && finding.reference.length > 0 ? [finding.reference] : [];
+		if (rawRefs.length > 0) draft.references = rawRefs.map((ref) => redactAllSecrets(ref));
 		return draft;
 	}
 	/**
@@ -247,7 +216,7 @@ var ReportBuilder = class {
 			for (const ref of draft.references) lines.push(`- ${ref}`);
 			lines.push("");
 		}
-		lines.push(`---\n*Report generated by ACULYX Passive Bug-Bounty Scanner. All credentials and sensitive tokens were strictly redacted.*`);
+		lines.push(`---\n*Report generated by ACULYX Passive Bug-Bounty Scanner. URLs, headers, and reported fields have been processed by automated secret redaction; researchers must review all details prior to submission.*`);
 		return lines.join("\n");
 	}
 	/**
@@ -1555,4 +1524,4 @@ function isTabStateUpdate(msg) {
 }
 //#endregion
 
-//# sourceMappingURL=popup.html-Di8gqqvB.js.map
+//# sourceMappingURL=popup.html-Da_8AzQE.js.map

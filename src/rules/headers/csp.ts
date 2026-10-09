@@ -26,8 +26,8 @@ function sourceTokens(sourceList: string): string[] {
   return sourceList.split(/\s+/).filter((t) => t.length > 0);
 }
 
-function hasWildcardSource(sourceList: string, isModernStrict: boolean): boolean {
-  if (isModernStrict) return false;
+function hasWildcardSource(sourceList: string, hasStrictDynamic: boolean): boolean {
+  if (hasStrictDynamic) return false;
   const tokens = sourceTokens(sourceList);
   return tokens.some((token) => token === '*' || token === 'http:' || token === 'https:');
 }
@@ -141,8 +141,8 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
   const effectiveScriptSrc = resolveEffective(directives, 'script-src');
 
   if (effectiveScriptSrc !== undefined) {
-    const { isModernStrict } = hasCspBypassProtection(effectiveScriptSrc);
-    const bypassProneHosts = isModernStrict ? [] : findBypassProneHosts(effectiveScriptSrc);
+    const { isModernStrict, hasStrictDynamic } = hasCspBypassProtection(effectiveScriptSrc);
+    const bypassProneHosts = hasStrictDynamic ? [] : findBypassProneHosts(effectiveScriptSrc);
 
     if (bypassProneHosts.length > 0) {
       findings.push({
@@ -214,7 +214,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
       });
     }
 
-    if (hasWildcardSource(effectiveScriptSrc, isModernStrict)) {
+    if (hasWildcardSource(effectiveScriptSrc, hasStrictDynamic)) {
       findings.push({
         ruleId: 'CSP-004',
         category: 'header',

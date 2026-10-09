@@ -195,7 +195,7 @@ export function runRules(input: RuleInput): RuleOutput {
 export function runApiRules(
   apiHop: import('../shared/types').ApiHop,
   optionsOrSettings?:
-    | { alwaysSensitive?: string[]; alwaysIgnore?: string[]; scopeEngine?: ScopeEngine }
+    | { alwaysSensitive?: string[]; alwaysIgnore?: string[]; scopeEngine?: ScopeEngine; scopeProfile?: ScopeProfile }
     | { alwaysSensitive: string[]; alwaysIgnore: string[] },
 ): Finding[] {
   const hopLike = apiHop as unknown as Hop;
@@ -210,9 +210,11 @@ export function runApiRules(
       ? optionsOrSettings.alwaysIgnore
       : undefined;
   const scopeEngine =
-    optionsOrSettings !== undefined && 'scopeEngine' in optionsOrSettings
+    optionsOrSettings !== undefined && 'scopeEngine' in optionsOrSettings && optionsOrSettings.scopeEngine !== undefined
       ? optionsOrSettings.scopeEngine
-      : undefined;
+      : optionsOrSettings !== undefined && 'scopeProfile' in optionsOrSettings && optionsOrSettings.scopeProfile !== undefined
+        ? new ConcreteScopeEngine(optionsOrSettings.scopeProfile)
+        : undefined;
 
   findings.push(...checkCors(hopLike));
   findings.push(...checkXcto(hopLike));

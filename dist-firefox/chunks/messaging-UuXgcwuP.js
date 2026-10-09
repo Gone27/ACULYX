@@ -81,6 +81,8 @@ var DEFAULT_SETTINGS = {
 	sensitiveCookieNames: [],
 	ignoredCookieNames: [],
 	evaluationMode: false,
+	scopeProfiles: [],
+	activeScopeProfileId: null,
 	theme: "system",
 	density: "comfortable",
 	reducedMotion: "system"
@@ -320,6 +322,12 @@ function migrateSettings(raw) {
 	const theme = typeof obj.theme === "string" && VALID_THEMES.has(obj.theme) ? obj.theme : "system";
 	const density = typeof obj.density === "string" && VALID_DENSITIES.has(obj.density) ? obj.density : "comfortable";
 	const reducedMotion = typeof obj.reducedMotion === "string" && VALID_MOTIONS.has(obj.reducedMotion) ? obj.reducedMotion : "system";
+	const scopeProfiles = [];
+	if (Array.isArray(obj.scopeProfiles)) {
+		for (const item of obj.scopeProfiles) if (typeof item === "object" && item !== null && typeof item.id === "string" && typeof item.name === "string" && Array.isArray(item.rules)) scopeProfiles.push(item);
+	}
+	let activeScopeProfileId = null;
+	if (typeof obj.activeScopeProfileId === "string" && obj.activeScopeProfileId.trim().length > 0) activeScopeProfileId = obj.activeScopeProfileId.trim();
 	const result = {
 		schemaVersion: 2,
 		monitoringMode,
@@ -329,6 +337,8 @@ function migrateSettings(raw) {
 		sensitiveCookieNames: sensitive,
 		ignoredCookieNames: ignored,
 		evaluationMode,
+		scopeProfiles,
+		activeScopeProfileId,
 		theme,
 		density,
 		reducedMotion
@@ -369,6 +379,8 @@ var SettingsTransitionPipeline = class {
 		if (a.theme !== b.theme) return false;
 		if (a.density !== b.density) return false;
 		if (a.reducedMotion !== b.reducedMotion) return false;
+		if ((a.activeScopeProfileId ?? null) !== (b.activeScopeProfileId ?? null)) return false;
+		if (JSON.stringify(a.scopeProfiles ?? []) !== JSON.stringify(b.scopeProfiles ?? [])) return false;
 		return true;
 	}
 	async transition(incoming, _source = "storage") {
@@ -380,11 +392,12 @@ var SettingsTransitionPipeline = class {
 			monitoringMode: "off"
 		};
 		const cookieListsChanged = haveCookieListsChanged(previous, validated);
+		const scopeProfileChanged = (previous.activeScopeProfileId ?? null) !== (validated.activeScopeProfileId ?? null) || JSON.stringify(previous.scopeProfiles ?? []) !== JSON.stringify(validated.scopeProfiles ?? []);
 		const modeChanged = previous.monitoringMode !== validated.monitoringMode;
 		this.lastAppliedSettings = { ...validated };
 		cachedSettings = { ...validated };
 		if (modeChanged && this.hooks.onModeChange) await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
-		if (cookieListsChanged && this.hooks.onRescoreTabs) await this.hooks.onRescoreTabs(previous, validated);
+		if ((cookieListsChanged || scopeProfileChanged) && this.hooks.onRescoreTabs) await this.hooks.onRescoreTabs(previous, validated);
 		if (this.hooks.onSettingsApplied) await this.hooks.onSettingsApplied(validated);
 		for (const cb of listeners) try {
 			cb(validated);
@@ -1957,4 +1970,4 @@ function sendToBackground(msg) {
 //#endregion
 export { DEFAULT_SETTINGS as A, resolveCookieOverlaps as C, onEpochChange as D, incrementStorageResetEpoch as E, SCORE_VERSION as F, SEVERITY_ORDER as I, SIDEPANEL_PORT_NAME as L, MAINTENANCE_ALARM as M, POPUP_PORT_NAME as N, setStorageResetEpoch as O, RESTRICTED_SCHEMES as P, normalizeCookieList as S, getStorageResetEpoch as T, redactUrlPath as _, SessionStorage as a, sanitizeUrlForStorage as b, checkDuplicateHeaders as c, headersDiffer as d, isSensitiveCookie as f, redactHeaderValue as g, parseCspDirectives as h, LocalStorage as i, GRADE_THRESHOLDS as j, BADGE_COLORS as k, extractSetCookieHeaders as l, originFromUrl as m, portSend as n, checkSubdomainTrust as o, normalizeHeaders as p, sendToBackground as r, registrableDomain as s, PortRegistry as t, hasCspBypassProtection as u, sanitizeCspPolicyForStorage as v, settingsTransitionPipeline as w, SettingsService as x, sanitizeEvidence as y };
 
-//# sourceMappingURL=messaging-CTMeVYaN.js.map
+//# sourceMappingURL=messaging-UuXgcwuP.js.map

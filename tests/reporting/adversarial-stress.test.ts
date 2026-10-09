@@ -176,12 +176,64 @@ describe('Empirical Challenger 2 — Secret Redaction & Incognito Isolation Stre
       expect(json).not.toContain('super_secret_access_token_999');
     });
 
-    it('PASS: sanitizeUrlForReport produces valid URL with single question mark (?) on query strings', () => {
-      const raw = 'https://target.com/search?token=secret123&q=query';
+    it('PASS: sanitizeUrlForReport strips query strings and fragments by default', () => {
+      const raw = 'https://target.com/search?auth_token=ALPHA123&state=BETA456&code_verifier=GAMMA789#state=OMEGA123&session=DELTA456';
       const output = sanitizeUrlForReport(raw);
 
-      expect(output).not.toContain('??');
-      expect(output).toBe('https://target.com/search?token=%5BREDACTED%5D&q=query');
+      expect(output).toBe('https://target.com/search');
+      expect(output).not.toContain('ALPHA123');
+      expect(output).not.toContain('BETA456');
+      expect(output).not.toContain('GAMMA789');
+      expect(output).not.toContain('OMEGA123');
+      expect(output).not.toContain('DELTA456');
+    });
+
+    it('PASS: redactAllSecrets redacts complex multi-parameter fragments (#state=OMEGA123&session=DELTA456)', () => {
+      const text = 'URL returned redirect to https://example.com/oauth#state=OMEGA123&session=DELTA456 in location';
+      const output = redactAllSecrets(text);
+
+      expect(output).not.toContain('OMEGA123');
+      expect(output).not.toContain('DELTA456');
+      expect(output).toContain('#[REDACTED]');
+    });
+
+    it('PASS: buildReportDraft, formatReportAsMarkdown, and formatReportAsJson scrub canaries across all free-text fields', () => {
+      const finding: Finding = {
+        ruleId: 'CSP-001',
+        category: 'header',
+        severity: 'high',
+        title: 'Title containing secret token: canary_title_token_111',
+        impact: 'Impact with auth_token: ALPHA123 and code_verifier: GAMMA789',
+        evidence: 'Evidence with Set-Cookie: session=CANARY_EVIDENCE_999; Path=/',
+        recommendation: 'Fix using key: canary_remediation_token_222',
+        reference: 'https://docs.example.com/ref?token=canary_ref_token_333',
+        sourceUrl: 'https://target.com/api?auth_token=ALPHA123#state=BETA456',
+        limitations: ['Limitation containing secret_canary_lim_444'],
+      };
+
+      const draft = ReportBuilder.buildReportDraft(finding);
+      const markdown = ReportBuilder.formatReportAsMarkdown(draft);
+      const json = ReportBuilder.formatReportAsJson(draft);
+
+      const canaryList = [
+        'canary_title_token_111',
+        'ALPHA123',
+        'GAMMA789',
+        'CANARY_EVIDENCE_999',
+        'canary_remediation_token_222',
+        'canary_ref_token_333',
+        'BETA456',
+        'secret_canary_lim_444',
+      ];
+
+      for (const canary of canaryList) {
+        expect(markdown, `Markdown output must not contain canary: ${canary}`).not.toContain(canary);
+        expect(json, `JSON output must not contain canary: ${canary}`).not.toContain(canary);
+      }
+
+      // Verify report footer accurately reflects automated secret redaction
+      expect(markdown).toContain('processed by automated secret redaction; researchers must review all details prior to submission');
+      expect(markdown).not.toContain('strictly redacted');
     });
   });
 

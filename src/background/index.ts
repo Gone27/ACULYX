@@ -21,6 +21,8 @@ import { CapturePolicy } from './capture-policy';
 import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
 import { runRules, runApiRules } from '../rules/engine';
+import { ScopeEngine } from '../shared/scope/engine';
+import type { ScopeProfile } from '../shared/scope/contracts';
 import {
   extractSetCookieHeaders,
   originFromUrl,
@@ -398,6 +400,18 @@ function recomputeTabState(tabId: number, state: TabState, actionEpoch?: number)
   if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
   if (CapturePolicy.getSnapshot().mode === 'off') return;
 
+  let activeProfile: ScopeProfile | undefined;
+  if (
+    currentSettings.activeScopeProfileId !== undefined &&
+    currentSettings.activeScopeProfileId !== null &&
+    currentSettings.activeScopeProfileId.length > 0 &&
+    currentSettings.scopeProfiles !== undefined
+  ) {
+    activeProfile = currentSettings.scopeProfiles.find(
+      (p) => p.id === currentSettings.activeScopeProfileId
+    );
+  }
+
   const result = runRules({
     hops: state.hops,
     cookies: state.cookies,
@@ -408,10 +422,21 @@ function recomputeTabState(tabId: number, state: TabState, actionEpoch?: number)
       alwaysSensitive: currentSettings.sensitiveCookieNames,
       alwaysIgnore: currentSettings.ignoredCookieNames,
     },
+    scopeProfile: activeProfile,
   });
 
   if (actionEpoch !== undefined && currentResetEpoch !== actionEpoch) return;
   if (CapturePolicy.getSnapshot().mode === 'off') return;
+
+  if (activeProfile) {
+    const scopeEngine = new ScopeEngine(activeProfile);
+    const scopeRes = scopeEngine.evaluate(state.url || state.origin);
+    state.scopeStatus = scopeRes.status;
+    state.scopeReason = scopeRes.reason;
+  } else {
+    state.scopeStatus = undefined;
+    state.scopeReason = undefined;
+  }
 
   state.findings = result.findings;
   state.score = result.score;
@@ -1599,9 +1624,22 @@ registerCaptureListeners(
       const isFirstParty = state.origin === targetOrigin;
       apiHop.isThirdParty = !isFirstParty;
 
+      let activeProfile: ScopeProfile | undefined;
+      if (
+        currentSettings.activeScopeProfileId !== undefined &&
+        currentSettings.activeScopeProfileId !== null &&
+        currentSettings.activeScopeProfileId.length > 0 &&
+        currentSettings.scopeProfiles !== undefined
+      ) {
+        activeProfile = currentSettings.scopeProfiles.find(
+          (p) => p.id === currentSettings.activeScopeProfileId
+        );
+      }
+
       const findings = runApiRules(apiHop, {
         alwaysSensitive: currentSettings.sensitiveCookieNames,
         alwaysIgnore: currentSettings.ignoredCookieNames,
+        scopeProfile: activeProfile,
       });
 
       if (!state.apiEndpoints) {

@@ -61,4 +61,20 @@ describe('Scope Matcher', () => {
       expect(matchTarget(normalizeScopeTarget('https://api.acme.com/'), portRule)).toBe(false);
     });
   });
+
+  describe('matchTarget with Scheme-Pinned Rules (Fail-Closed)', () => {
+    const schemeRule = normalizeScopeTarget('https://example.com:8443');
+
+    it('matches target with identical scheme and port', () => {
+      expect(matchTarget(normalizeScopeTarget('https://example.com:8443'), schemeRule)).toBe(true);
+    });
+
+    it('rejects scheme-less target on scheme-pinned rule (fail closed)', () => {
+      expect(matchTarget(normalizeScopeTarget('example.com:8443'), schemeRule)).toBe(false);
+    });
+
+    it('rejects target with mismatched scheme', () => {
+      expect(matchTarget(normalizeScopeTarget('http://example.com:8443'), schemeRule)).toBe(false);
+    });
+  });
 });

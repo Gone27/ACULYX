@@ -79,6 +79,17 @@
         <li>
           <button
             class="nav-item"
+            data-section="scope"
+            role="menuitem"
+            title="Scope &amp; Bug-Bounty Programs"
+          >
+            <span class="nav-icon" aria-hidden="true">🎯</span>
+            <span class="nav-label">Scope</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
             data-section="appearance"
             role="menuitem"
             title="Appearance &amp; Accessibility"
@@ -423,6 +434,32 @@
         </div>
 
         <div id="data-mgmt-status" class="status-message" aria-live="polite"></div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Scope & Bug-Bounty Programs
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-scope" hidden aria-labelledby="heading-scope">
+        <h2 class="section-title" id="heading-scope">Scope &amp; Bug-Bounty Programs</h2>
+        <p class="section-desc">Configure authorized targets for bug-bounty engagements. Exclusions take precedence over broad includes.</p>
+
+        <h3 class="subsection-title">Active Program / Profile</h3>
+        <div class="field-row">
+          <label class="field-label" for="active-scope-profile-select">
+            Active Scope Profile
+          </label>
+          <select id="active-scope-profile-select" class="select-input" aria-describedby="active-scope-profile-hint">
+            <option value="">(None — Global Unscoped Monitoring)</option>
+          </select>
+          <p class="field-hint" id="active-scope-profile-hint">Select a profile to filter findings and classify tab scope status (in-scope vs out-of-scope).</p>
+        </div>
+
+        <div class="flex-between">
+          <h3 class="subsection-title">Scope Profiles</h3>
+          <button type="button" class="btn-secondary btn-sm" id="btn-add-scope-profile">+ New Profile</button>
+        </div>
+
+        <div id="scope-profiles-container" class="scope-profiles-list"></div>
       </section>
 
       <!-- ════════════════════════════════════════════════════════════

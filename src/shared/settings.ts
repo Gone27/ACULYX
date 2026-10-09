@@ -10,7 +10,7 @@
  */
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
-import type { Severity, SettingsV2 } from './types';
+import type { Severity, SettingsV2, ScopeProfile } from './types';
 import {
   storageWriteBarrier,
   getStorageResetEpoch,
@@ -199,6 +199,21 @@ export function migrateSettings(raw: unknown): SettingsV2 {
       ? (obj.reducedMotion as NonNullable<SettingsV2['reducedMotion']>)
       : 'system';
 
+  // Scope profiles
+  const scopeProfiles: ScopeProfile[] = [];
+  if (Array.isArray(obj.scopeProfiles)) {
+    for (const item of obj.scopeProfiles) {
+      if (typeof item === 'object' && item !== null && typeof (item as ScopeProfile).id === 'string' && typeof (item as ScopeProfile).name === 'string' && Array.isArray((item as ScopeProfile).rules)) {
+        scopeProfiles.push(item as ScopeProfile);
+      }
+    }
+  }
+
+  let activeScopeProfileId: string | null = null;
+  if (typeof obj.activeScopeProfileId === 'string' && obj.activeScopeProfileId.trim().length > 0) {
+    activeScopeProfileId = obj.activeScopeProfileId.trim();
+  }
+
   const result: SettingsV2 = {
     schemaVersion: 2,
     monitoringMode,
@@ -208,6 +223,8 @@ export function migrateSettings(raw: unknown): SettingsV2 {
     sensitiveCookieNames: sensitive,
     ignoredCookieNames: ignored,
     evaluationMode,
+    scopeProfiles,
+    activeScopeProfileId,
     theme,
     density,
     reducedMotion,
@@ -269,6 +286,9 @@ export class SettingsTransitionPipeline {
     if (a.density !== b.density) return false;
     if (a.reducedMotion !== b.reducedMotion) return false;
 
+    if ((a.activeScopeProfileId ?? null) !== (b.activeScopeProfileId ?? null)) return false;
+    if (JSON.stringify(a.scopeProfiles ?? []) !== JSON.stringify(b.scopeProfiles ?? [])) return false;
+
     return true;
   }
 
@@ -297,6 +317,9 @@ export class SettingsTransitionPipeline {
 
     // 3. Delta Detection
     const cookieListsChanged = haveCookieListsChanged(previous, validated);
+    const scopeProfileChanged =
+      (previous.activeScopeProfileId ?? null) !== (validated.activeScopeProfileId ?? null) ||
+      JSON.stringify(previous.scopeProfiles ?? []) !== JSON.stringify(validated.scopeProfiles ?? []);
     const modeChanged = previous.monitoringMode !== validated.monitoringMode;
 
     // 4. Update state atomically
@@ -308,7 +331,7 @@ export class SettingsTransitionPipeline {
       await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
     }
 
-    if (cookieListsChanged && this.hooks.onRescoreTabs) {
+    if ((cookieListsChanged || scopeProfileChanged) && this.hooks.onRescoreTabs) {
       await this.hooks.onRescoreTabs(previous, validated);
     }
 

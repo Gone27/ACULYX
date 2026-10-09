@@ -105,5 +105,15 @@ describe('Scope Normalization', () => {
     it('throws on empty or non-string input', () => {
       expect(() => normalizeScopeTarget('')).toThrow(/Scope target must be a non-empty string/);
     });
+
+    it('rejects malformed wildcards without explicit "*." prefix (fail closed)', () => {
+      expect(() => normalizeScopeTarget('*example.com')).toThrow(/wildcards must use the explicit "\*\." prefix/);
+      expect(() => normalizeScopeTarget('example*.com')).toThrow(/wildcards must use the explicit "\*\." prefix/);
+      expect(() => normalizeScopeTarget('*')).toThrow(/wildcards must use the explicit "\*\." prefix/);
+    });
+
+    it('rejects wildcards with interior "*" characters', () => {
+      expect(() => normalizeScopeTarget('*.api.*.example.com')).toThrow(/wildcards cannot contain interior "\*"/);
+    });
   });
 });

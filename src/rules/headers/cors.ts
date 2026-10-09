@@ -8,7 +8,7 @@ const REF_CORS = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS';
 export function checkCors(hop: Hop | ApiHop): Finding[] {
   const isApi = 'method' in hop || 'normalizedPath' in hop;
   const contentType = hop.headers['content-type']?.toLowerCase() ?? '';
-  
+
   if (!isApi && (contentType.includes('text/html') || contentType === '')) {
     return [];
   }
@@ -69,22 +69,23 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
     }];
   }
 
-  // Case 3: Wildcard ACAO
+  // Case 3: Wildcard ACAO (informational observation without evidence of sensitivity)
   if (allowOrigin === '*') {
     return [{
       ruleId: 'CORS-001',
       category: 'cors',
-      severity: 'medium',
-      confidence: 'deterministic',
+      severity: 'info',
+      confidence: 'heuristic',
       provenance: 'response-header',
-      outcome: fromCache ? 'partial-coverage' : 'fail',
-      title: 'CORS allows every origin to read this response',
-      impact: 'Any website can read this response through browser JavaScript; this is risky when the response contains non-public data.',
-      evidence: sanitizeEvidence(`Access-Control-Allow-Origin: *${credentials ? '; Access-Control-Allow-Credentials: true (credentials are ignored with wildcard origin)' : ''}`),
-      recommendation: 'Replace the wildcard with an explicit allowlist of trusted origins when this response contains data that should not be public.',
+      outcome: 'pass',
+      title: 'CORS policy permits wildcard origin (Access-Control-Allow-Origin: *)',
+      impact: 'Allows any website to read this response via browser JavaScript. Standard and safe for public APIs and resources; hazardous only if sensitive or authenticated user data is exposed.',
+      evidence: sanitizeEvidence(`Access-Control-Allow-Origin: *${credentials ? '; Access-Control-Allow-Credentials: true (ignored by browsers with wildcard origin)' : ''}`),
+      recommendation: 'Verify that this endpoint exposes only public resources. If user-specific or sensitive data is returned, specify an explicit trusted origin instead of wildcard.',
       reference: REF_CORS,
       limitations: [
-        'Passive observation of wildcard CORS; permissible for public endpoints, hazardous for sensitive endpoints.',
+        'Passive observation: wildcard CORS is permissible for public endpoints, hazardous only for sensitive endpoints.',
+        'Browsers reject credentialed requests (cookies/HTTP auth) when Access-Control-Allow-Origin is "*".',
       ],
     }];
   }

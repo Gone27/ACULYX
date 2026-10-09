@@ -1,4 +1,5 @@
-import type { ScopeStatus } from './scope/contracts';
+import type { ScopeStatus, ScopeProfile } from './scope/contracts';
+export type { ScopeStatus, ScopeProfile };
 
 // ─── Core enumerations ────────────────────────────────────────────────────────
 
@@ -242,6 +243,10 @@ export interface TabState {
   navigationGeneration?: number;
   /** True when this tab is an incognito/private tab. Incognito state is session-only and never persisted to local storage. */
   isIncognito?: boolean | undefined;
+  /** Overall scope status evaluated against the active scope profile. */
+  scopeStatus?: ScopeStatus | undefined;
+  /** Human-readable explanation of determined scope status. */
+  scopeReason?: string | undefined;
 }
 
 export interface SettingsV2 {
@@ -253,6 +258,10 @@ export interface SettingsV2 {
   sensitiveCookieNames: string[];
   ignoredCookieNames: string[];
   evaluationMode: boolean;
+  /** User-defined scope profiles for bug-bounty targets and programs. */
+  scopeProfiles?: ScopeProfile[];
+  /** Active scope profile ID, or null if unassigned / global. */
+  activeScopeProfileId?: string | null;
   /** Appearance: color theme preference. 'system' follows prefers-color-scheme. */
   theme?: 'system' | 'dark' | 'light';
   /** Appearance: layout density for lists and tables. */

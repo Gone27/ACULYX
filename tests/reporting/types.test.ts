@@ -626,14 +626,13 @@ describe('Reporting & Researcher Triage Contracts (R0)', () => {
       expect(clean).toBe('https://api.target.com/v1/auth');
     });
 
-    it('redacts sensitive query parameter tokens', () => {
+    it('strips query parameters from URLs by default in reports', () => {
       const dirtyUrl = 'https://target.com/callback?token=eyJhbGciOiJIUzI1NiJ9.test&code=secret123&public=ok';
       const clean = sanitizeUrlForReport(dirtyUrl);
       expect(clean).not.toContain('eyJhbGciOiJIUzI1NiJ9');
       expect(clean).not.toContain('secret123');
-      expect(clean).toContain('token=%5BREDACTED%5D');
-      expect(clean).toContain('code=%5BREDACTED%5D');
-      expect(clean).toContain('public=ok');
+      expect(clean).not.toContain('?');
+      expect(clean).toBe('https://target.com/callback');
     });
 
     it('strips URL fragments entirely', () => {

@@ -138,18 +138,21 @@ export function normalizeScopeTarget(raw: string): NormalizedScopeTarget {
     authority = authority.slice(atIdx + 1);
   }
 
-  // Check for wildcard prefix
+  // Check for wildcard prefix: only the explicit "*." prefix is supported (fail closed)
   let isWildcard = false;
   let hostAndPort = authority;
   if (hostAndPort.startsWith('*.')) {
     isWildcard = true;
     hostAndPort = hostAndPort.slice(2);
-  } else if (hostAndPort.startsWith('*')) {
-    isWildcard = true;
-    hostAndPort = hostAndPort.slice(1);
-    if (hostAndPort.startsWith('.')) {
-      hostAndPort = hostAndPort.slice(1);
+    if (hostAndPort.includes('*')) {
+      throw new Error(
+        `Invalid wildcard pattern: wildcards cannot contain interior "*" characters. Found: "${raw}"`
+      );
     }
+  } else if (hostAndPort.includes('*')) {
+    throw new Error(
+      `Invalid wildcard pattern: wildcards must use the explicit "*." prefix (e.g. "*.example.com"). Found: "${raw}"`
+    );
   }
 
   // Extract explicit port

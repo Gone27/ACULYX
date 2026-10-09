@@ -232,4 +232,37 @@ describe('Bounded Rule Precision Audit', () => {
       }
     });
   });
+
+  describe('CSP Nonce/Hash vs Strict-Dynamic Broad-Source Precision', () => {
+    it('flags CSP-004 when nonce is combined with https: scheme without strict-dynamic', () => {
+      const hop = makeHop({
+        'content-security-policy': "script-src 'nonce-abc123' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      const { findings } = checkCsp(hop);
+      const csp004 = findings.find((f) => f.ruleId === 'CSP-004');
+      expect(csp004).toBeDefined();
+      expect(csp004?.severity).toBe('medium');
+      expect(csp004?.evidence).toContain('https:');
+    });
+
+    it('flags CSP-004 when hash is combined with * wildcard without strict-dynamic', () => {
+      const hop = makeHop({
+        'content-security-policy': "script-src 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=' *; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      const { findings } = checkCsp(hop);
+      const csp004 = findings.find((f) => f.ruleId === 'CSP-004');
+      expect(csp004).toBeDefined();
+      expect(csp004?.severity).toBe('medium');
+      expect(csp004?.evidence).toContain('*');
+    });
+
+    it('suppresses CSP-004 when strict-dynamic is present alongside host/scheme sources', () => {
+      const hop = makeHop({
+        'content-security-policy': "script-src 'nonce-abc123' 'strict-dynamic' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      const { findings } = checkCsp(hop);
+      const csp004 = findings.find((f) => f.ruleId === 'CSP-004');
+      expect(csp004).toBeUndefined();
+    });
+  });
 });
