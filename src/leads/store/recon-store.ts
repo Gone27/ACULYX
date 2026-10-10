@@ -171,3 +171,5 @@ export async function clearRecon(): Promise<void> {
     }
   }
 }
+
+export const clearReconMemory = clearRecon;
