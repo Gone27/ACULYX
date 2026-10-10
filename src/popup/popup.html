@@ -14,154 +14,206 @@
     <a href="" id="settings-link" class="settings-icon" title="Settings" aria-label="Extension Settings">⚙</a>
   </header>
 
-  <!-- 5. Onboarding Card (first-time visitors) -->
-  <div class="onboarding-card" id="onboarding-card" hidden role="region" aria-label="Welcome to ACULYX">
-    <div class="onboarding-header">
-      <span class="onboarding-title">🛡️ Welcome to ACULYX</span>
-      <button class="onboarding-close-btn" id="onboarding-close-btn" title="Dismiss" aria-label="Dismiss onboarding">✕</button>
-    </div>
-    <p class="onboarding-text">
-      Monitoring starts only after you grant read-only access for this site. Headers and cookie attributes are analyzed locally.
-    </p>
-    <div class="onboarding-highlights">
-      <span class="onboarding-pill">🔒 100% Local &amp; Private</span>
-      <span class="onboarding-pill">⚡ Zero Tracking</span>
-    </div>
-    <button class="onboarding-action-btn" id="onboarding-action-btn">Continue</button>
-  </div>
+  <!-- Segmented Control [ Hygiene | Leads ] -->
+  <nav class="popup-nav-segmented" role="tablist" aria-label="Scanner Mode">
+    <button class="nav-segment active" id="tab-btn-hygiene" role="tab" aria-selected="true" aria-controls="hygiene-view">Hygiene</button>
+    <button class="nav-segment" id="tab-btn-leads" role="tab" aria-selected="false" aria-controls="leads-view">Leads</button>
+  </nav>
 
-  <!-- Special condition notice (localhost, PDF, zero cookies, etc.) -->
-  <div class="special-notice" id="special-notice" hidden role="note"></div>
-
-  <!-- Grade display -->
-  <div class="grade-section" id="grade-section" role="region" aria-label="Security Grade">
-    <div class="grade-badge" id="grade-badge" data-state="locked" aria-label="Site access locked" role="img">
-      <svg class="badge-shield" viewBox="0 0 64 72" aria-hidden="true" focusable="false">
-        <path class="shield-outline" d="M32 3 57 12v19c0 17-10 29-25 38C17 60 7 48 7 31V12L32 3Z" />
-        <path class="badge-lock" d="M24 31v-5a8 8 0 0 1 16 0v5m-18 0h20v17H22V31Z" />
-        <circle class="badge-scan" cx="32" cy="38" r="5" />
-        <text class="badge-grade" id="badge-grade" x="32" y="43" text-anchor="middle">?</text>
-      </svg>
-    </div>
-    <div class="grade-details">
-      <div class="score" id="score-text"></div>
-      <div class="quality-score" id="quality-score-text"></div>
-      <div class="origin" id="origin-text"></div>
-      <!-- 3. Historical trend over time -->
-      <div class="trend-indicator" id="trend-indicator" hidden role="status">
-        <svg class="trend-chart" id="trend-chart" viewBox="0 0 96 28" role="img" hidden></svg>
-        <span id="trend-text"></span>
+  <!-- Hygiene View (Preserves existing Header & Cookie Scanner UI) -->
+  <div id="hygiene-view" class="tab-view active" role="tabpanel" aria-labelledby="tab-btn-hygiene">
+    <!-- 5. Onboarding Card (first-time visitors) -->
+    <div class="onboarding-card" id="onboarding-card" hidden role="region" aria-label="Welcome to ACULYX">
+      <div class="onboarding-header">
+        <span class="onboarding-title">🛡️ Welcome to ACULYX</span>
+        <button class="onboarding-close-btn" id="onboarding-close-btn" title="Dismiss" aria-label="Dismiss onboarding">✕</button>
       </div>
-      <!-- C: Stop monitoring link — shown when site is monitored -->
-      <button class="stop-monitoring-btn" id="stop-monitoring-btn" hidden aria-label="Stop monitoring this site">Stop monitoring</button>
+      <p class="onboarding-text">
+        Monitoring starts only after you grant read-only access for this site. Headers and cookie attributes are analyzed locally.
+      </p>
+      <div class="onboarding-highlights">
+        <span class="onboarding-pill">🔒 100% Local &amp; Private</span>
+        <span class="onboarding-pill">⚡ Zero Tracking</span>
+      </div>
+      <button class="onboarding-action-btn" id="onboarding-action-btn">Continue</button>
+    </div>
+
+    <!-- Special condition notice (localhost, PDF, zero cookies, etc.) -->
+    <div class="special-notice" id="special-notice" hidden role="note"></div>
+
+    <!-- Grade display -->
+    <div class="grade-section" id="grade-section" role="region" aria-label="Security Grade">
+      <div class="grade-badge" id="grade-badge" data-state="locked" aria-label="Site access locked" role="img">
+        <svg class="badge-shield" viewBox="0 0 64 72" aria-hidden="true" focusable="false">
+          <path class="shield-outline" d="M32 3 57 12v19c0 17-10 29-25 38C17 60 7 48 7 31V12L32 3Z" />
+          <path class="badge-lock" d="M24 31v-5a8 8 0 0 1 16 0v5m-18 0h20v17H22V31Z" />
+          <circle class="badge-scan" cx="32" cy="38" r="5" />
+          <text class="badge-grade" id="badge-grade" x="32" y="43" text-anchor="middle">?</text>
+        </svg>
+      </div>
+      <div class="grade-details">
+        <div class="score" id="score-text"></div>
+        <div class="quality-score" id="quality-score-text"></div>
+        <div class="origin" id="origin-text"></div>
+        <!-- 3. Historical trend over time -->
+        <div class="trend-indicator" id="trend-indicator" hidden role="status">
+          <svg class="trend-chart" id="trend-chart" viewBox="0 0 96 28" role="img" hidden></svg>
+          <span id="trend-text"></span>
+        </div>
+        <!-- C: Stop monitoring link — shown when site is monitored -->
+        <button class="stop-monitoring-btn" id="stop-monitoring-btn" hidden aria-label="Stop monitoring this site">Stop monitoring</button>
+      </div>
+    </div>
+
+    <!-- Coverage indicator -->
+    <div class="coverage-bar" id="coverage-bar" hidden role="status"></div>
+
+    <!-- State-specific messages (CSS shows only the active one) -->
+    <div class="state-message state-not-monitored">
+      <p>ACULYX is not monitoring this site.</p>
+    </div>
+    <div class="state-message state-permission-denied">
+      <p>Permission was denied. Click "Monitor this site" to try again.</p>
+    </div>
+    <div class="state-message state-access-granted-reload">
+      <p>Access granted. Reload the page to start capturing headers.</p>
+    </div>
+    <div class="state-message state-capturing">
+      <p>Capturing headers…</p>
+    </div>
+    <div class="state-message state-paused-conflict">
+      <p>⚠ Capture paused — broad and per-site permissions conflict.</p>
+    </div>
+    <div class="state-message state-all-sites-missing">
+      <p>⚠ All-sites permission missing. Monitoring is paused.</p>
+    </div>
+    <div class="state-message state-restricted">
+      <p>This page cannot be inspected.</p>
+    </div>
+    <!-- State messages (no permission / restricted / loading) -->
+    <div class="state-message" id="state-message" role="status" aria-live="polite"></div>
+
+    <!-- Monitor this site button -->
+    <div class="monitor-section" id="monitor-section" hidden>
+      <button class="btn-primary" id="monitor-btn" aria-label="Monitor this site">Monitor this site</button>
+      <p class="monitor-hint">Grant read-only access to headers on this origin.</p>
+    </div>
+
+    <!-- Top findings list (max 5) -->
+    <div class="findings-section" id="findings-section" hidden role="region" aria-label="Security Findings">
+      <div class="findings-header">
+        <h2 class="section-title">Top findings</h2>
+        <button class="btn-filter-override" id="show-all-findings-btn" hidden type="button">Show all</button>
+      </div>
+      <div class="findings-filter-notice" id="findings-filter-notice" hidden></div>
+      <ul class="findings-list" id="findings-list" role="list"></ul>
+    </div>
+
+    <!-- B: Score breakdown (collapsible) -->
+    <details class="breakdown-section" id="breakdown-section" hidden>
+      <summary class="breakdown-summary">Score breakdown</summary>
+      <table class="breakdown-table" id="breakdown-table">
+        <thead>
+          <tr>
+            <th class="col-rule">Rule</th>
+            <th class="col-title">Finding</th>
+            <th class="col-pts">Pts</th>
+          </tr>
+        </thead>
+        <tbody id="breakdown-body"></tbody>
+      </table>
+    </details>
+
+    <!-- Auth Posture Diff (pre-login vs post-login) -->
+    <details class="auth-diff-section" id="auth-diff-section" hidden>
+      <summary class="auth-diff-summary" id="auth-diff-summary">
+        Posture after login: <span id="auth-diff-delta" class="auth-diff-delta">0 pts</span>
+      </summary>
+      <div class="auth-diff-content">
+        <div class="auth-diff-meta" id="auth-diff-meta"></div>
+        <ul class="auth-diff-list" id="auth-diff-list" role="list"></ul>
+      </div>
+    </details>
+
+    <!-- E: Subdomain Trust Analysis (collapsible) -->
+    <details class="subdomain-section" id="subdomain-section" hidden>
+      <summary class="subdomain-summary">
+        Subdomain trust analysis
+        <span class="subdomain-badge" id="subdomain-badge"></span>
+      </summary>
+      <svg class="trust-graph" id="trust-graph" viewBox="0 0 320 180" role="group" aria-labelledby="trust-graph-title trust-graph-description">
+        <title id="trust-graph-title">Subdomain trust graph</title>
+        <desc id="trust-graph-description">Spokes connect the analyzed page to each subdomain trust vector.</desc>
+      </svg>
+      <ul class="vector-list" id="vector-list" role="list"></ul>
+      <button class="open-graph-btn" id="open-graph-btn" type="button">Open Attack Surface Graph (Side Panel) →</button>
+    </details>
+
+    <!-- API endpoints (collapsible) -->
+    <details class="api-endpoints-section" id="api-endpoints-section" hidden>
+      <summary class="api-endpoints-summary">
+        API &amp; Subresource Findings
+        <span class="api-endpoints-badge" id="api-endpoints-badge">0 endpoints</span>
+      </summary>
+      <div class="api-endpoints-disclaimer">
+        API findings are passive observations from in-page XHR/fetch calls and do not affect the main document security score.
+      </div>
+      <ul class="api-endpoints-list" id="api-endpoints-list" role="list"></ul>
+    </details>
+
+    <!-- Footer with export actions -->
+    <footer class="popup-footer" role="contentinfo">
+      <span class="privacy-note">ACULYX analysis is local — nothing leaves your device.</span>
+      <div class="export-actions" id="export-actions">
+        <!-- 4. Export JSON & Copy Markdown report buttons -->
+        <button class="export-btn" id="export-btn" hidden aria-label="Export findings as JSON">Export JSON</button>
+        <button class="export-btn export-btn-secondary" id="copy-report-btn" hidden aria-label="Copy Markdown Audit Report">📋 Copy Report</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Leads View (Lead Radar) -->
+  <div id="leads-view" class="tab-view leads-tab-view" role="tabpanel" aria-labelledby="tab-btn-leads" hidden>
+    <div class="leads-header-bar">
+      <div class="leads-title-group">
+        <span class="leads-accent-dot"></span>
+        <span class="leads-title-text">Lead Radar</span>
+      </div>
+      <div class="leads-filter-group">
+        <span id="leads-count-badge" class="leads-count-badge">0 leads</span>
+      </div>
+    </div>
+
+    <!-- SVG Radar Visualizer -->
+    <div class="radar-container" id="radar-container" role="region" aria-label="Lead Radar Visualizer">
+      <svg class="radar-svg" id="radar-svg" viewBox="-120 -120 240 240" role="img" aria-label="Vulnerability Lead Radar">
+        <g id="radar-rings"></g>
+        <g id="radar-axes"></g>
+        <g id="radar-sweep" class="radar-sweep-group">
+          <line x1="0" y1="0" x2="0" y2="-105" class="radar-sweep-line" />
+          <path d="M 0 0 L 0 -105 A 105 105 0 0 1 74 -74 Z" class="radar-sweep-arc" />
+        </g>
+        <g id="radar-blips"></g>
+      </svg>
+      <div class="radar-legend">
+        <span class="radar-legend-item"><span class="legend-dot dot-critical"></span>Crit</span>
+        <span class="radar-legend-item"><span class="legend-dot dot-high"></span>High</span>
+        <span class="radar-legend-item"><span class="legend-dot dot-medium"></span>Med</span>
+        <span class="radar-legend-item"><span class="legend-dot dot-low"></span>Low</span>
+        <span class="radar-legend-item"><span class="legend-dot dot-info"></span>Info</span>
+      </div>
+    </div>
+
+    <!-- Lead Cards List Container -->
+    <div class="leads-cards-container" id="leads-cards-container" role="region" aria-label="Lead Cards">
+      <div id="leads-empty-state" class="leads-empty-state">
+        <span class="empty-icon">📡</span>
+        <p class="empty-title">No leads detected on this origin</p>
+        <p class="empty-desc">Ensure Lead Radar is enabled in settings and the site is monitored.</p>
+      </div>
+      <div id="leads-card-list" class="leads-card-list" role="list"></div>
     </div>
   </div>
-
-  <!-- Coverage indicator -->
-  <div class="coverage-bar" id="coverage-bar" hidden role="status"></div>
-
-  <!-- State-specific messages (CSS shows only the active one) -->
-  <div class="state-message state-not-monitored">
-    <p>ACULYX is not monitoring this site.</p>
-  </div>
-  <div class="state-message state-permission-denied">
-    <p>Permission was denied. Click "Monitor this site" to try again.</p>
-  </div>
-  <div class="state-message state-access-granted-reload">
-    <p>Access granted. Reload the page to start capturing headers.</p>
-  </div>
-  <div class="state-message state-capturing">
-    <p>Capturing headers…</p>
-  </div>
-  <div class="state-message state-paused-conflict">
-    <p>⚠ Capture paused — broad and per-site permissions conflict.</p>
-  </div>
-  <div class="state-message state-all-sites-missing">
-    <p>⚠ All-sites permission missing. Monitoring is paused.</p>
-  </div>
-  <div class="state-message state-restricted">
-    <p>This page cannot be inspected.</p>
-  </div>
-  <!-- State messages (no permission / restricted / loading) -->
-  <div class="state-message" id="state-message" role="status" aria-live="polite"></div>
-
-  <!-- Monitor this site button -->
-  <div class="monitor-section" id="monitor-section" hidden>
-    <button class="btn-primary" id="monitor-btn" aria-label="Monitor this site">Monitor this site</button>
-    <p class="monitor-hint">Grant read-only access to headers on this origin.</p>
-  </div>
-
-  <!-- Top findings list (max 5) -->
-  <div class="findings-section" id="findings-section" hidden role="region" aria-label="Security Findings">
-    <div class="findings-header">
-      <h2 class="section-title">Top findings</h2>
-      <button class="btn-filter-override" id="show-all-findings-btn" hidden type="button">Show all</button>
-    </div>
-    <div class="findings-filter-notice" id="findings-filter-notice" hidden></div>
-    <ul class="findings-list" id="findings-list" role="list"></ul>
-  </div>
-
-  <!-- B: Score breakdown (collapsible) -->
-  <details class="breakdown-section" id="breakdown-section" hidden>
-    <summary class="breakdown-summary">Score breakdown</summary>
-    <table class="breakdown-table" id="breakdown-table">
-      <thead>
-        <tr>
-          <th class="col-rule">Rule</th>
-          <th class="col-title">Finding</th>
-          <th class="col-pts">Pts</th>
-        </tr>
-      </thead>
-      <tbody id="breakdown-body"></tbody>
-    </table>
-  </details>
-
-  <!-- Auth Posture Diff (pre-login vs post-login) -->
-  <details class="auth-diff-section" id="auth-diff-section" hidden>
-    <summary class="auth-diff-summary" id="auth-diff-summary">
-      Posture after login: <span id="auth-diff-delta" class="auth-diff-delta">0 pts</span>
-    </summary>
-    <div class="auth-diff-content">
-      <div class="auth-diff-meta" id="auth-diff-meta"></div>
-      <ul class="auth-diff-list" id="auth-diff-list" role="list"></ul>
-    </div>
-  </details>
-
-  <!-- E: Subdomain Trust Analysis (collapsible) -->
-  <details class="subdomain-section" id="subdomain-section" hidden>
-    <summary class="subdomain-summary">
-      Subdomain trust analysis
-      <span class="subdomain-badge" id="subdomain-badge"></span>
-    </summary>
-    <svg class="trust-graph" id="trust-graph" viewBox="0 0 320 180" role="group" aria-labelledby="trust-graph-title trust-graph-description">
-      <title id="trust-graph-title">Subdomain trust graph</title>
-      <desc id="trust-graph-description">Spokes connect the analyzed page to each subdomain trust vector.</desc>
-    </svg>
-    <ul class="vector-list" id="vector-list" role="list"></ul>
-    <button class="open-graph-btn" id="open-graph-btn" type="button">Open Attack Surface Graph (Side Panel) →</button>
-  </details>
-
-  <!-- API endpoints (collapsible) -->
-  <details class="api-endpoints-section" id="api-endpoints-section" hidden>
-    <summary class="api-endpoints-summary">
-      API &amp; Subresource Findings
-      <span class="api-endpoints-badge" id="api-endpoints-badge">0 endpoints</span>
-    </summary>
-    <div class="api-endpoints-disclaimer">
-      API findings are passive observations from in-page XHR/fetch calls and do not affect the main document security score.
-    </div>
-    <ul class="api-endpoints-list" id="api-endpoints-list" role="list"></ul>
-  </details>
-
-  <!-- Footer with export actions -->
-  <footer class="popup-footer" role="contentinfo">
-    <span class="privacy-note">ACULYX analysis is local — nothing leaves your device.</span>
-    <div class="export-actions" id="export-actions">
-      <!-- 4. Export JSON & Copy Markdown report buttons -->
-      <button class="export-btn" id="export-btn" hidden aria-label="Export findings as JSON">Export JSON</button>
-      <button class="export-btn export-btn-secondary" id="copy-report-btn" hidden aria-label="Copy Markdown Audit Report">📋 Copy Report</button>
-    </div>
-  </footer>
 
   <!-- Finding Details & Triage Drawer -->
   <dialog class="finding-details-drawer" id="finding-details-drawer" aria-labelledby="drawer-finding-title">

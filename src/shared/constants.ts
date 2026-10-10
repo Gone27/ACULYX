@@ -104,4 +104,6 @@ export const DEFAULT_SETTINGS: SettingsV2 = {
   theme: 'system',
   density: 'comfortable',
   reducedMotion: 'system',
+  leadsEnabled: false,
+  deepModeEnabled: false,
 };

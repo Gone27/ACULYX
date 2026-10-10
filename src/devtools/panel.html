@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ACULYX Leads Panel</title>
+  <link rel="stylesheet" href="./panel.css">
+</head>
+<body>
+  <div class="panel-container">
+    <header class="panel-header">
+      <div class="header-left">
+        <span class="panel-logo">ACULYX</span>
+        <span class="panel-title">Lead Radar — Network Body Sensor (S4)</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-clear" class="btn-secondary" title="Clear collected leads">Clear</button>
+      </div>
+    </header>
+
+    <div class="stats-bar" id="stats-bar">
+      <div class="stat-pill stat-total">Total: <span id="stat-total-count">0</span></div>
+      <div class="stat-pill stat-critical">Crit: <span id="stat-critical-count">0</span></div>
+      <div class="stat-pill stat-high">High: <span id="stat-high-count">0</span></div>
+      <div class="stat-pill stat-medium">Med: <span id="stat-medium-count">0</span></div>
+      <div class="stat-pill stat-low">Low: <span id="stat-low-count">0</span></div>
+      <div class="stat-pill stat-info">Info: <span id="stat-info-count">0</span></div>
+    </div>
+
+    <div class="privacy-banner">
+      <span class="privacy-badge">STRICT PRIVACY INVARIANT</span>
+      Response bodies are inspected strictly in-memory. Raw bodies are never persisted or exported. Only masked evidence leads are preserved.
+    </div>
+
+    <main class="panel-main">
+      <div class="leads-table-container">
+        <table class="leads-table">
+          <thead>
+            <tr>
+              <th style="width: 90px;">Potential</th>
+              <th style="width: 80px;">Family</th>
+              <th style="width: 100px;">Rule</th>
+              <th>Title</th>
+              <th>Location</th>
+              <th>Masked Evidence</th>
+              <th style="width: 80px;">Time</th>
+            </tr>
+          </thead>
+          <tbody id="leads-tbody">
+            <tr id="empty-row" class="empty-row">
+              <td colspan="7">Listening for network responses... No body leads detected yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="./panel.ts"></script>
+</body>
+</html>

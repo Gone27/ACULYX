@@ -45,6 +45,17 @@ let btnClearTriage: HTMLButtonElement;
 let activeScopeProfileSelect: HTMLSelectElement;
 let scopeProfilesContainer: HTMLElement;
 let btnAddScopeProfile: HTMLButtonElement;
+let leadsEnabledToggle: HTMLInputElement;
+let deepModeToggle: HTMLInputElement;
+let optionsReconHostsCount: HTMLElement;
+let optionsReconEndpointsCount: HTMLElement;
+let optionsReconParamsCount: HTMLElement;
+let btnResetReconMemory: HTMLButtonElement;
+let reconResetStatus: HTMLSpanElement;
+let hunterEnabledToggle: HTMLInputElement;
+let hunterUserAgent: HTMLInputElement;
+let hunterMaxRps: HTMLInputElement;
+let hunterCustomHeaders: HTMLTextAreaElement;
 let currentMode: Settings['monitoringMode'] = 'per-site';
 let pendingNavSection: string | null = null;
 
@@ -85,6 +96,18 @@ document.addEventListener('DOMContentLoaded', () => {
   scopeProfilesContainer   = getEl<HTMLElement>('scope-profiles-container');
   btnAddScopeProfile       = getEl<HTMLButtonElement>('btn-add-scope-profile');
 
+  leadsEnabledToggle         = getEl<HTMLInputElement>('leads-enabled-toggle');
+  deepModeToggle             = getEl<HTMLInputElement>('deep-mode-toggle');
+  optionsReconHostsCount     = getEl<HTMLElement>('options-recon-hosts-count');
+  optionsReconEndpointsCount = getEl<HTMLElement>('options-recon-endpoints-count');
+  optionsReconParamsCount    = getEl<HTMLElement>('options-recon-params-count');
+  btnResetReconMemory        = getEl<HTMLButtonElement>('btn-reset-recon-memory');
+  reconResetStatus           = getEl<HTMLSpanElement>('recon-reset-status');
+  hunterEnabledToggle        = getEl<HTMLInputElement>('hunter-enabled-toggle');
+  hunterUserAgent            = getEl<HTMLInputElement>('hunter-user-agent');
+  hunterMaxRps               = getEl<HTMLInputElement>('hunter-max-rps');
+  hunterCustomHeaders        = getEl<HTMLTextAreaElement>('hunter-custom-headers');
+
   wireNav();
   wireNavCards();
   wireModeRadios();
@@ -97,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireUnsavedDialog();
   wireTriageManagement();
   wireScopeManagement();
+  wireLeadsAndReconManagement();
 
   // Version badge
   if (typeof chrome !== 'undefined' && typeof chrome.runtime !== 'undefined') {
@@ -338,6 +362,20 @@ async function loadAndPopulate(): Promise<void> {
   workingActiveScopeProfileId = settings.activeScopeProfileId ?? null;
   renderScopeProfiles();
 
+  // Leads & Recon
+  leadsEnabledToggle.checked = Boolean(settings.leadsEnabled);
+  deepModeToggle.checked = Boolean(settings.deepModeEnabled);
+  hunterEnabledToggle.checked = Boolean(settings.hunterConfig?.enabled);
+  hunterUserAgent.value = settings.hunterConfig?.customUserAgent ?? '';
+  hunterMaxRps.value = String(settings.hunterConfig?.maxRequestsPerSecond ?? 1);
+  if (settings.hunterConfig?.customHeaders) {
+    const lines = Object.entries(settings.hunterConfig.customHeaders).map(([k, v]) => `${k}: ${v}`).join('\n');
+    hunterCustomHeaders.value = lines;
+  } else {
+    hunterCustomHeaders.value = '';
+  }
+  void refreshReconCounts();
+
   // Populate home view
   await refreshHomeView();
 
@@ -516,6 +554,25 @@ function readFormValues(): Settings {
     evaluationMode: evalModeToggle.checked,
     scopeProfiles: [...workingScopeProfiles],
     activeScopeProfileId: workingActiveScopeProfileId,
+    leadsEnabled: leadsEnabledToggle.checked,
+    deepModeEnabled: deepModeToggle.checked,
+    hunterConfig: {
+      enabled: hunterEnabledToggle.checked,
+      customUserAgent: hunterUserAgent.value.trim() || undefined,
+      maxRequestsPerSecond: Math.max(0.1, Math.min(5, parseFloat(hunterMaxRps.value) || 1)),
+      customHeaders: (() => {
+        const headers: Record<string, string> = {};
+        for (const line of hunterCustomHeaders.value.split('\n')) {
+          const idx = line.indexOf(':');
+          if (idx > 0) {
+            const k = line.slice(0, idx).trim();
+            const v = line.slice(idx + 1).trim();
+            if (k) headers[k] = v;
+          }
+        }
+        return Object.keys(headers).length > 0 ? headers : undefined;
+      })(),
+    },
     theme,
     density,
     reducedMotion,
@@ -762,6 +819,9 @@ function getFormStateString(): string {
     evaluationMode: current.evaluationMode,
     activeScopeProfileId: current.activeScopeProfileId ?? null,
     scopeProfiles: current.scopeProfiles ?? [],
+    leadsEnabled: current.leadsEnabled,
+    deepModeEnabled: current.deepModeEnabled,
+    hunterConfig: current.hunterConfig,
     theme: current.theme ?? 'system',
     density: current.density ?? 'comfortable',
     reducedMotion: current.reducedMotion ?? 'system',
@@ -793,6 +853,12 @@ function wireDirtyTracking(): void {
   alwaysSensitiveInput.addEventListener('input', updateDirtyState);
   alwaysIgnoreInput.addEventListener('input', updateDirtyState);
   evalModeToggle.addEventListener('change', updateDirtyState);
+  leadsEnabledToggle.addEventListener('change', updateDirtyState);
+  deepModeToggle.addEventListener('change', updateDirtyState);
+  hunterEnabledToggle.addEventListener('change', updateDirtyState);
+  hunterUserAgent.addEventListener('input', updateDirtyState);
+  hunterMaxRps.addEventListener('input', updateDirtyState);
+  hunterCustomHeaders.addEventListener('input', updateDirtyState);
 
   const allAppearanceRadios = document.querySelectorAll<HTMLInputElement>(
     'input[name="theme"], input[name="density"], input[name="reducedMotion"]'
@@ -1106,6 +1172,58 @@ function renderScopeProfiles(): void {
 
     scopeProfilesContainer.appendChild(card);
   });
+}
+
+/* ================================================================
+   Lead Radar & Recon Intelligence
+   ================================================================ */
+
+function wireLeadsAndReconManagement(): void {
+  btnResetReconMemory.addEventListener('click', () => {
+    const confirmed = window.confirm('Reset all accumulated reconnaissance memory across all origins?');
+    if (!confirmed) return;
+
+    btnResetReconMemory.disabled = true;
+    void sendToBackground({ type: 'RECON_RESET' })
+      .then(() => {
+        optionsReconHostsCount.textContent = '0';
+        optionsReconEndpointsCount.textContent = '0';
+        optionsReconParamsCount.textContent = '0';
+        reconResetStatus.textContent = 'Recon memory cleared ✓';
+        reconResetStatus.className = 'status-message status-success';
+      })
+      .catch((err: unknown) => {
+        reconResetStatus.textContent = `Failed to reset: ${String(err)}`;
+        reconResetStatus.className = 'status-message status-error';
+      })
+      .finally(() => {
+        btnResetReconMemory.disabled = false;
+        setTimeout(() => {
+          reconResetStatus.textContent = '';
+          reconResetStatus.className = 'status-message';
+        }, 3000);
+      });
+  });
+}
+
+async function refreshReconCounts(): Promise<void> {
+  try {
+    const res = await sendToBackground({ type: 'RECON_GET' }) as {
+      type: string;
+      memory?: {
+        hosts?: unknown[];
+        endpoints?: unknown[];
+        params?: unknown[];
+      };
+    };
+    if (res && res.type === 'RECON_GET_RESPONSE' && res.memory) {
+      optionsReconHostsCount.textContent = String(res.memory.hosts?.length ?? 0);
+      optionsReconEndpointsCount.textContent = String(res.memory.endpoints?.length ?? 0);
+      optionsReconParamsCount.textContent = String(res.memory.params?.length ?? 0);
+    }
+  } catch {
+    // Background service worker might not be responding yet
+  }
 }
 
 /* ================================================================

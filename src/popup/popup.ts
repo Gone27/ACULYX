@@ -24,6 +24,9 @@ import type {
   SettingsV2,
 } from '../shared/types';
 import { sendToBackground } from '../shared/messaging';
+import type { LeadStateUpdateMessage } from '../shared/messaging';
+import type { Lead } from '../leads/types';
+import { formatLeadsReportMarkdown } from '../leads/export/export';
 import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
 import { LocalStorage } from '../shared/storage';
 import { SettingsService } from '../shared/settings';
@@ -34,6 +37,20 @@ import { applyAppearance } from '../shared/appearance';
 import { TriageStore, ReportBuilder, type ResearcherReviewState } from '../shared/reporting';
 
 /* ── DOM element references (asserted non-null at init time) ── */
+let tabBtnHygiene:       HTMLButtonElement;
+let tabBtnLeads:         HTMLButtonElement;
+let hygieneView:         HTMLDivElement;
+let leadsView:           HTMLDivElement;
+let leadsCountBadge:     HTMLSpanElement;
+let radarSvg:            SVGSVGElement;
+let radarRings:          SVGGElement;
+let radarAxes:           SVGGElement;
+let radarBlips:          SVGGElement;
+let leadsEmptyState:     HTMLDivElement;
+let leadsCardList:       HTMLDivElement;
+let currentLeads:        Lead[] = [];
+let radarBaseRendered:   boolean = false;
+
 let gradeBadge:          HTMLDivElement;
 let badgeGrade:          SVGTextElement;
 let scoreText:           HTMLDivElement;
@@ -183,6 +200,20 @@ document.addEventListener('DOMContentLoaded', () => {
   drawerExportMdBtn   = getEl<HTMLButtonElement>('drawer-export-md-btn');
   drawerExportJsonBtn = getEl<HTMLButtonElement>('drawer-export-json-btn');
   drawerCopyBtn       = getEl<HTMLButtonElement>('drawer-copy-btn');
+
+  tabBtnHygiene       = getEl<HTMLButtonElement>('tab-btn-hygiene');
+  tabBtnLeads         = getEl<HTMLButtonElement>('tab-btn-leads');
+  hygieneView         = getEl<HTMLDivElement>('hygiene-view');
+  leadsView           = getEl<HTMLDivElement>('leads-view');
+  leadsCountBadge     = getEl<HTMLSpanElement>('leads-count-badge');
+  radarSvg            = getEl<SVGSVGElement>('radar-svg');
+  radarRings          = getEl<SVGGElement>('radar-rings');
+  radarAxes           = getEl<SVGGElement>('radar-axes');
+  radarBlips          = getEl<SVGGElement>('radar-blips');
+  leadsEmptyState     = getEl<HTMLDivElement>('leads-empty-state');
+  leadsCardList       = getEl<HTMLDivElement>('leads-card-list');
+
+  wireSegmentedControl();
 
   drawerCloseBtn.addEventListener('click', () => {
     findingDetailsDrawer.close();
@@ -408,6 +439,7 @@ async function initPopup(): Promise<void> {
   }
 
   openLivePort();
+  void refreshLeads();
 }
 
 /* ================================================================
@@ -425,6 +457,14 @@ function openLivePort(): void {
       if (newSettings !== undefined) {
         currentSettings = newSettings;
         applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+      }
+      return;
+    }
+    if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'LEAD_STATE_UPDATE') {
+      const leadMsg = msg as LeadStateUpdateMessage;
+      if (!currentOrigin || leadMsg.origin === currentOrigin || (leadMsg.tabId !== undefined && leadMsg.tabId === currentTabId)) {
+        currentLeads = leadMsg.leads ?? [];
+        renderLeadsTab(currentLeads);
       }
       return;
     }
@@ -1733,6 +1773,377 @@ function formatSourceHost(sourceUrl: string): string {
     return new URL(sourceUrl).hostname;
   } catch {
     return sourceUrl;
+  }
+}
+
+/* ================================================================
+   Leads Tab, Radar Visualizer, and Lead Cards
+   ================================================================ */
+
+function wireSegmentedControl(): void {
+  tabBtnHygiene.addEventListener('click', () => {
+    tabBtnHygiene.classList.add('active');
+    tabBtnHygiene.setAttribute('aria-selected', 'true');
+    tabBtnLeads.classList.remove('active');
+    tabBtnLeads.setAttribute('aria-selected', 'false');
+    hygieneView.hidden = false;
+    leadsView.hidden = true;
+  });
+
+  tabBtnLeads.addEventListener('click', () => {
+    tabBtnLeads.classList.add('active');
+    tabBtnLeads.setAttribute('aria-selected', 'true');
+    tabBtnHygiene.classList.remove('active');
+    tabBtnHygiene.setAttribute('aria-selected', 'false');
+    leadsView.hidden = false;
+    hygieneView.hidden = true;
+    renderRadarBase();
+    void refreshLeads();
+  });
+}
+
+async function refreshLeads(): Promise<void> {
+  if (currentTabId === null && !currentOrigin) return;
+  try {
+    const res = await sendToBackground({
+      type: 'GET_LEADS_STATE',
+      tabId: currentTabId ?? undefined,
+      origin: currentOrigin || undefined,
+    });
+    if (res && res.type === 'LEAD_STATE_UPDATE') {
+      currentLeads = res.leads ?? [];
+      renderLeadsTab(currentLeads);
+    }
+  } catch {
+    // Background service worker might be waking up
+  }
+}
+
+const FAMILIES: Array<{ id: string; name: string }> = [
+  { id: 'F1', name: 'Secrets' },
+  { id: 'F2', name: 'Endpoints' },
+  { id: 'F3', name: 'Params' },
+  { id: 'F4', name: 'Auth' },
+  { id: 'F5', name: 'Takeover' },
+  { id: 'F6', name: 'DOM Sinks' },
+  { id: 'F7', name: 'CORS/Misc' },
+  { id: 'F8', name: 'Hydration' },
+];
+
+function renderRadarBase(): void {
+  if (radarBaseRendered) return;
+  radarBaseRendered = true;
+
+  while (radarRings.firstChild) radarRings.removeChild(radarRings.firstChild);
+  while (radarAxes.firstChild) radarAxes.removeChild(radarAxes.firstChild);
+
+  const ringRadii = [25, 50, 75, 100];
+  for (const r of ringRadii) {
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', '0');
+    circle.setAttribute('cy', '0');
+    circle.setAttribute('r', String(r));
+    circle.setAttribute('stroke', r === 100 ? 'rgba(138, 43, 226, 0.45)' : 'rgba(138, 43, 226, 0.2)');
+    circle.setAttribute('stroke-width', '1');
+    circle.setAttribute('fill', 'none');
+    radarRings.appendChild(circle);
+  }
+
+  for (let i = 0; i < FAMILIES.length; i++) {
+    const angle = (i * 2 * Math.PI) / FAMILIES.length - Math.PI / 2;
+    const x2 = Math.round(105 * Math.cos(angle));
+    const y2 = Math.round(105 * Math.sin(angle));
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', '0');
+    line.setAttribute('y1', '0');
+    line.setAttribute('x2', String(x2));
+    line.setAttribute('y2', String(y2));
+    line.setAttribute('stroke', 'rgba(138, 43, 226, 0.25)');
+    line.setAttribute('stroke-width', '1');
+    radarAxes.appendChild(line);
+
+    const lx = Math.round(114 * Math.cos(angle));
+    const ly = Math.round(114 * Math.sin(angle) + 3);
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', String(lx));
+    text.setAttribute('y', String(ly));
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('font-size', '8');
+    text.setAttribute('font-weight', '600');
+    text.setAttribute('fill', '#a78bfa');
+    text.textContent = FAMILIES[i].id;
+    radarAxes.appendChild(text);
+  }
+}
+
+function renderRadarBlips(leads: Lead[]): void {
+  while (radarBlips.firstChild) {
+    radarBlips.removeChild(radarBlips.firstChild);
+  }
+
+  const potentialRadii: Record<Lead['potential'], number> = {
+    critical: 28,
+    high: 48,
+    medium: 68,
+    low: 84,
+    info: 96,
+  };
+
+  for (const lead of leads) {
+    const famIndex = Math.max(0, FAMILIES.findIndex((f) => f.id === lead.family));
+    const baseAngle = (famIndex * 2 * Math.PI) / FAMILIES.length - Math.PI / 2;
+    const baseRadius = potentialRadii[lead.potential] ?? 70;
+
+    let hash = 0;
+    for (let c = 0; c < lead.id.length; c++) {
+      hash = ((hash << 5) - hash + lead.id.charCodeAt(c)) | 0;
+    }
+    const angleOffset = (((Math.abs(hash) % 13) - 6) * Math.PI) / 60;
+    const radiusOffset = ((Math.abs(hash >> 3) % 9) - 4) * 2;
+
+    const angle = baseAngle + angleOffset;
+    const radius = Math.max(16, Math.min(102, baseRadius + radiusOffset));
+
+    const cx = Math.round(radius * Math.cos(angle));
+    const cy = Math.round(radius * Math.sin(angle));
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', String(cx));
+    circle.setAttribute('cy', String(cy));
+    circle.setAttribute('r', '4');
+    circle.setAttribute('class', `radar-blip radar-blip-${lead.potential}`);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `[${lead.potential.toUpperCase()}] ${lead.title} (${lead.ruleId})`;
+    circle.appendChild(title);
+
+    circle.addEventListener('click', () => {
+      focusLeadCard(lead.id);
+    });
+
+    radarBlips.appendChild(circle);
+  }
+}
+
+function renderLeadsTab(leads: Lead[]): void {
+  renderRadarBase();
+  renderRadarBlips(leads);
+
+  leadsCountBadge.textContent = `${leads.length} lead${leads.length === 1 ? '' : 's'}`;
+
+  while (leadsCardList.firstChild) {
+    leadsCardList.removeChild(leadsCardList.firstChild);
+  }
+
+  if (leads.length === 0) {
+    leadsEmptyState.hidden = false;
+    leadsCardList.hidden = true;
+    return;
+  }
+
+  leadsEmptyState.hidden = true;
+  leadsCardList.hidden = false;
+
+  const sorted = [...leads].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return (b.priority ?? 0) - (a.priority ?? 0);
+  });
+
+  for (const lead of sorted) {
+    leadsCardList.appendChild(createLeadCard(lead));
+  }
+}
+
+function createLeadCard(lead: Lead): HTMLDivElement {
+  const card = document.createElement('div');
+  card.className = 'lead-card';
+  card.id = `lead-card-${lead.id}`;
+  if (lead.pinned) {
+    card.classList.add('card-pinned');
+  }
+
+  const header = document.createElement('div');
+  header.className = 'lead-card-header';
+
+  const metaLeft = document.createElement('div');
+  metaLeft.className = 'lead-card-meta-left';
+
+  const famIcon = document.createElement('span');
+  famIcon.className = 'lead-family-icon';
+  famIcon.textContent = lead.family;
+  famIcon.title = `Family ${lead.family}`;
+  metaLeft.appendChild(famIcon);
+
+  const tierBadge = document.createElement('span');
+  tierBadge.className = `lead-tier-badge tier-${lead.tier}`;
+  tierBadge.textContent = lead.tier;
+  metaLeft.appendChild(tierBadge);
+
+  const scopeBadge = document.createElement('span');
+  scopeBadge.className = `lead-scope-chip scope-${lead.scopeStatus}`;
+  scopeBadge.textContent = lead.scopeStatus === 'in-scope' ? 'In-Scope' : lead.scopeStatus === 'out-of-scope' ? 'Out-of-Scope' : 'Unknown Scope';
+  metaLeft.appendChild(scopeBadge);
+
+  header.appendChild(metaLeft);
+
+  const potentialBadge = document.createElement('span');
+  potentialBadge.className = `lead-tier-badge dot-${lead.potential}`;
+  potentialBadge.textContent = lead.potential.toUpperCase();
+  header.appendChild(potentialBadge);
+
+  card.appendChild(header);
+
+  const title = document.createElement('div');
+  title.className = 'lead-card-title';
+  title.textContent = lead.title;
+  card.appendChild(title);
+
+  if (lead.evidence?.preview) {
+    const pre = document.createElement('pre');
+    pre.className = 'lead-evidence-pre';
+    pre.textContent = lead.evidence.preview;
+    card.appendChild(pre);
+  }
+
+  if (lead.evidence?.location) {
+    const locLine = document.createElement('div');
+    locLine.className = 'lead-detail-line';
+    const locLabel = document.createElement('span');
+    locLabel.className = 'lead-detail-label';
+    locLabel.textContent = 'Location: ';
+    locLine.appendChild(locLabel);
+    const locVal = document.createTextNode(lead.evidence.location);
+    locLine.appendChild(locVal);
+    card.appendChild(locLine);
+  }
+
+  if (lead.chainIds && lead.chainIds.length > 0) {
+    const chainLine = document.createElement('div');
+    chainLine.className = 'lead-detail-line';
+    const chainLabel = document.createElement('span');
+    chainLabel.className = 'lead-detail-label';
+    chainLabel.textContent = '⛓ Correlated Chain: ';
+    chainLine.appendChild(chainLabel);
+    const chainVal = document.createTextNode(lead.chainIds.join(', '));
+    chainLine.appendChild(chainVal);
+    card.appendChild(chainLine);
+  }
+
+  if (lead.needs && lead.needs.length > 0) {
+    const needsLine = document.createElement('div');
+    needsLine.className = 'lead-detail-line';
+    const needsLabel = document.createElement('span');
+    needsLabel.className = 'lead-detail-label';
+    needsLabel.textContent = 'Validation Needed: ';
+    needsLine.appendChild(needsLabel);
+    const needsVal = document.createTextNode(lead.needs.join('; '));
+    needsLine.appendChild(needsVal);
+    card.appendChild(needsLine);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'lead-card-actions';
+
+  // Pin
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'lead-btn';
+  pinBtn.textContent = lead.pinned ? '📌 Pinned' : '📍 Pin';
+  if (lead.pinned) pinBtn.classList.add('btn-active');
+  pinBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const newPinned = !lead.pinned;
+    lead.pinned = newPinned;
+    pinBtn.textContent = newPinned ? '📌 Pinned' : '📍 Pin';
+    if (newPinned) {
+      pinBtn.classList.add('btn-active');
+      card.classList.add('card-pinned');
+    } else {
+      pinBtn.classList.remove('btn-active');
+      card.classList.remove('card-pinned');
+    }
+    await sendToBackground({
+      type: 'LEAD_ACTION',
+      leadId: lead.id,
+      action: newPinned ? 'pin' : 'unpin',
+      pinned: newPinned,
+      origin: currentOrigin,
+    });
+  });
+  actions.appendChild(pinBtn);
+
+  // Triage
+  const triageBtn = document.createElement('button');
+  triageBtn.className = 'lead-btn';
+  const triageText = lead.triageState ? lead.triageState : 'Triage';
+  triageBtn.textContent = `🎯 ${triageText}`;
+  triageBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const states: Array<Lead['triageState']> = ['open', 'triaged', 'false_positive', 'resolved'];
+    const currentIdx = states.indexOf(lead.triageState ?? 'open');
+    const nextState = states[(currentIdx + 1) % states.length];
+    lead.triageState = nextState;
+    triageBtn.textContent = `🎯 ${nextState}`;
+    await sendToBackground({
+      type: 'LEAD_ACTION',
+      leadId: lead.id,
+      action: 'triage',
+      triageState: nextState,
+      origin: currentOrigin,
+    });
+  });
+  actions.appendChild(triageBtn);
+
+  // Copy report
+  const reportBtn = document.createElement('button');
+  reportBtn.className = 'lead-btn';
+  reportBtn.textContent = '📄 Copy Report';
+  reportBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const md = formatLeadsReportMarkdown([lead]);
+    await navigator.clipboard.writeText(md);
+    const orig = reportBtn.textContent;
+    reportBtn.textContent = '✔ Copied!';
+    setTimeout(() => { reportBtn.textContent = orig; }, 1500);
+  });
+  actions.appendChild(reportBtn);
+
+  // Copy cURL (Strictly in-scope GET requests without cookies)
+  const curlBtn = document.createElement('button');
+  curlBtn.className = 'lead-btn';
+  curlBtn.textContent = '💻 Copy cURL';
+  const isInScope = lead.scopeStatus === 'in-scope';
+  const isSafeUrl = lead.url && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
+  if (isInScope && isSafeUrl) {
+    curlBtn.title = 'Copy safe in-scope GET cURL command without cookies';
+    curlBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const curlCmd = `curl -s -i "${lead.url}"`;
+      await navigator.clipboard.writeText(curlCmd);
+      const orig = curlBtn.textContent;
+      curlBtn.textContent = '✔ Copied!';
+      setTimeout(() => { curlBtn.textContent = orig; }, 1500);
+    });
+  } else {
+    curlBtn.disabled = true;
+    curlBtn.style.opacity = '0.5';
+    curlBtn.style.cursor = 'not-allowed';
+    curlBtn.title = 'cURL export only available for in-scope GET requests without cookies';
+  }
+  actions.appendChild(curlBtn);
+
+  card.appendChild(actions);
+
+  return card;
+}
+
+function focusLeadCard(leadId: string): void {
+  const card = document.getElementById(`lead-card-${leadId}`);
+  if (card) {
+    document.querySelectorAll('.lead-card').forEach((c) => c.classList.remove('focused-card'));
+    card.classList.add('focused-card');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 

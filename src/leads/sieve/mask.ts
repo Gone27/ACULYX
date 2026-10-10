@@ -1,0 +1,188 @@
+import type { Masked } from '../types';
+
+const K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function rotr(x: number, n: number): number {
+  return (x >>> n) | (x << (32 - n));
+}
+
+/**
+ * Universal synchronous SHA-256 implementation.
+ */
+export function sha256Hex(str: string): string {
+  const bytes = typeof TextEncoder !== 'undefined'
+    ? new TextEncoder().encode(str)
+    : Buffer.from(str, 'utf8');
+
+  const byteLen = bytes.length;
+  const bitLen = byteLen * 8;
+  const withPad: number[] = [];
+
+  for (let i = 0; i < byteLen; i++) {
+    withPad.push(bytes[i]);
+  }
+  withPad.push(0x80);
+  while (withPad.length % 64 !== 56) {
+    withPad.push(0);
+  }
+  for (let i = 7; i >= 0; i--) {
+    withPad.push(Number((BigInt(bitLen) >> BigInt(i * 8)) & 0xffn));
+  }
+
+  let h0 = 0x6a09e667;
+  let h1 = 0xbb67ae85;
+  let h2 = 0x3c6ef372;
+  let h3 = 0xa54ff53a;
+  let h4 = 0x510e527f;
+  let h5 = 0x9b05688c;
+  let h6 = 0x1f83d9ab;
+  let h7 = 0x5be0cd19;
+
+  const w = new Uint32Array(64);
+
+  for (let chunk = 0; chunk < withPad.length; chunk += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] =
+        (withPad[chunk + i * 4] << 24) |
+        (withPad[chunk + i * 4 + 1] << 16) |
+        (withPad[chunk + i * 4 + 2] << 8) |
+        withPad[chunk + i * 4 + 3];
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    let f = h5;
+    let g = h6;
+    let h = h7;
+
+    for (let i = 0; i < 64; i++) {
+      const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + s1 + ch + K[i] + w[i]) | 0;
+      const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (s0 + maj) | 0;
+
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) | 0;
+    }
+
+    h0 = (h0 + a) | 0;
+    h1 = (h1 + b) | 0;
+    h2 = (h2 + c) | 0;
+    h3 = (h3 + d) | 0;
+    h4 = (h4 + e) | 0;
+    h5 = (h5 + f) | 0;
+    h6 = (h6 + g) | 0;
+    h7 = (h7 + h) | 0;
+  }
+
+  return [h0, h1, h2, h3, h4, h5, h6, h7]
+    .map(x => (x >>> 0).toString(16).padStart(8, '0'))
+    .join('');
+}
+
+/**
+ * Mask secret string preserving only prefix, suffix, length and short hash.
+ */
+export function maskSecret(v: string): Masked<string> {
+  if (!v || v.length <= 6) {
+    return '***' as Masked<string>;
+  }
+
+  const hash = sha256Hex(v).slice(0, 8);
+  const head = v.slice(0, 4);
+  const tail = v.slice(-2);
+  const formatted = `${head}...${tail} (len ${v.length}) [${hash}]`;
+  return formatted as Masked<string>;
+}
+
+const SENSITIVE_PARAM_REGEX = /^(token|auth|auth_token|authorization|access_token|refresh_token|id_token|key|api_key|apikey|secret|client_secret|password|passwd|pass|sig|signature|jwt|code|session|session_id|state|ref|canary|hash|credential|nonce)$/i;
+
+/**
+ * Redact sensitive query parameters, canaries, and embedded credentials in URLs.
+ */
+export function maskLocation(loc: string): Masked<string> {
+  if (!loc) {
+    return '' as Masked<string>;
+  }
+
+  try {
+    // If it's a parseable full URL
+    const parsed = new URL(loc);
+
+    // Redact credentials
+    if (parsed.username || parsed.password) {
+      parsed.username = '***';
+      parsed.password = '***';
+    }
+
+    // Redact query params
+    const keys = Array.from(parsed.searchParams.keys());
+    for (const key of keys) {
+      const val = parsed.searchParams.get(key) || '';
+      if (
+        SENSITIVE_PARAM_REGEX.test(key) ||
+        val.startsWith('CANARY_') ||
+        val.length >= 20 ||
+        /^[a-zA-Z0-9+/=_-]{32,}$/.test(val)
+      ) {
+        parsed.searchParams.set(key, '***');
+      }
+    }
+
+    let result = parsed.toString();
+    // Catch any remaining raw canary strings
+    result = result.replace(/CANARY_[A-Za-z0-9_]+/g, '***');
+    return result as Masked<string>;
+  } catch {
+    // Fallback for relative paths or non-standard URLs
+    let sanitized = loc;
+    // Strip user:pass
+    sanitized = sanitized.replace(/\/\/[^/:@\s]+:[^/@\s]+@/g, '//***:***@');
+    // Strip query parameters
+    sanitized = sanitized.replace(/([?&])([a-zA-Z0-9_-]+)=([^&#\s]*)/g, (match, prefix, key, val) => {
+      if (
+        SENSITIVE_PARAM_REGEX.test(key) ||
+        val.startsWith('CANARY_') ||
+        val.length >= 20
+      ) {
+        return `${prefix}${key}=***`;
+      }
+      return match;
+    });
+    // Strip canaries
+    sanitized = sanitized.replace(/CANARY_[A-Za-z0-9_]+/g, '***');
+    return sanitized as Masked<string>;
+  }
+}
+
+/**
+ * Checks if a string contains synthetic canary tokens.
+ */
+export function hasCanary(v: string): boolean {
+  return /CANARY_[A-Za-z0-9_]+/i.test(v);
+}

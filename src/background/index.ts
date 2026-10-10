@@ -16,10 +16,20 @@
  */
 
 import { tabStates, initLifecycle, hydrateFromSession, originAuthBaselines } from './lifecycle';
-import { registerCaptureListeners, captureMap, clearInFlightCaptures, inFlightRequests, incognitoTabIds } from './capture';
+import { registerCaptureListeners, captureMap, clearInFlightCaptures, inFlightRequests, incognitoTabIds, registerParamHarvester } from './capture';
 import { CapturePolicy } from './capture-policy';
 import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
+import {
+  handleParamHarvest,
+  handleDomLeadsCollected,
+  handleMainWorldEvent,
+  handleDevToolsLeads,
+  handleLeadAction,
+  getLeadsState,
+  handleHunterProbe,
+} from './leads-handler';
+import { getReconMemory, clearReconMemory } from '../leads';
 import { runRules, runApiRules } from '../rules/engine';
 import { ScopeEngine } from '../shared/scope/engine';
 import type { ScopeProfile } from '../shared/scope/contracts';
@@ -931,6 +941,35 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 
 registerPageSignalInjection();
 
+// S1: Register parameter harvester for query parameter extraction
+registerParamHarvester((url, paramNames, tabId) => {
+  if (currentSettings.leadsEnabled) {
+    void handleParamHarvest(url, paramNames, tabId, currentSettings);
+  }
+});
+
+// S2 & S3: Navigation completion leads collector injection
+chrome.webNavigation.onCompleted.addListener((details): void => {
+  if (details.frameId !== 0 || details.tabId < 0) return;
+  if (!currentSettings.leadsEnabled) return;
+  if (isRestrictedUrl(details.url)) return;
+
+  if (typeof chrome.scripting !== 'undefined') {
+    void chrome.scripting.executeScript({
+      target: { tabId: details.tabId, frameIds: [0] },
+      files: ['src/content/dom-collector.ts'],
+    }).catch(() => undefined);
+
+    if (currentSettings.deepModeEnabled) {
+      void chrome.scripting.executeScript({
+        target: { tabId: details.tabId, frameIds: [0] },
+        world: 'MAIN',
+        files: ['src/content/main-world-hooks.ts'],
+      }).catch(() => undefined);
+    }
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Cookie change listener
 // ---------------------------------------------------------------------------
@@ -1109,6 +1148,12 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port): void => {
           state: stateForTab,
         };
         portSend(port, response);
+
+        if (currentSettings.leadsEnabled) {
+          const tabState = tabStates.get(resolvedTabId);
+          const leadsState = getLeadsState(resolvedTabId, tabState?.origin);
+          portSend(port, leadsState);
+        }
       });
     }
   });
@@ -1587,6 +1632,74 @@ chrome.runtime.onMessage.addListener(
         .catch((e: unknown) => {
           sendResponse({ type: 'RESET_ALL_DATA_RESPONSE', success: false, error: String(e) });
         });
+      return true;
+    }
+
+    if (message.type === 'DOM_LEADS_COLLECTED') {
+      const tabId = _sender.tab?.id ?? message.tabId;
+      void handleDomLeadsCollected(message, currentSettings).then((leadState) => {
+        if (tabId !== undefined) {
+          portRegistry.broadcast(tabId, leadState);
+        }
+        portRegistry.broadcastAll(leadState);
+        sendResponse(leadState);
+      });
+      return true;
+    }
+
+    if (message.type === 'MAIN_WORLD_LEADS_EVENT') {
+      const tabId = _sender.tab?.id ?? message.tabId;
+      const leadState = handleMainWorldEvent(message, currentSettings);
+      if (tabId !== undefined) {
+        portRegistry.broadcast(tabId, leadState);
+      }
+      portRegistry.broadcastAll(leadState);
+      sendResponse(leadState);
+      return false;
+    }
+
+    if (message.type === 'DEVTOOLS_LEADS_COLLECTED') {
+      const leadState = handleDevToolsLeads(message.leads, message.tabId);
+      if (message.tabId !== undefined) {
+        portRegistry.broadcast(message.tabId, leadState);
+      }
+      portRegistry.broadcastAll(leadState);
+      sendResponse(leadState);
+      return false;
+    }
+
+    if (message.type === 'GET_LEADS_STATE') {
+      const leadState = getLeadsState(message.tabId, message.origin);
+      sendResponse(leadState);
+      return false;
+    }
+
+    if (message.type === 'LEAD_ACTION') {
+      const success = handleLeadAction(message.leadId, message.action, message.triageState, message.pinned);
+      const updated = getLeadsState(undefined, message.origin);
+      portRegistry.broadcastAll(updated);
+      sendResponse({ type: 'LEAD_ACTION_RESPONSE', success, leadId: message.leadId });
+      return false;
+    }
+
+    if (message.type === 'RECON_GET') {
+      void getReconMemory().then((memory) => {
+        sendResponse({ type: 'RECON_GET_RESPONSE', memory });
+      });
+      return true;
+    }
+
+    if (message.type === 'RECON_RESET') {
+      void clearReconMemory().then(() => {
+        sendResponse({ type: 'RECON_RESET_RESPONSE', success: true });
+      });
+      return true;
+    }
+
+    if (message.type === 'HUNTER_RUN_PROBE') {
+      void handleHunterProbe(message.probe, message.scopeStatus, currentSettings.hunterConfig).then((entry) => {
+        sendResponse({ type: 'HUNTER_RUN_PROBE_RESPONSE', entry });
+      });
       return true;
     }
 

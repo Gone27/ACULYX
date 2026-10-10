@@ -98,6 +98,128 @@ export interface ResetAllDataResponse {
   error?: string;
 }
 
+export interface DomLeadsCollectedMessage {
+  type: 'DOM_LEADS_COLLECTED';
+  tabId?: number;
+  url: string;
+  origin: string;
+  generation?: number;
+  data: {
+    forms: Array<{ action: string; method: string; inputNames: string[] }>;
+    iframes: Array<{ src: string; sandbox: string; allow: string }>;
+    scripts: Array<{ src: string; inlineContent?: string; sourceMappingURL?: string }>;
+    links: Array<{ href: string; rel?: string }>;
+    metaTags: Array<{ name: string; content: string; generator?: string }>;
+    comments: string[];
+    hydrationGlobals: {
+      nextData?: string;
+      nuxt?: string;
+      initialState?: string;
+      apolloState?: string;
+      env?: string;
+    };
+    resourceTiming: string[];
+    storageKeyNames: {
+      localStorage: string[];
+      sessionStorage: string[];
+    };
+  };
+}
+
+export interface MainWorldLeadsEventMessage {
+  type: 'MAIN_WORLD_LEADS_EVENT';
+  tabId?: number;
+  url: string;
+  origin: string;
+  generation?: number;
+  event: {
+    eventType: 'sink' | 'postmessage_call' | 'postmessage_listener' | 'storage_write';
+    sinkName?: string;
+    sourceValue?: string;
+    targetOrigin?: string;
+    hasOriginCheck?: boolean;
+    storageKey?: string;
+    tokenShape?: string;
+    location?: string;
+    details?: string;
+  };
+}
+
+export interface GetLeadsStateMessage {
+  type: 'GET_LEADS_STATE';
+  tabId?: number;
+  origin?: string;
+}
+
+export interface LeadStateUpdateMessage {
+  type: 'LEAD_STATE_UPDATE';
+  tabId?: number;
+  origin: string;
+  leads: import('../leads/types').Lead[];
+  activeChains?: Array<{ chain: import('../leads/types').ChainRule; matchedLeads: import('../leads/types').Lead[] }>;
+  stats?: {
+    total: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    info: number;
+  };
+}
+
+export interface LeadActionMessage {
+  type: 'LEAD_ACTION';
+  leadId: string;
+  action: 'pin' | 'unpin' | 'triage';
+  triageState?: import('../leads/types').Lead['triageState'];
+  pinned?: boolean;
+  origin?: string;
+}
+
+export interface LeadActionResponse {
+  type: 'LEAD_ACTION_RESPONSE';
+  success: boolean;
+  leadId: string;
+  error?: string;
+}
+
+export interface ReconGetMessage {
+  type: 'RECON_GET';
+  origin?: string;
+}
+
+export interface ReconGetResponse {
+  type: 'RECON_GET_RESPONSE';
+  memory: import('../leads/types').ReconMemory;
+}
+
+export interface ReconResetMessage {
+  type: 'RECON_RESET';
+  origin?: string;
+}
+
+export interface ReconResetResponse {
+  type: 'RECON_RESET_RESPONSE';
+  success: boolean;
+}
+
+export interface HunterRunProbeMessage {
+  type: 'HUNTER_RUN_PROBE';
+  probe: import('../leads/types').HunterProbeRequest;
+  scopeStatus?: import('../leads/types').Lead['scopeStatus'];
+}
+
+export interface HunterRunProbeResponse {
+  type: 'HUNTER_RUN_PROBE_RESPONSE';
+  entry: import('../leads/types').HunterLedgerEntry;
+}
+
+export interface DevToolsLeadsCollectedMessage {
+  type: 'DEVTOOLS_LEADS_COLLECTED';
+  tabId?: number;
+  leads: import('../leads/types').Lead[];
+}
+
 /** All messages that cross the service worker ↔ UI boundary. */
 export type ExtensionMessage =
   | TabStateUpdateMessage
@@ -114,7 +236,20 @@ export type ExtensionMessage =
   | GeneratePocMessage
   | GeneratePocResponse
   | ResetAllDataMessage
-  | ResetAllDataResponse;
+  | ResetAllDataResponse
+  | DomLeadsCollectedMessage
+  | MainWorldLeadsEventMessage
+  | GetLeadsStateMessage
+  | LeadStateUpdateMessage
+  | LeadActionMessage
+  | LeadActionResponse
+  | ReconGetMessage
+  | ReconGetResponse
+  | ReconResetMessage
+  | ReconResetResponse
+  | HunterRunProbeMessage
+  | HunterRunProbeResponse
+  | DevToolsLeadsCollectedMessage;
 
 // ─── Port registry ────────────────────────────────────────────────────────────
 

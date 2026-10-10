@@ -21,6 +21,8 @@
     }
   },
 
+  "devtools_page": "src/devtools/devtools.html",
+
   "side_panel": {
     "default_path": "src/sidepanel/sidepanel.html"
   },
@@ -47,6 +49,16 @@
   ],
 
   "optional_host_permissions": ["<all_urls>"],
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/content/dom-collector.ts",
+        "src/content/main-world-hooks.ts"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
 
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'",

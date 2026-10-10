@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ACULYX — Attack Surface Graph</title>
+  <title>ACULYX — Recon &amp; Lead Radar</title>
   <link rel="stylesheet" href="../shared/design-tokens.css">
   <link rel="stylesheet" href="sidepanel.css">
 </head>
@@ -11,119 +11,338 @@
   <!-- Header bar -->
   <header class="sidepanel-header" role="banner">
     <div class="header-main">
-      <span class="sidepanel-title">ACULYX Attack Surface Graph</span>
+      <span class="sidepanel-title">ACULYX Intelligence</span>
       <span class="tier-badge" id="tier-badge">Standard</span>
     </div>
     <div class="header-actions">
-      <button type="button" id="view-toggle-btn" aria-pressed="false" title="Switch between graph and list view">
-        List view
+      <button class="palette-hint-btn" id="palette-open-btn" title="Open Command Palette (Ctrl+K)" aria-label="Open Command Palette">
+        <kbd class="kbd-badge">Ctrl+K</kbd>
       </button>
-      <button class="icon-btn" id="refresh-btn" title="Refresh Graph" aria-label="Refresh Graph">🔄</button>
+      <button class="icon-btn" id="refresh-btn" title="Refresh State" aria-label="Refresh State">🔄</button>
       <a href="" id="options-link" class="icon-btn" title="Settings" aria-label="Settings">⚙</a>
     </div>
   </header>
 
-  <!-- Evaluation Banner (when in standard mode) -->
-  <div class="eval-banner" id="eval-banner" hidden>
-    <div class="eval-banner-content">
-      <span class="eval-icon">ℹ️</span>
-      <div class="eval-text">
-        <strong>Standard View</strong>
-        <p id="eval-banner-text">Showing active host and apex node. Enable evaluation mode in Settings to explore the full accumulated attack surface graph.</p>
+  <!-- Navigation Tab Bar -->
+  <nav class="sidepanel-nav" role="tablist" aria-label="Sidepanel Navigation">
+    <button class="nav-tab active" id="tab-graph" role="tab" aria-selected="true" aria-controls="view-graph">Graph</button>
+    <button class="nav-tab" id="tab-radar" role="tab" aria-selected="false" aria-controls="view-radar">Radar</button>
+    <button class="nav-tab" id="tab-leads" role="tab" aria-selected="false" aria-controls="view-leads">
+      Leads <span class="tab-badge" id="tab-leads-badge" hidden>0</span>
+    </button>
+    <button class="nav-tab" id="tab-chains" role="tab" aria-selected="false" aria-controls="view-chains">
+      Chains <span class="tab-badge" id="tab-chains-badge" hidden>0</span>
+    </button>
+    <button class="nav-tab" id="tab-recon" role="tab" aria-selected="false" aria-controls="view-recon">Recon</button>
+    <button class="nav-tab" id="tab-timeline" role="tab" aria-selected="false" aria-controls="view-timeline">Timeline</button>
+  </nav>
+
+  <!-- Views Container -->
+  <div class="views-container">
+    <!-- VIEW 1: Graph View (Existing Attack Surface Graph) -->
+    <div id="view-graph" class="panel-view active" role="tabpanel" aria-labelledby="tab-graph">
+      <div class="view-graph-subnav">
+        <button type="button" id="view-toggle-btn" aria-pressed="false" title="Switch between graph and list view">
+          List view
+        </button>
+      </div>
+
+      <!-- Evaluation Banner (when in standard mode) -->
+      <div class="eval-banner" id="eval-banner" hidden>
+        <div class="eval-banner-content">
+          <span class="eval-icon">ℹ️</span>
+          <div class="eval-text">
+            <strong>Standard View</strong>
+            <p id="eval-banner-text">Showing active host and apex node. Enable evaluation mode in Settings to explore the full accumulated attack surface graph.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Apex and statistics summary bar -->
+      <div class="summary-bar">
+        <div class="summary-item">
+          <span class="summary-label">Apex Domain</span>
+          <span class="summary-val" id="apex-domain-val">—</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Discovered Nodes</span>
+          <span class="summary-val" id="nodes-count-val">0</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Trust Vectors</span>
+          <span class="summary-val" id="edges-count-val">0</span>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="legend-panel">
+        <div class="legend-group">
+          <span class="legend-title">Nodes:</span>
+          <span class="legend-item"><span class="legend-dot apex-dot"></span> Apex</span>
+          <span class="legend-item"><span class="legend-dot sub-dot"></span> Subdomain</span>
+        </div>
+        <div class="legend-group">
+          <span class="legend-title">Vectors:</span>
+          <span class="legend-item"><span class="legend-line cookie-line"></span> Cookie</span>
+          <span class="legend-item"><span class="legend-line csp-line"></span> CSP</span>
+          <span class="legend-item"><span class="legend-line cors-line"></span> CORS</span>
+        </div>
+      </div>
+
+      <!-- Main visual area -->
+      <main class="graph-canvas-container" id="canvas-container">
+        <div class="graph-section">
+          <div class="graph-loading" id="graph-loading">Loading graph…</div>
+          <div class="graph-empty" id="graph-empty" hidden>
+            No attack surface nodes discovered yet for this domain. Browse pages on this origin to accumulate trust vectors.
+          </div>
+          <svg id="graph-svg" class="graph-svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Attack Surface Node Graph">
+            <g id="edges-group"></g>
+            <g id="nodes-group"></g>
+          </svg>
+        </div>
+
+        <div class="node-list-section" aria-label="Node list">
+          <table class="node-list-table" id="node-list-table" role="grid" aria-label="Attack surface nodes">
+            <thead>
+              <tr>
+                <th scope="col">Hostname</th>
+                <th scope="col">Role</th>
+                <th scope="col">Grade</th>
+                <th scope="col">Last seen</th>
+              </tr>
+            </thead>
+            <tbody id="node-list-body">
+              <!-- rows added by JS -->
+            </tbody>
+          </table>
+        </div>
+      </main>
+
+      <!-- Selected Node Details Drawer -->
+      <section class="node-details" id="node-details" hidden>
+        <div class="node-details-header">
+          <h2 class="node-title" id="node-hostname">hostname</h2>
+          <button class="close-details-btn" id="close-details-btn" title="Close" aria-label="Close details">✕</button>
+        </div>
+        <div class="node-details-body">
+          <div class="detail-row">
+            <span class="detail-label">Role:</span>
+            <span class="detail-value" id="node-role">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Discovered Via:</span>
+            <span class="detail-value" id="node-discovered-via">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Security Grade:</span>
+            <span class="detail-value" id="node-grade">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Scope Status:</span>
+            <span class="detail-value" id="node-scope">—</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Last Seen:</span>
+            <span class="detail-value" id="node-last-seen">—</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- VIEW 2: Radar View -->
+    <div id="view-radar" class="panel-view" role="tabpanel" aria-labelledby="tab-radar" hidden>
+      <div class="panel-subbar">
+        <span class="subbar-title">Vulnerability Radar</span>
+        <div class="radar-filter-controls">
+          <label class="filter-label">Filter:
+            <select id="radar-severity-filter" class="panel-select">
+              <option value="all">All Severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="radar-panel-container">
+        <svg class="sidepanel-radar-svg" id="sidepanel-radar-svg" viewBox="-120 -120 240 240" role="img" aria-label="Vulnerability Lead Radar">
+          <g id="sp-radar-rings"></g>
+          <g id="sp-radar-axes"></g>
+          <g id="sp-radar-sweep" class="radar-sweep-group">
+            <line x1="0" y1="0" x2="0" y2="-105" class="radar-sweep-line" />
+            <path d="M 0 0 L 0 -105 A 105 105 0 0 1 74 -74 Z" class="radar-sweep-arc" />
+          </g>
+          <g id="sp-radar-blips"></g>
+        </svg>
+
+        <div class="radar-legend">
+          <span class="radar-legend-item"><span class="legend-dot dot-critical"></span>Critical</span>
+          <span class="radar-legend-item"><span class="legend-dot dot-high"></span>High</span>
+          <span class="radar-legend-item"><span class="legend-dot dot-medium"></span>Medium</span>
+          <span class="radar-legend-item"><span class="legend-dot dot-low"></span>Low</span>
+          <span class="radar-legend-item"><span class="legend-dot dot-info"></span>Info</span>
+        </div>
+      </div>
+
+      <div class="radar-stats-grid" id="radar-stats-grid">
+        <div class="stat-box stat-critical"><span class="stat-count" id="stat-count-critical">0</span><span class="stat-label">Critical</span></div>
+        <div class="stat-box stat-high"><span class="stat-count" id="stat-count-high">0</span><span class="stat-label">High</span></div>
+        <div class="stat-box stat-medium"><span class="stat-count" id="stat-count-medium">0</span><span class="stat-label">Medium</span></div>
+        <div class="stat-box stat-low"><span class="stat-count" id="stat-count-low">0</span><span class="stat-label">Low</span></div>
+        <div class="stat-box stat-info"><span class="stat-count" id="stat-count-info">0</span><span class="stat-label">Info</span></div>
+      </div>
+    </div>
+
+    <!-- VIEW 3: Leads View -->
+    <div id="view-leads" class="panel-view" role="tabpanel" aria-labelledby="tab-leads" hidden>
+      <!-- Filter Toolbar -->
+      <div class="leads-filter-toolbar">
+        <div class="filter-row">
+          <input type="text" id="leads-search-input" class="leads-search-input" placeholder="Search leads by title, rule, tag...">
+        </div>
+        <div class="filter-row filter-row-selects">
+          <select id="leads-filter-family" class="panel-select">
+            <option value="all">All Families</option>
+            <option value="F1">F1: Secrets</option>
+            <option value="F2">F2: Endpoints</option>
+            <option value="F3">F3: Parameters</option>
+            <option value="F4">F4: Auth &amp; Storage</option>
+            <option value="F5">F5: Takeover/Subdomains</option>
+            <option value="F6">F6: DOM Sinks</option>
+            <option value="F7">F7: CORS/Misconfig</option>
+            <option value="F8">F8: Hydration</option>
+          </select>
+          <select id="leads-filter-tier" class="panel-select">
+            <option value="all">All Tiers</option>
+            <option value="observed">Observed</option>
+            <option value="strong">Strong</option>
+            <option value="weak">Weak</option>
+            <option value="whisper">Whisper</option>
+          </select>
+          <select id="leads-filter-scope" class="panel-select">
+            <option value="all">All Scopes</option>
+            <option value="in-scope">In-Scope</option>
+            <option value="out-of-scope">Out-of-Scope</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </div>
+        <div class="filter-row filter-row-checks">
+          <label class="check-label"><input type="checkbox" id="leads-filter-new-only"> New Only</label>
+          <label class="check-label"><input type="checkbox" id="leads-filter-chain-only"> In Chain Only</label>
+          <div class="leads-export-actions">
+            <button class="panel-action-btn" id="export-leads-md-btn" title="Export Markdown Report">MD</button>
+            <button class="panel-action-btn" id="export-leads-json-btn" title="Export JSON Report">JSON</button>
+            <button class="panel-action-btn" id="export-leads-sarif-btn" title="Export SARIF Report">SARIF</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shortcut helper hint -->
+      <div class="keyboard-hints-bar">
+        <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
+        <span><kbd>p</kbd> pin</span>
+        <span><kbd>v</kbd> triage</span>
+        <span><kbd>Ctrl+K</kbd> palette</span>
+      </div>
+
+      <!-- Lead Cards List -->
+      <div class="sidepanel-leads-container">
+        <div id="sp-leads-empty" class="leads-empty-state">
+          <span class="empty-icon">📡</span>
+          <p class="empty-title">No leads match current filters</p>
+          <p class="empty-desc">Inspect pages on active origins to accumulate leads.</p>
+        </div>
+        <div id="sp-leads-list" class="leads-card-list"></div>
+      </div>
+    </div>
+
+    <!-- VIEW 4: Chains View -->
+    <div id="view-chains" class="panel-view" role="tabpanel" aria-labelledby="tab-chains" hidden>
+      <div class="panel-subbar">
+        <span class="subbar-title">Attack Vector Chains (CH-001 – CH-007)</span>
+        <span class="chains-active-badge" id="chains-active-badge">0 Active</span>
+      </div>
+      <div class="chains-list-container" id="chains-list-container">
+        <!-- populated dynamically via JS -->
+      </div>
+    </div>
+
+    <!-- VIEW 5: Recon View -->
+    <div id="view-recon" class="panel-view" role="tabpanel" aria-labelledby="tab-recon" hidden>
+      <div class="panel-subbar">
+        <span class="subbar-title">Reconnaissance Intelligence</span>
+        <div class="recon-actions">
+          <button class="panel-btn-primary" id="download-wordlist-btn">📥 Download Wordlist (.txt)</button>
+          <button class="panel-btn-danger" id="reset-recon-btn" title="Clear all remembered recon memory">🗑 Reset</button>
+        </div>
+      </div>
+
+      <div class="recon-stats-bar">
+        <div class="recon-stat"><span class="recon-stat-val" id="recon-hosts-count">0</span><span class="recon-stat-lbl">Hosts</span></div>
+        <div class="recon-stat"><span class="recon-stat-val" id="recon-endpoints-count">0</span><span class="recon-stat-lbl">Endpoints</span></div>
+        <div class="recon-stat"><span class="recon-stat-val" id="recon-params-count">0</span><span class="recon-stat-lbl">Parameters</span></div>
+        <div class="recon-stat"><span class="recon-stat-val" id="recon-buckets-count">0</span><span class="recon-stat-lbl">Buckets</span></div>
+      </div>
+
+      <!-- Recon subtabs -->
+      <div class="recon-subnav">
+        <button class="recon-subtab active" id="recon-subtab-endpoints" data-target="recon-section-endpoints">Endpoints</button>
+        <button class="recon-subtab" id="recon-subtab-params" data-target="recon-section-params">Parameters</button>
+        <button class="recon-subtab" id="recon-subtab-hosts" data-target="recon-section-hosts">Hosts</button>
+        <button class="recon-subtab" id="recon-subtab-buckets" data-target="recon-section-buckets">Buckets</button>
+      </div>
+
+      <div class="recon-sections-container">
+        <div class="recon-section active" id="recon-section-endpoints">
+          <div class="recon-list" id="recon-endpoints-list"></div>
+        </div>
+        <div class="recon-section" id="recon-section-params" hidden>
+          <div class="recon-list" id="recon-params-list"></div>
+        </div>
+        <div class="recon-section" id="recon-section-hosts" hidden>
+          <div class="recon-list" id="recon-hosts-list"></div>
+        </div>
+        <div class="recon-section" id="recon-section-buckets" hidden>
+          <div class="recon-list" id="recon-buckets-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 6: Timeline View -->
+    <div id="view-timeline" class="panel-view" role="tabpanel" aria-labelledby="tab-timeline" hidden>
+      <div class="panel-subbar">
+        <span class="subbar-title">Discovery Timeline</span>
+        <span class="timeline-count-badge" id="timeline-count-badge">0 events</span>
+      </div>
+      <div class="timeline-container" id="timeline-container">
+        <div id="timeline-empty" class="leads-empty-state">
+          <span class="empty-icon">⏳</span>
+          <p class="empty-title">Timeline empty</p>
+          <p class="empty-desc">Events and leads will stream chronologically here.</p>
+        </div>
+        <div id="timeline-stream" class="timeline-stream"></div>
       </div>
     </div>
   </div>
 
-  <!-- Apex and statistics summary bar -->
-  <div class="summary-bar">
-    <div class="summary-item">
-      <span class="summary-label">Apex Domain</span>
-      <span class="summary-val" id="apex-domain-val">—</span>
-    </div>
-    <div class="summary-item">
-      <span class="summary-label">Discovered Nodes</span>
-      <span class="summary-val" id="nodes-count-val">0</span>
-    </div>
-    <div class="summary-item">
-      <span class="summary-label">Trust Vectors</span>
-      <span class="summary-val" id="edges-count-val">0</span>
-    </div>
-  </div>
-
-  <!-- Legend -->
-  <div class="legend-panel">
-    <div class="legend-group">
-      <span class="legend-title">Nodes:</span>
-      <span class="legend-item"><span class="legend-dot apex-dot"></span> Apex</span>
-      <span class="legend-item"><span class="legend-dot sub-dot"></span> Subdomain</span>
-    </div>
-    <div class="legend-group">
-      <span class="legend-title">Vectors:</span>
-      <span class="legend-item"><span class="legend-line cookie-line"></span> Cookie</span>
-      <span class="legend-item"><span class="legend-line csp-line"></span> CSP</span>
-      <span class="legend-item"><span class="legend-line cors-line"></span> CORS</span>
-    </div>
-  </div>
-
-  <!-- Main visual area -->
-  <main class="graph-canvas-container" id="canvas-container">
-    <div class="graph-section">
-      <div class="graph-loading" id="graph-loading">Loading graph…</div>
-      <div class="graph-empty" id="graph-empty" hidden>
-        No attack surface nodes discovered yet for this domain. Browse pages on this origin to accumulate trust vectors.
+  <!-- Command Palette Modal Dialog (Ctrl+K) -->
+  <dialog class="cmd-palette-dialog" id="command-palette-dialog" aria-labelledby="cmd-palette-title">
+    <div class="cmd-palette-box">
+      <div class="cmd-palette-header">
+        <span id="cmd-palette-title" class="cmd-palette-title">Command Palette</span>
+        <button class="cmd-palette-close-btn" id="cmd-palette-close-btn" aria-label="Close Command Palette">✕</button>
       </div>
-      <svg id="graph-svg" class="graph-svg" viewBox="0 0 600 450" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Attack Surface Node Graph">
-        <g id="edges-group"></g>
-        <g id="nodes-group"></g>
-      </svg>
+      <div class="cmd-palette-search">
+        <input type="text" id="cmd-palette-input" class="cmd-palette-input" placeholder="Type a command or view (e.g. leads, radar, chains, recon, export)..." autofocus>
+      </div>
+      <ul class="cmd-palette-results" id="cmd-palette-results" role="listbox">
+        <!-- populated dynamically -->
+      </ul>
     </div>
-
-    <div class="node-list-section" aria-label="Node list">
-      <table class="node-list-table" id="node-list-table" role="grid" aria-label="Attack surface nodes">
-        <thead>
-          <tr>
-            <th scope="col">Hostname</th>
-            <th scope="col">Role</th>
-            <th scope="col">Grade</th>
-            <th scope="col">Last seen</th>
-          </tr>
-        </thead>
-        <tbody id="node-list-body">
-          <!-- rows added by JS -->
-        </tbody>
-      </table>
-    </div>
-  </main>
-
-  <!-- Selected Node Details Drawer -->
-  <section class="node-details" id="node-details" hidden>
-    <div class="node-details-header">
-      <h2 class="node-title" id="node-hostname">hostname</h2>
-      <button class="close-details-btn" id="close-details-btn" title="Close" aria-label="Close details">✕</button>
-    </div>
-    <div class="node-details-body">
-      <div class="detail-row">
-        <span class="detail-label">Role:</span>
-        <span class="detail-value" id="node-role">—</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Discovered Via:</span>
-        <span class="detail-value" id="node-discovered-via">—</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Security Grade:</span>
-        <span class="detail-value" id="node-grade">—</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Scope Status:</span>
-        <span class="detail-value" id="node-scope">—</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Last Seen:</span>
-        <span class="detail-value" id="node-last-seen">—</span>
-      </div>
-    </div>
-  </section>
+  </dialog>
 
   <script type="module" src="sidepanel.ts"></script>
 </body>

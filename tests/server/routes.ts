@@ -141,6 +141,8 @@ function handleXssInHeaders(_req: Request, res: Response): void {
 // Registration
 // --------------------------------------------------------------------------
 
+import { registerLeadLabRoutes } from './lead-lab-routes';
+
 /**
  * Register all test routes on the provided Express application.
  *
@@ -154,6 +156,7 @@ export function registerRoutes(app: Express): void {
   app.get('/version-leak', handleVersionLeak);
   app.get('/hsts-short', handleHstsShort);
   app.get('/xss-in-headers', handleXssInHeaders);
+  registerLeadLabRoutes(app);
 
   // --------------------------------------------------------------------------
   // Index route: lists available test endpoints for manual inspection.

@@ -268,6 +268,9 @@ export interface SettingsV2 {
   density?: 'comfortable' | 'compact';
   /** Appearance: motion preference override. 'system' follows prefers-reduced-motion. */
   reducedMotion?: 'system' | 'always' | 'never';
+  leadsEnabled?: boolean;
+  deepModeEnabled?: boolean;
+  hunterConfig?: import('../leads/types').HunterConfig;
   legacyAllowedOrigins?: string[];
   /** Legacy fields for backward compatibility */
   allowedOrigins?: string[];

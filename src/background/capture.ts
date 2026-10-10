@@ -125,6 +125,32 @@ export function isCaptureActiveForUrl(url: string): boolean {
   return isCaptureAllowedAtBoundary(url, CapturePolicy.getSnapshot());
 }
 
+export type ParamHarvesterCallback = (url: string, paramNames: string[], tabId: number) => void;
+let paramHarvesterCallback: ParamHarvesterCallback | null = null;
+
+export function registerParamHarvester(cb: ParamHarvesterCallback): void {
+  paramHarvesterCallback = cb;
+}
+
+export function extractRawQueryParams(rawUrl: string): string[] {
+  try {
+    const qIndex = rawUrl.indexOf('?');
+    if (qIndex === -1) return [];
+    const hashIndex = rawUrl.indexOf('#', qIndex);
+    const search = hashIndex !== -1 ? rawUrl.slice(qIndex, hashIndex) : rawUrl.slice(qIndex);
+    const params = new URLSearchParams(search);
+    const names = new Set<string>();
+    params.forEach((_, key) => {
+      if (key && key.trim().length > 0) {
+        names.add(key.trim());
+      }
+    });
+    return Array.from(names);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Registers all WebRequest listeners needed to capture response hops.
  *
@@ -144,6 +170,16 @@ export function registerCaptureListeners(
     chrome.webRequest.onBeforeSendHeaders.addListener(
       (details: chrome.webRequest.WebRequestHeadersDetails): void => {
         if (details.tabId < 0) return;
+
+        // S1: Extract query parameter names before any redaction occurs
+        const rawParamNames = extractRawQueryParams(details.url);
+        if (rawParamNames.length > 0 && paramHarvesterCallback) {
+          try {
+            paramHarvesterCallback(details.url, rawParamNames, details.tabId);
+          } catch {
+            // Fail-safe
+          }
+        }
 
         const snapshot = CapturePolicy.getSnapshot();
         const isAllowed = isCaptureActiveForUrl(details.url);
@@ -197,6 +233,16 @@ export function registerCaptureListeners(
   // -------------------------------------------------------------------------
   chrome.webRequest.onHeadersReceived.addListener(
     (details: chrome.webRequest.WebResponseHeadersDetails): void => {
+      // S1: Extract query parameter names before any redaction occurs
+      const rawParamNames = extractRawQueryParams(details.url);
+      if (rawParamNames.length > 0 && paramHarvesterCallback) {
+        try {
+          paramHarvesterCallback(details.url, rawParamNames, details.tabId);
+        } catch {
+          // Fail-safe
+        }
+      }
+
       // Only track top-level navigation frames.
       if (details.type !== 'main_frame' || details.tabId < 0) return;
       if (!isCaptureActiveForUrl(details.url)) return;

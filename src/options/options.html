@@ -90,6 +90,17 @@
         <li>
           <button
             class="nav-item"
+            data-section="leads"
+            role="menuitem"
+            title="Lead Radar &amp; Recon Intelligence"
+          >
+            <span class="nav-icon" aria-hidden="true">📡</span>
+            <span class="nav-label">Leads &amp; Recon</span>
+          </button>
+        </li>
+        <li>
+          <button
+            class="nav-item"
             data-section="appearance"
             role="menuitem"
             title="Appearance &amp; Accessibility"
@@ -460,6 +471,87 @@
         </div>
 
         <div id="scope-profiles-container" class="scope-profiles-list"></div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════════
+           SECTION: Lead Radar & Recon Intelligence
+           ════════════════════════════════════════════════════════════ -->
+      <section class="settings-section" id="section-leads" hidden aria-labelledby="heading-leads">
+        <h2 class="section-title" id="heading-leads">Lead Radar &amp; Recon Intelligence</h2>
+
+        <!-- Master toggle: Enable Lead Radar -->
+        <div class="field-row">
+          <label class="checkbox-label" for="leads-enabled-toggle">
+            <input type="checkbox" id="leads-enabled-toggle" name="leadsEnabled">
+            <span class="checkbox-title">Enable Lead Radar</span>
+          </label>
+          <p class="field-hint">
+            Passively correlates vulnerabilities, auth posture shifts, endpoints, and leak vectors into prioritized, actionable security leads.
+          </p>
+        </div>
+
+        <!-- Deep Mode toggle -->
+        <div class="field-row" style="margin-top: 16px;">
+          <label class="checkbox-label" for="deep-mode-toggle">
+            <input type="checkbox" id="deep-mode-toggle" name="deepModeEnabled">
+            <span class="checkbox-title">Enable Deep Mode (Main-World Hooking)</span>
+          </label>
+          <div class="field-warning" style="margin-top: 6px; padding: 10px; background: rgba(138, 43, 226, 0.1); border-left: 3px solid var(--sc-violet, #8a2be2); border-radius: 4px;">
+            <strong style="color: var(--sc-violet-light, #a78bfa);">Consent Disclosure &amp; Safety Invariant:</strong>
+            <p style="font-size: 12px; margin-top: 4px; color: var(--text-muted);">
+              Deep Mode registers lightweight in-memory hooks inside page execution contexts to observe sink invocations (such as <code>innerHTML</code>, <code>eval</code>), cross-origin <code>postMessage</code> routing, and sensitive token writes to Web Storage. In accordance with ACULYX privacy standards, runtime values are only inspected in-memory to detect token structure; raw payloads and secrets are never persisted or exported.
+            </p>
+          </div>
+        </div>
+
+        <!-- Recon Memory Management -->
+        <div class="field-row" style="margin-top: 24px;">
+          <h3 class="subsection-title">Reconnaissance Memory</h3>
+          <p class="field-hint">
+            ACULYX accumulates discovered unique hostnames, endpoints, and query parameters per origin to build high-signal wordlists and surface attack surface expansion.
+          </p>
+          <div style="display: flex; gap: 16px; margin: 12px 0; align-items: center;">
+            <div style="font-size: 13px;">
+              Remembered: <strong id="options-recon-hosts-count">0</strong> hosts,
+              <strong id="options-recon-endpoints-count">0</strong> endpoints,
+              <strong id="options-recon-params-count">0</strong> parameters
+            </div>
+            <button type="button" class="btn-danger btn-sm" id="btn-reset-recon-memory">Reset Recon Memory</button>
+          </div>
+          <span id="recon-reset-status" class="status-message" role="status"></span>
+        </div>
+
+        <!-- Hunter Engine (Gated Active Validation) -->
+        <div class="field-row" style="margin-top: 24px;">
+          <h3 class="subsection-title">Hunter Engine (Active Validation)</h3>
+          <p class="field-hint">
+            Configures client-side targeted probes for in-scope leads. Strictly gated to explicit in-scope targets under an active Bug-Bounty Scope Profile.
+          </p>
+
+          <div style="margin-top: 8px;">
+            <label class="checkbox-label" for="hunter-enabled-toggle">
+              <input type="checkbox" id="hunter-enabled-toggle" name="hunterEnabled">
+              <span>Enable Hunter Probe Engine</span>
+            </label>
+          </div>
+
+          <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+            <div>
+              <label for="hunter-user-agent" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Hunter User-Agent Header:</label>
+              <input type="text" id="hunter-user-agent" class="text-input" style="width: 100%; max-width: 480px;" placeholder="ACULYX Security Probe / 1.0">
+            </div>
+
+            <div>
+              <label for="hunter-max-rps" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Max Requests Per Second (RPS Rate Limit):</label>
+              <input type="number" id="hunter-max-rps" class="text-input" style="width: 120px;" min="0.1" max="5" step="0.5" value="1">
+            </div>
+
+            <div>
+              <label for="hunter-custom-headers" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Program Verification Headers (Key: Value):</label>
+              <textarea id="hunter-custom-headers" class="textarea-input" rows="2" style="width: 100%; max-width: 480px;" placeholder="X-Bug-Bounty: hackerone-username&#10;X-Security-Researcher: your-handle"></textarea>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ════════════════════════════════════════════════════════════
