@@ -1708,6 +1708,20 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'HUNTER_RUN_PROBE') {
+      if (!isExtensionInternalSender(_sender) || _sender.tab !== undefined) {
+        sendResponse({
+          type: 'HUNTER_RUN_PROBE_RESPONSE',
+          entry: {
+            probeId: message.probe?.id || 'unknown',
+            ruleId: message.probe?.ruleId || 'unknown',
+            targetUrl: message.probe?.targetUrl || '',
+            status: 'blocked',
+            notes: 'Unauthorized sender: HUNTER_RUN_PROBE is strictly restricted to internal extension pages without tab context',
+            timestamp: Date.now(),
+          },
+        });
+        return false;
+      }
       const probe = message.probe;
       const targetUrl = probe?.targetUrl || '';
       const recomputedScope = resolveScopeStatus(targetUrl, currentSettings);

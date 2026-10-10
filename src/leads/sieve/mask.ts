@@ -58,9 +58,11 @@ export function sha256Hex(str: string): string {
         withPad[chunk + i * 4 + 3];
     }
     for (let i = 16; i < 64; i++) {
-      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      const w15 = w[i - 15]!;
+      const w2 = w[i - 2]!;
+      const s0 = rotr(w15, 7) ^ rotr(w15, 18) ^ (w15 >>> 3);
+      const s1 = rotr(w2, 17) ^ rotr(w2, 19) ^ (w2 >>> 10);
+      w[i] = (w[i - 16]! + s0 + w[i - 7]! + s1) | 0;
     }
 
     let a = h0;
@@ -75,7 +77,7 @@ export function sha256Hex(str: string): string {
     for (let i = 0; i < 64; i++) {
       const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
       const ch = (e & f) ^ (~e & g);
-      const temp1 = (h + s1 + ch + K[i] + w[i]) | 0;
+      const temp1 = (h + s1 + ch + K[i]! + w[i]!) | 0;
       const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
       const maj = (a & b) ^ (a & c) ^ (b & c);
       const temp2 = (s0 + maj) | 0;
@@ -121,10 +123,10 @@ export function maskSecret(v: string): Masked<string> {
   return formatted as Masked<string>;
 }
 
-const SENSITIVE_PARAM_REGEX = /^(token|auth|auth_token|authorization|access_token|refresh_token|id_token|key|api_key|apikey|secret|client_secret|password|passwd|pass|sig|signature|jwt|code|session|session_id|state|ref|hash|credential|nonce)$/i;
-
 /**
- * Redact sensitive query parameters and embedded credentials in URLs.
+ * Redact sensitive query parameters, embedded credentials, and URL fragments.
+ * Drops #... fragments entirely (preventing OAuth implicit flow token leakage)
+ * and masks ALL query parameter values to '***' while retaining parameter names.
  */
 export function maskLocation(loc: string): Masked<string> {
   if (!loc) {
@@ -135,62 +137,28 @@ export function maskLocation(loc: string): Masked<string> {
     // If it's a parseable full URL
     const parsed = new URL(loc);
 
-    // Redact credentials
-    if (parsed.username || parsed.password) {
-      parsed.username = '***';
-      parsed.password = '***';
-    }
+    // 1. Strip fragments entirely to prevent OAuth tokens / implicit grants from leaking
+    parsed.hash = '';
 
-    // Redact query params
+    // 2. Strip embedded user:pass credentials
+    parsed.username = '';
+    parsed.password = '';
+
+    // 3. Mask ALL query parameter values to '***' while retaining parameter names
     const keys = Array.from(parsed.searchParams.keys());
     for (const key of keys) {
-      const val = parsed.searchParams.get(key) || '';
-      if (
-        SENSITIVE_PARAM_REGEX.test(key) ||
-        val.length >= 20 ||
-        /^[a-zA-Z0-9+/=_-]{32,}$/.test(val)
-      ) {
-        parsed.searchParams.set(key, '***');
-      }
-    }
-
-    // Also sanitize sensitive fragment/hash query parameters (e.g. #access_token=...)
-    if (parsed.hash && parsed.hash.includes('=')) {
-      const hashContent = parsed.hash.slice(1);
-      try {
-        const hashParams = new URLSearchParams(hashContent);
-        let modifiedHash = false;
-        for (const hKey of Array.from(hashParams.keys())) {
-          const hVal = hashParams.get(hKey) || '';
-          if (SENSITIVE_PARAM_REGEX.test(hKey) || hVal.length >= 20) {
-            hashParams.set(hKey, '***');
-            modifiedHash = true;
-          }
-        }
-        if (modifiedHash) {
-          parsed.hash = '#' + hashParams.toString();
-        }
-      } catch {
-        // Fallback for non-standard hash
-      }
+      parsed.searchParams.set(key, '***');
     }
 
     return parsed.toString() as Masked<string>;
   } catch {
     // Fallback for relative paths or non-standard URLs
-    let sanitized = loc;
-    // Strip user:pass
-    sanitized = sanitized.replace(/\/\/[^/:@\s]+:[^/@\s]+@/g, '//***:***@');
-    // Strip query parameters
-    sanitized = sanitized.replace(/([?&])([a-zA-Z0-9_-]+)=([^&#\s]*)/g, (match, prefix, key, val) => {
-      if (
-        SENSITIVE_PARAM_REGEX.test(key) ||
-        val.length >= 20
-      ) {
-        return `${prefix}${key}=***`;
-      }
-      return match;
-    });
+    // 1. Drop fragment entirely
+    let sanitized = loc.split('#')[0] || '';
+    // 2. Strip user:pass
+    sanitized = sanitized.replace(/\/\/[^/:@\s]+:[^/@\s]+@/g, '//');
+    // 3. Mask all query parameter values
+    sanitized = sanitized.replace(/([?&][^=&#\s]+)=([^&#\s]*)/g, '$1=***');
     return sanitized as Masked<string>;
   }
 }

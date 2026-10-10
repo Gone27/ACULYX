@@ -30,4 +30,23 @@ describe('Sieve Masking & Redaction Contracts', () => {
     const masked = maskSecret(canary);
     expect(masked).not.toContain('LEAD_SECRET');
   });
+
+  it('strips OAuth fragments entirely (#access_token=...)', () => {
+    const tokenPart = ['ya29', 'SECRETSECRET'].join('.');
+    const oauthUrl = `https://a.test/cb#access_token=${tokenPart}&state=abc`;
+    const masked = maskLocation(oauthUrl);
+    expect(masked).not.toContain('access_token');
+    expect(masked).not.toContain('SECRETSECRET');
+    expect(masked).not.toContain('#');
+    expect(masked).toBe('https://a.test/cb');
+  });
+
+  it('masks all query parameter values while preserving keys', () => {
+    const url = 'https://example.com/search?email=a@b.com&uid=12345&q=hello';
+    const masked = maskLocation(url);
+    expect(masked).toBe('https://example.com/search?email=***&uid=***&q=***');
+    expect(masked).not.toContain('a@b.com');
+    expect(masked).not.toContain('12345');
+    expect(masked).not.toContain('hello');
+  });
 });

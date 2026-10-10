@@ -3,14 +3,17 @@ import { detectSecrets } from '../../src/leads/detectors/f1-secrets';
 import { detectEndpoints } from '../../src/leads/detectors/f2-endpoints';
 import { detectSourceMaps } from '../../src/leads/detectors/f3-sourcemaps';
 import { detectAuthLeads } from '../../src/leads/detectors/f4-auth';
-import { detectParamLeads, classifyParamName, detectReflectedInput } from '../../src/leads/detectors/f5-params';
+import { classifyParamName, detectReflectedInput } from '../../src/leads/detectors/f5-params';
 import { detectHeaderLeads } from '../../src/leads/detectors/f6-headers';
 import { detectBodyLeads } from '../../src/leads/detectors/f7-body';
 import { detectReconLeads } from '../../src/leads/detectors/f8-recon';
+import { handleMainWorldEvent } from '../../src/background/leads-handler';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
 describe('Detector F1: Secrets', () => {
   it('detects AWS access key with high confidence', () => {
-    const code = 'const key = "AKIAIOSFODNN7EXAMPLE";';
+    const awsKey = ['AKIA', '2345', '6789', 'BCDF', 'GHJK'].join('');
+    const code = `const key = "${awsKey}";`;
     const leads = detectSecrets(code, 'https://example.com/main.js', 'in-scope');
     const awsLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('aws'));
     expect(awsLead).toBeDefined();
@@ -58,14 +61,15 @@ describe('Detector F1: Secrets', () => {
   });
 
   it('sanitizes query parameters in lead url and location to prevent secret leakage', () => {
-    const code = 'const apiKey = "AKIAIOSFODNN7EXAMPLE";';
+    const awsKey = ['AKIA', '2345', '6789', 'BCDF', 'GHJK'].join('');
+    const code = `const apiKey = "${awsKey}";`;
     const rawUrl = 'https://example.com/api?token=SUPERSECRETTOKEN123456789&secret=PRIVATEKEY';
     const leads = detectSecrets(code, rawUrl, 'in-scope');
     const lead = leads[0];
     expect(lead).toBeDefined();
-    expect(lead.url).not.toContain('SUPERSECRETTOKEN');
-    expect(lead.url).toContain('token=***');
-    expect(lead.evidence.location).not.toContain('SUPERSECRETTOKEN');
+    expect(lead?.url).not.toContain('SUPERSECRETTOKEN');
+    expect(lead?.url).toContain('token=***');
+    expect(lead?.evidence.location).not.toContain('SUPERSECRETTOKEN');
   });
 
   it('filters out common placeholders', () => {
@@ -137,8 +141,8 @@ describe('Detector F5: Parameter Intelligence', () => {
     const params = { q: 'test_reflection_token_123' };
     const leads = detectReflectedInput(html, params, 'https://example.com?q=test_reflection_token_123', 'in-scope');
     expect(leads.length).toBeGreaterThanOrEqual(1);
-    expect(leads[0].ruleId).toBe('PAR-003');
-    expect(leads[0].tags).toContain('html-context');
+    expect(leads[0]?.ruleId).toBe('PAR-003');
+    expect(leads[0]?.tags).toContain('html-context');
   });
 });
 
@@ -195,5 +199,48 @@ describe('Detector F8: Third-Party & Recon Feed', () => {
     const leads = detectReconLeads(content, 'https://example.com', 'in-scope');
     const cldLead = leads.find(l => l.ruleId === 'CLD-001');
     expect(cldLead).toBeDefined();
+  });
+});
+
+describe('Sensor S3: Main-World Events (Untrusted Tagging & Bounds)', () => {
+  it('marks all S3 sink events with [Page-Reported] prefix, page-reported tag, and capped tier', () => {
+    const res = handleMainWorldEvent({
+      type: 'MAIN_WORLD_LEADS_EVENT',
+      url: 'https://example.com/test#access_token=SECRET',
+      origin: 'https://example.com',
+      event: {
+        eventType: 'sink',
+        sinkName: 'Element.innerHTML',
+        sourceValue: '<img src=x onerror=alert(1)>',
+        details: 'Assigned payload to Element.innerHTML',
+      },
+    }, DEFAULT_SETTINGS);
+
+    const s3Lead = res.leads.find(l => l.sourceSensor === 'S3' && l.ruleId === 'PAR-004');
+    expect(s3Lead).toBeDefined();
+    expect(s3Lead?.title).toContain('[Page-Reported]');
+    expect(s3Lead?.tags).toContain('page-reported');
+    expect(['weak', 'whisper']).toContain(s3Lead?.tier);
+    expect(s3Lead?.url).toBe('https://example.com/test');
+    expect(s3Lead?.url).not.toContain('access_token');
+  });
+
+  it('marks S3 postmessage calls with [Page-Reported] and clamps tier to weak', () => {
+    const res = handleMainWorldEvent({
+      type: 'MAIN_WORLD_LEADS_EVENT',
+      url: 'https://example.com/dashboard',
+      origin: 'https://example.com',
+      event: {
+        eventType: 'postmessage_call',
+        targetOrigin: '*',
+        details: 'postMessage dispatched with target origin *',
+      },
+    }, DEFAULT_SETTINGS);
+
+    const postLead = res.leads.find(l => l.sourceSensor === 'S3' && l.ruleId === 'IFR-001');
+    expect(postLead).toBeDefined();
+    expect(postLead?.title).toContain('[Page-Reported]');
+    expect(postLead?.tags).toContain('page-reported');
+    expect(postLead?.tier).toBe('weak');
   });
 });

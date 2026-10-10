@@ -22,24 +22,10 @@ export interface MainWorldLeadEventDetail {
 }
 
 let hooksInstalledInClosure = false;
-const HOOKS_SYMBOL = Symbol.for('__aculyx_main_world_hooks_installed__');
-const s3PerLoadNonce = `aculyx_s3_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
 
 export function installMainWorldHooks(): void {
   if (hooksInstalledInClosure) return;
-  const global = globalThis as any;
-  if (global[HOOKS_SYMBOL]) return;
   hooksInstalledInClosure = true;
-  try {
-    Object.defineProperty(global, HOOKS_SYMBOL, {
-      value: true,
-      writable: false,
-      configurable: false,
-      enumerable: false,
-    });
-  } catch {
-    // Protected by closure boolean
-  }
 
   const dispatchedEventHashes = new Set<string>();
   const recentPostMessages: string[] = [];
@@ -53,11 +39,11 @@ export function installMainWorldHooks(): void {
     dispatchedEventHashes.add(hash);
 
     try {
+      const cleanLocation = window.location.href ? window.location.href.split('#')[0] : '';
       const event = new CustomEvent('__ACULYX_MAIN_WORLD_EVENT__', {
         detail: {
           ...detail,
-          nonce: s3PerLoadNonce,
-          location: window.location.href,
+          location: cleanLocation,
         },
       });
       window.dispatchEvent(event);

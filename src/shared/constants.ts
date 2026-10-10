@@ -106,4 +106,8 @@ export const DEFAULT_SETTINGS: SettingsV2 = {
   reducedMotion: 'system',
   leadsEnabled: false,
   deepModeEnabled: false,
+  hunterConfig: {
+    enabled: false,
+    maxRequestsPerSecond: 1,
+  },
 };

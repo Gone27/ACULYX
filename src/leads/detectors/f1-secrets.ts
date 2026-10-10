@@ -63,15 +63,16 @@ function nextLeadId(prefix: string): string {
 
 export function detectSecrets(
   code: string,
-  url: string,
+  rawUrl: string,
   scopeStatus: Lead['scopeStatus'] = 'unknown'
 ): Lead[] {
   const leads: Lead[] = [];
   if (!code || typeof code !== 'string') return leads;
 
+  const url = (maskLocation(rawUrl) as string) || rawUrl;
   const origin = (() => {
     try {
-      return new URL(url).origin;
+      return new URL(rawUrl).origin;
     } catch {
       return 'https://unknown';
     }

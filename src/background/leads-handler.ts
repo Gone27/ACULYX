@@ -258,7 +258,7 @@ export async function handleDomLeadsCollected(
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url: scriptUrl,
+          url: (maskLocation(scriptUrl) as string) || scriptUrl,
           sourceSensor: 'S2',
         };
         globalLeadStore.addLead(smLead, tabId);
@@ -306,7 +306,7 @@ export async function handleDomLeadsCollected(
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url,
+          url: (maskLocation(url) as string) || url,
           sourceSensor: 'S2',
         };
         globalLeadStore.addLead(ifrLead, tabId);
@@ -457,7 +457,7 @@ export function handleMainWorldEvent(
       tier: 'weak',
       potential: 'medium',
       confidence: 0.7,
-      title: `Client-Side DOM Sink Execution with Controlled Input (${event.sinkName || 'sink'})`,
+      title: `[Page-Reported] Client-Side DOM Sink Execution with Controlled Input (${event.sinkName || 'sink'})`,
       needs: ['audit whether input reaches sink unescaped to verify DOM XSS'],
       doesNotProve: ['exploitable DOM XSS execution'],
       evidence: {
@@ -465,7 +465,7 @@ export function handleMainWorldEvent(
         location: maskLocation(sanitizedUrl),
         context: event.details || `Assigned to ${event.sinkName}`,
       },
-      tags: ['dom-xss', 'sink', 'taint-lite', event.sinkName || 'sink'],
+      tags: ['page-reported', 'dom-xss', 'sink', 'taint-lite', event.sinkName || 'sink'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
@@ -481,7 +481,7 @@ export function handleMainWorldEvent(
       tier: 'weak',
       potential: 'low',
       confidence: 0.65,
-      title: `window.postMessage Dispatched to Wildcard Target Origin "*"`,
+      title: `[Page-Reported] window.postMessage Dispatched to Wildcard Target Origin "*"`,
       needs: ['inspect message payload and determine if sensitive tokens or state can be intercepted'],
       doesNotProve: ['unauthorized cross-origin token interception'],
       evidence: {
@@ -489,7 +489,7 @@ export function handleMainWorldEvent(
         location: maskLocation(sanitizedUrl),
         context: event.details,
       },
-      tags: ['postmessage', 'wildcard-origin', 'cross-origin'],
+      tags: ['page-reported', 'postmessage', 'wildcard-origin', 'cross-origin'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
@@ -505,7 +505,7 @@ export function handleMainWorldEvent(
       tier: 'whisper',
       potential: 'info',
       confidence: 0.6,
-      title: `window message Event Listener Registered Without Origin Validation Check`,
+      title: `[Page-Reported] window message Event Listener Registered Without Origin Validation Check`,
       needs: ['verify if listener handler processes untrusted cross-origin postMessage payloads'],
       doesNotProve: ['cross-origin message manipulation'],
       evidence: {
@@ -513,7 +513,7 @@ export function handleMainWorldEvent(
         location: maskLocation(sanitizedUrl),
         context: event.details,
       },
-      tags: ['postmessage', 'missing-origin-check', 'event-listener'],
+      tags: ['page-reported', 'postmessage', 'missing-origin-check', 'event-listener'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
@@ -529,7 +529,7 @@ export function handleMainWorldEvent(
       tier: 'whisper',
       potential: 'info',
       confidence: 0.65,
-      title: `Sensitive Token Stored in Web Storage (${event.storageKey || 'key'})`,
+      title: `[Page-Reported] Sensitive Token Stored in Web Storage (${event.storageKey || 'key'})`,
       needs: ['check if tokens stored in localStorage are vulnerable to XSS exfiltration'],
       doesNotProve: ['token compromise'],
       evidence: {
@@ -537,7 +537,7 @@ export function handleMainWorldEvent(
         location: maskLocation(sanitizedUrl),
         context: event.details || `Key: ${event.storageKey}`,
       },
-      tags: ['storage', 'jwt', 'auth-token', event.storageKey || 'key'],
+      tags: ['page-reported', 'storage', 'jwt', 'auth-token', event.storageKey || 'key'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
@@ -642,7 +642,7 @@ export function getLeadsState(
 export async function handleHunterProbe(
   probe: HunterProbeRequest,
   scopeStatus: Lead['scopeStatus'] = 'unknown',
-  config: HunterConfig = { enabled: true, maxRequestsPerSecond: 1 },
+  config: HunterConfig = { enabled: false, maxRequestsPerSecond: 1 },
   confirmedByUser = false
 ): Promise<HunterLedgerEntry> {
   return executeHunterProbe(probe, scopeStatus, config, confirmedByUser);

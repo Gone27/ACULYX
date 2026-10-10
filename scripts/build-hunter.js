@@ -40,3 +40,17 @@ manifest.host_permissions = ['<all_urls>'];
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
 
 console.log('✓ Hunter Edition build generated successfully in dist-hunter/');
+
+// 5. Create ACULYX v2 Hunter.zip
+try {
+  const { execSync } = await import('child_process');
+  const hunterZip = path.join(rootDir, 'ACULYX v2 Hunter.zip');
+  if (process.platform === 'win32') {
+    execSync(`powershell -NoProfile -Command "Compress-Archive -Path '${hunterDistDir}\\*' -DestinationPath '${hunterZip}' -Force"`, { stdio: 'inherit' });
+  } else {
+    execSync(`cd "${hunterDistDir}" && zip -r "${hunterZip}" .`, { stdio: 'inherit' });
+  }
+  console.log('✓ Hunter Edition zip packaged successfully: ACULYX v2 Hunter.zip');
+} catch (err) {
+  console.warn('Note: Could not compress hunter zip archive automatically:', err.message);
+}

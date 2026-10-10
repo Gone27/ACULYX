@@ -70,7 +70,8 @@ export function collectDomLeads(): DomCollectionResult {
   const forms: ExtractedFormData[] = [];
   const formElements = Array.from(document.querySelectorAll('form'));
   for (const form of formElements) {
-    const action = form.getAttribute('action') ?? '';
+    const rawAction = form.getAttribute('action') ?? '';
+    const action = sanitizeClientUrl(rawAction);
     const method = (form.getAttribute('method') ?? 'GET').toUpperCase();
     const inputNames: string[] = [];
     const controls = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -90,7 +91,7 @@ export function collectDomLeads(): DomCollectionResult {
   const iframeElements = Array.from(document.querySelectorAll('iframe'));
   for (const iframe of iframeElements) {
     iframes.push({
-      src: iframe.getAttribute('src') ?? '',
+      src: sanitizeClientUrl(iframe.getAttribute('src') ?? ''),
       sandbox: iframe.getAttribute('sandbox') ?? '',
       allow: iframe.getAttribute('allow') ?? '',
     });
@@ -102,7 +103,8 @@ export function collectDomLeads(): DomCollectionResult {
   const scriptElements = Array.from(document.querySelectorAll('script'));
 
   for (const script of scriptElements) {
-    const src = script.getAttribute('src') ?? '';
+    const rawSrc = script.getAttribute('src') ?? '';
+    const src = sanitizeClientUrl(rawSrc);
     let inlineContent: string | undefined;
     let sourceMappingURL: string | undefined;
 
@@ -132,7 +134,7 @@ export function collectDomLeads(): DomCollectionResult {
   const linkElements = Array.from(document.querySelectorAll('a[href]')).slice(0, MAX_LINKS);
   for (const a of linkElements) {
     links.push({
-      href: a.getAttribute('href') ?? '',
+      href: sanitizeClientUrl(a.getAttribute('href') ?? ''),
       rel: a.getAttribute('rel') ?? undefined,
     });
   }
@@ -270,17 +272,31 @@ export function collectDomLeads(): DomCollectionResult {
 }
 
 function sanitizeClientUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
   try {
     const u = new URL(rawUrl);
-    const sensitive = /token|auth|key|secret|password|sig|jwt|code|session/i;
+    // 1. Strip fragments entirely to prevent OAuth tokens from leaking
+    u.hash = '';
+
+    // 2. Strip embedded user:pass credentials
+    u.username = '';
+    u.password = '';
+
+    // 3. Mask ALL query parameter values to '***' while retaining parameter names for attack-surface intelligence
     for (const k of Array.from(u.searchParams.keys())) {
-      if (sensitive.test(k) || (u.searchParams.get(k)?.length ?? 0) >= 20) {
-        u.searchParams.set(k, '***');
-      }
+      u.searchParams.set(k, '***');
     }
+
     return u.toString();
   } catch {
-    return rawUrl.replace(/([?&][a-zA-Z0-9_-]*(?:token|auth|key|secret|pass|sig)[a-zA-Z0-9_-]*=)[^&#\s]*/gi, '$1***');
+    // Relative or malformed URL fallback:
+    // Drop fragment
+    let sanitized = rawUrl.split('#')[0] || '';
+    // Strip user:pass
+    sanitized = sanitized.replace(/\/\/[^/:@\s]+:[^/@\s]+@/g, '//');
+    // Mask all query parameter values
+    sanitized = sanitized.replace(/([?&][^=&#\s]+)=([^&#\s]*)/g, '$1=***');
+    return sanitized;
   }
 }
 
@@ -296,29 +312,24 @@ const ALLOWED_SINKS = new Set([
   'location.replace',
 ]);
 
+const MAX_MAIN_WORLD_EVENTS = 50; // Strict cap per page load
 let domCollectorInstalledInClosure = false;
 
 export function initDomCollector(): void {
   if (domCollectorInstalledInClosure) return;
   domCollectorInstalledInClosure = true;
 
-  let activeS3Nonce: string | null = null;
+  let mainWorldEventCount = 0;
 
-  // Listen for S3 (Main World Hooks) CustomEvents and relay to background with strict validation
+  // Listen for S3 (Main World Hooks) CustomEvents and relay to background as untrusted with strict payload caps
   window.addEventListener('__ACULYX_MAIN_WORLD_EVENT__', (event: Event) => {
     try {
+      // 1. Strict event count cap
+      if (mainWorldEventCount >= MAX_MAIN_WORLD_EVENTS) return;
+
       const customEvent = event as CustomEvent;
       const detail = customEvent.detail;
       if (!detail || typeof detail !== 'object') return;
-
-      // 1. Nonce validation to reject page-forged events
-      const nonce = typeof detail.nonce === 'string' ? detail.nonce : '';
-      if (!nonce.startsWith('aculyx_s3_')) return;
-      if (!activeS3Nonce) {
-        activeS3Nonce = nonce;
-      } else if (activeS3Nonce !== nonce) {
-        return; // Reject forged events with mismatched nonce
-      }
 
       // 2. Validate eventType whitelist
       const eventType = detail.eventType;
@@ -333,18 +344,19 @@ export function initDomCollector(): void {
         }
       }
 
-      // 4. Bound all string fields to prevent memory exhaustion
+      // 4. Strict payload caps: clamp string lengths to prevent memory exhaustion
       const safeDetail = {
         eventType,
-        nonce,
-        sinkName: typeof detail.sinkName === 'string' ? detail.sinkName.slice(0, 100) : undefined,
-        sourceValue: typeof detail.sourceValue === 'string' ? detail.sourceValue.slice(0, 256) : undefined,
-        targetOrigin: typeof detail.targetOrigin === 'string' ? detail.targetOrigin.slice(0, 200) : undefined,
+        sinkName: typeof detail.sinkName === 'string' ? detail.sinkName.slice(0, 80) : undefined,
+        sourceValue: typeof detail.sourceValue === 'string' ? detail.sourceValue.slice(0, 128) : undefined,
+        targetOrigin: typeof detail.targetOrigin === 'string' ? detail.targetOrigin.slice(0, 128) : undefined,
         hasOriginCheck: typeof detail.hasOriginCheck === 'boolean' ? detail.hasOriginCheck : undefined,
-        storageKey: typeof detail.storageKey === 'string' ? detail.storageKey.slice(0, 128) : undefined,
-        tokenShape: typeof detail.tokenShape === 'string' ? detail.tokenShape.slice(0, 100) : undefined,
-        details: typeof detail.details === 'string' ? detail.details.slice(0, 500) : undefined,
+        storageKey: typeof detail.storageKey === 'string' ? detail.storageKey.slice(0, 64) : undefined,
+        tokenShape: typeof detail.tokenShape === 'string' ? detail.tokenShape.slice(0, 64) : undefined,
+        details: typeof detail.details === 'string' ? detail.details.slice(0, 256) : undefined,
       };
+
+      mainWorldEventCount++;
 
       void chrome.runtime?.sendMessage?.({
         type: 'MAIN_WORLD_LEADS_EVENT',

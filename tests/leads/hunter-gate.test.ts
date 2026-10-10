@@ -17,7 +17,7 @@ describe('Hunter Active Tier Scope Gating & Safety', () => {
       reason: 'Confirm endpoint presence',
     };
 
-    const result = await executeHunterProbe(probe, 'out-of-scope', sampleConfig);
+    const result = await executeHunterProbe(probe, 'out-of-scope', sampleConfig, true);
     expect(result.scopeStatus).toBe('out-of-scope');
     expect(result.resultNotes).toMatch(/blocked|out-of-scope/i);
     expect(result.response).toBeUndefined();
@@ -30,7 +30,7 @@ describe('Hunter Active Tier Scope Gating & Safety', () => {
       reason: 'Confirm endpoint presence',
     };
 
-    const result = await executeHunterProbe(probe, 'unknown', sampleConfig);
+    const result = await executeHunterProbe(probe, 'unknown', sampleConfig, true);
     expect(result.scopeStatus).toBe('unknown');
     expect(result.resultNotes).toMatch(/blocked/i);
   });
@@ -42,7 +42,19 @@ describe('Hunter Active Tier Scope Gating & Safety', () => {
       reason: 'Active payload injection',
     };
 
-    const result = await executeHunterProbe(probe, 'in-scope', sampleConfig);
+    const result = await executeHunterProbe(probe, 'in-scope', sampleConfig, true);
     expect(result.resultNotes).toMatch(/prohibited|disallowed|method/i);
+  });
+
+  it('strictly blocks probes not explicitly confirmed by the user', async () => {
+    const probe: HunterProbeRequest = {
+      targetUrl: 'https://in-scope.example.com/api/test',
+      method: 'GET',
+      reason: 'Confirm endpoint presence',
+    };
+
+    const result = await executeHunterProbe(probe, 'in-scope', sampleConfig, false);
+    expect(result.confirmedByUser).toBe(false);
+    expect(result.resultNotes).toMatch(/confirmed by the user/i);
   });
 });
