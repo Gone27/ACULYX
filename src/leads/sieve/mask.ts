@@ -113,17 +113,18 @@ export function maskSecret(v: string): Masked<string> {
     return '***' as Masked<string>;
   }
 
-  const hash = sha256Hex(v).slice(0, 8);
+  // 64-bit cryptographic entropy hash (16 hex chars)
+  const hash = sha256Hex(v).slice(0, 16);
   const head = v.slice(0, 4);
   const tail = v.slice(-2);
   const formatted = `${head}...${tail} (len ${v.length}) [${hash}]`;
   return formatted as Masked<string>;
 }
 
-const SENSITIVE_PARAM_REGEX = /^(token|auth|auth_token|authorization|access_token|refresh_token|id_token|key|api_key|apikey|secret|client_secret|password|passwd|pass|sig|signature|jwt|code|session|session_id|state|ref|canary|hash|credential|nonce)$/i;
+const SENSITIVE_PARAM_REGEX = /^(token|auth|auth_token|authorization|access_token|refresh_token|id_token|key|api_key|apikey|secret|client_secret|password|passwd|pass|sig|signature|jwt|code|session|session_id|state|ref|hash|credential|nonce)$/i;
 
 /**
- * Redact sensitive query parameters, canaries, and embedded credentials in URLs.
+ * Redact sensitive query parameters and embedded credentials in URLs.
  */
 export function maskLocation(loc: string): Masked<string> {
   if (!loc) {
@@ -146,7 +147,6 @@ export function maskLocation(loc: string): Masked<string> {
       const val = parsed.searchParams.get(key) || '';
       if (
         SENSITIVE_PARAM_REGEX.test(key) ||
-        val.startsWith('CANARY_') ||
         val.length >= 20 ||
         /^[a-zA-Z0-9+/=_-]{32,}$/.test(val)
       ) {
@@ -154,10 +154,28 @@ export function maskLocation(loc: string): Masked<string> {
       }
     }
 
-    let result = parsed.toString();
-    // Catch any remaining raw canary strings
-    result = result.replace(/CANARY_[A-Za-z0-9_]+/g, '***');
-    return result as Masked<string>;
+    // Also sanitize sensitive fragment/hash query parameters (e.g. #access_token=...)
+    if (parsed.hash && parsed.hash.includes('=')) {
+      const hashContent = parsed.hash.slice(1);
+      try {
+        const hashParams = new URLSearchParams(hashContent);
+        let modifiedHash = false;
+        for (const hKey of Array.from(hashParams.keys())) {
+          const hVal = hashParams.get(hKey) || '';
+          if (SENSITIVE_PARAM_REGEX.test(hKey) || hVal.length >= 20) {
+            hashParams.set(hKey, '***');
+            modifiedHash = true;
+          }
+        }
+        if (modifiedHash) {
+          parsed.hash = '#' + hashParams.toString();
+        }
+      } catch {
+        // Fallback for non-standard hash
+      }
+    }
+
+    return parsed.toString() as Masked<string>;
   } catch {
     // Fallback for relative paths or non-standard URLs
     let sanitized = loc;
@@ -167,22 +185,14 @@ export function maskLocation(loc: string): Masked<string> {
     sanitized = sanitized.replace(/([?&])([a-zA-Z0-9_-]+)=([^&#\s]*)/g, (match, prefix, key, val) => {
       if (
         SENSITIVE_PARAM_REGEX.test(key) ||
-        val.startsWith('CANARY_') ||
         val.length >= 20
       ) {
         return `${prefix}${key}=***`;
       }
       return match;
     });
-    // Strip canaries
-    sanitized = sanitized.replace(/CANARY_[A-Za-z0-9_]+/g, '***');
     return sanitized as Masked<string>;
   }
 }
 
-/**
- * Checks if a string contains synthetic canary tokens.
- */
-export function hasCanary(v: string): boolean {
-  return /CANARY_[A-Za-z0-9_]+/i.test(v);
-}
+export const maskUrl = maskLocation;

@@ -12,6 +12,9 @@
  */
 
 import { detectBodyLeads } from '../leads/detectors/f7-body';
+import { detectSecrets } from '../leads/detectors/f1-secrets';
+import { detectEndpoints } from '../leads/detectors/f2-endpoints';
+import { maskLocation } from '../leads/sieve/mask';
 import type { Lead } from '../leads/types';
 
 const collectedLeads: Lead[] = [];
@@ -156,16 +159,23 @@ if (typeof chrome !== 'undefined' && chrome.devtools?.network?.onRequestFinished
     request.getContent((rawContent) => {
       if (!rawContent || typeof rawContent !== 'string') return;
 
-      // In-memory detector evaluation
-      const leads = detectBodyLeads(rawContent, mimeType, url, 'in-scope');
+      // In-memory detector evaluation (F7: Body, F1: Secrets, F2: Endpoints)
+      const bodyLeads = detectBodyLeads(rawContent, mimeType, url, 'in-scope');
+      const secretLeads = detectSecrets(rawContent, url, 'in-scope');
+      const endpointLeads = (mimeType.includes('javascript') || mimeType.includes('json'))
+        ? detectEndpoints(rawContent, url, 'in-scope')
+        : [];
 
       // CRITICAL: Explicitly decouple content so raw response is garbage collected immediately
       rawContent = '';
 
-      if (leads.length === 0) return;
+      const allLeads = [...bodyLeads, ...secretLeads, ...endpointLeads];
+      if (allLeads.length === 0) return;
 
-      for (const lead of leads) {
+      for (const lead of allLeads) {
         lead.sourceSensor = 'S4';
+        lead.url = (maskLocation(lead.url) as string) || lead.url;
+        lead.evidence.location = maskLocation(lead.evidence.location);
         collectedLeads.push(lead);
         renderLeadRow(lead);
       }
@@ -178,7 +188,7 @@ if (typeof chrome !== 'undefined' && chrome.devtools?.network?.onRequestFinished
         void chrome.runtime?.sendMessage?.({
           type: 'DEVTOOLS_LEADS_COLLECTED',
           tabId: inspectedTabId,
-          leads,
+          leads: allLeads,
         }).catch(() => undefined);
       } catch {
         // Ignore communication failure

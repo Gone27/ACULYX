@@ -1,4 +1,5 @@
 import type { ReconMemory, ReconHost, ReconParam, ReconEndpoint, ReconBucket } from '../types';
+import { maskLocation } from '../sieve/mask';
 
 const STORAGE_KEY = 'aculyx_recon_memory';
 
@@ -110,8 +111,9 @@ export async function recordParam(param: ReconParam): Promise<void> {
 export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
   const mem = await getReconMemory();
   const method = ep.method || 'GET';
+  const sanitizedPath = (maskLocation(ep.path || '') as string) || ep.path;
   const existingIdx = mem.endpoints.findIndex(
-    e => e.origin === ep.origin && e.path === ep.path && (e.method || 'GET') === method
+    e => e.origin === ep.origin && e.path === sanitizedPath && (e.method || 'GET') === method
   );
 
   if (existingIdx !== -1) {
@@ -126,6 +128,7 @@ export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
   } else {
     mem.endpoints.push({
       ...ep,
+      path: sanitizedPath,
       tags: [...(ep.tags || [])],
     });
     if (mem.endpoints.length > LIMITS.maxEndpoints) {

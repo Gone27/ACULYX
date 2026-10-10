@@ -30,6 +30,10 @@ const PLACEHOLDER_PATTERNS = [
 ];
 
 export function isPlaceholder(val: string): boolean {
+  if (val.startsWith('xox')) {
+    // Slack tokens legitimately use numeric workspace and user IDs (e.g. xoxb-1234567890-...)
+    return /xox[baprs]-(?:xxxx|test|dummy|SAMPLE|YOUR_|CHANGE_ME)/i.test(val) || /(.)\1{6,}/.test(val);
+  }
   for (const pattern of PLACEHOLDER_PATTERNS) {
     if (pattern.test(val)) return true;
   }
@@ -39,7 +43,7 @@ export function isPlaceholder(val: string): boolean {
 function parseJwtHeader(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split('.');
-    if (parts.length !== 3) return null;
+    if (parts.length < 2 || parts.length > 3) return null;
     let b64 = parts[0].replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4 !== 0) b64 += '=';
     const json = typeof atob !== 'undefined'
@@ -286,7 +290,7 @@ export function detectSecrets(
   }
 
   // Slack tokens and webhooks
-  const slackMatches = code.match(/\bxox[baprs]-[0-9a-zA-Z]{10,48}\b/g);
+  const slackMatches = code.match(/\bxox[baprs]-[0-9a-zA-Z-]{10,80}\b/g);
   if (slackMatches) {
     for (const match of slackMatches) {
       if (isPlaceholder(match)) continue;
@@ -308,7 +312,7 @@ export function detectSecrets(
         scopeStatus,
         timestamp: Date.now(),
         origin,
-        url,
+        url: (maskLocation(url) as string) || url,
         sourceSensor: 'S2',
       });
     }
@@ -666,34 +670,40 @@ export function detectSecrets(
     }
   }
 
-  // 5. SEC-004: JWT IN STATIC SOURCE
-  const jwtRegex = /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_\-+/=]{10,}\b/g;
+  // 5. SEC-004: JWT IN STATIC SOURCE (including unsigned alg=none tokens with empty signature)
+  const jwtRegex = /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_\-+/=]*)?/g;
   const jwtMatches = code.match(jwtRegex);
   if (jwtMatches) {
     for (const token of jwtMatches) {
       if (isPlaceholder(token)) continue;
       const header = parseJwtHeader(token);
       const alg = header?.alg ? String(header.alg) : 'unknown';
+      const isUnsigned = alg.toLowerCase() === 'none' || token.endsWith('.') || !token.split('.')[2];
+      const potential = isUnsigned ? 'high' : 'medium';
+      const title = isUnsigned
+        ? 'Unsigned / alg=none Static JWT Token Disclosed'
+        : `Static JWT Token Exposure (${alg})`;
+
       leads.push({
         id: nextLeadId('SEC-JWT'),
         ruleId: 'SEC-004',
         family: 'F1',
         tier: 'observed',
-        potential: 'medium',
-        confidence: 0.8,
-        title: `Static JWT Token Exposure (${alg})`,
+        potential,
+        confidence: isUnsigned ? 0.95 : 0.8,
+        title,
         needs: ['verify expiration and audience claims'],
         doesNotProve: ['unexpired session state'],
         evidence: {
           preview: maskSecret(token),
           location: maskLocation(url),
-          context: `JWT alg: ${alg}, claims inspected in memory`,
+          context: `JWT alg: ${alg}, isUnsigned: ${isUnsigned}, claims inspected in memory`,
         },
-        tags: ['jwt', 'token', 'auth'],
+        tags: ['jwt', 'token', 'auth', ...(isUnsigned ? ['alg-none', 'unsigned'] : [])],
         scopeStatus,
         timestamp: Date.now(),
         origin,
-        url,
+        url: (maskLocation(url) as string) || url,
         sourceSensor: 'S2',
       });
     }

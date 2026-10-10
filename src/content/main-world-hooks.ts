@@ -10,6 +10,7 @@
 
 export interface MainWorldLeadEventDetail {
   eventType: 'sink' | 'postmessage_call' | 'postmessage_listener' | 'storage_write';
+  nonce?: string;
   sinkName?: string;
   sourceValue?: string;
   targetOrigin?: string;
@@ -20,10 +21,25 @@ export interface MainWorldLeadEventDetail {
   details?: string;
 }
 
+let hooksInstalledInClosure = false;
+const HOOKS_SYMBOL = Symbol.for('__aculyx_main_world_hooks_installed__');
+const s3PerLoadNonce = `aculyx_s3_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+
 export function installMainWorldHooks(): void {
-  const global = globalThis as typeof globalThis & { __aculyxMainWorldHooksInstalled?: boolean };
-  if (global.__aculyxMainWorldHooksInstalled) return;
-  global.__aculyxMainWorldHooksInstalled = true;
+  if (hooksInstalledInClosure) return;
+  const global = globalThis as any;
+  if (global[HOOKS_SYMBOL]) return;
+  hooksInstalledInClosure = true;
+  try {
+    Object.defineProperty(global, HOOKS_SYMBOL, {
+      value: true,
+      writable: false,
+      configurable: false,
+      enumerable: false,
+    });
+  } catch {
+    // Protected by closure boolean
+  }
 
   const dispatchedEventHashes = new Set<string>();
   const recentPostMessages: string[] = [];
@@ -40,6 +56,7 @@ export function installMainWorldHooks(): void {
       const event = new CustomEvent('__ACULYX_MAIN_WORLD_EVENT__', {
         detail: {
           ...detail,
+          nonce: s3PerLoadNonce,
           location: window.location.href,
         },
       });

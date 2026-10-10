@@ -1,6 +1,6 @@
 import type { Lead } from '../types';
 import type { ScopeProfile, ScopeRule } from '../../shared/scope/contracts';
-import { maskSecret, maskLocation, hasCanary } from '../sieve/mask';
+import { maskSecret, maskLocation } from '../sieve/mask';
 
 export interface ExtendedScopeRule extends ScopeRule {
   effect: 'in-scope' | 'out-of-scope';
@@ -125,18 +125,13 @@ export function generateNameOnlyWordlist(params: string[], endpoints: string[]):
 }
 
 function sanitizeReportLead(lead: Lead): Lead {
-  let preview = lead.evidence.preview;
-  let location = lead.evidence.location;
-
-  if (!preview || hasCanary(preview)) {
-    preview = maskSecret(preview || '');
-  }
-  if (!location || hasCanary(location)) {
-    location = maskLocation(location || '');
-  }
+  const preview = maskSecret(lead.evidence.preview || '');
+  const location = maskLocation(lead.evidence.location || '');
+  const url = maskLocation(lead.url || '');
 
   return {
     ...lead,
+    url,
     evidence: {
       ...lead.evidence,
       preview,

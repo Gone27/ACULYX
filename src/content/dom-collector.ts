@@ -269,21 +269,88 @@ export function collectDomLeads(): DomCollectionResult {
   };
 }
 
-export function initDomCollector(): void {
-  const global = globalThis as typeof globalThis & { __aculyxDomCollectorInstalled?: boolean };
-  if (global.__aculyxDomCollectorInstalled) return;
-  global.__aculyxDomCollectorInstalled = true;
+function sanitizeClientUrl(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const sensitive = /token|auth|key|secret|password|sig|jwt|code|session/i;
+    for (const k of Array.from(u.searchParams.keys())) {
+      if (sensitive.test(k) || (u.searchParams.get(k)?.length ?? 0) >= 20) {
+        u.searchParams.set(k, '***');
+      }
+    }
+    return u.toString();
+  } catch {
+    return rawUrl.replace(/([?&][a-zA-Z0-9_-]*(?:token|auth|key|secret|pass|sig)[a-zA-Z0-9_-]*=)[^&#\s]*/gi, '$1***');
+  }
+}
 
-  // Listen for S3 (Main World Hooks) CustomEvents and relay to background
+const ALLOWED_SINKS = new Set([
+  'Element.innerHTML',
+  'Element.outerHTML',
+  'Element.insertAdjacentHTML',
+  'document.write',
+  'document.writeln',
+  'window.eval',
+  'setTimeout(string)',
+  'location.assign',
+  'location.replace',
+]);
+
+let domCollectorInstalledInClosure = false;
+
+export function initDomCollector(): void {
+  if (domCollectorInstalledInClosure) return;
+  domCollectorInstalledInClosure = true;
+
+  let activeS3Nonce: string | null = null;
+
+  // Listen for S3 (Main World Hooks) CustomEvents and relay to background with strict validation
   window.addEventListener('__ACULYX_MAIN_WORLD_EVENT__', (event: Event) => {
     try {
       const customEvent = event as CustomEvent;
-      if (!customEvent.detail) return;
+      const detail = customEvent.detail;
+      if (!detail || typeof detail !== 'object') return;
+
+      // 1. Nonce validation to reject page-forged events
+      const nonce = typeof detail.nonce === 'string' ? detail.nonce : '';
+      if (!nonce.startsWith('aculyx_s3_')) return;
+      if (!activeS3Nonce) {
+        activeS3Nonce = nonce;
+      } else if (activeS3Nonce !== nonce) {
+        return; // Reject forged events with mismatched nonce
+      }
+
+      // 2. Validate eventType whitelist
+      const eventType = detail.eventType;
+      if (!['sink', 'postmessage_call', 'postmessage_listener', 'storage_write'].includes(eventType)) {
+        return;
+      }
+
+      // 3. Validate sink payload
+      if (eventType === 'sink') {
+        if (!detail.sinkName || !ALLOWED_SINKS.has(detail.sinkName)) {
+          return;
+        }
+      }
+
+      // 4. Bound all string fields to prevent memory exhaustion
+      const safeDetail = {
+        eventType,
+        nonce,
+        sinkName: typeof detail.sinkName === 'string' ? detail.sinkName.slice(0, 100) : undefined,
+        sourceValue: typeof detail.sourceValue === 'string' ? detail.sourceValue.slice(0, 256) : undefined,
+        targetOrigin: typeof detail.targetOrigin === 'string' ? detail.targetOrigin.slice(0, 200) : undefined,
+        hasOriginCheck: typeof detail.hasOriginCheck === 'boolean' ? detail.hasOriginCheck : undefined,
+        storageKey: typeof detail.storageKey === 'string' ? detail.storageKey.slice(0, 128) : undefined,
+        tokenShape: typeof detail.tokenShape === 'string' ? detail.tokenShape.slice(0, 100) : undefined,
+        details: typeof detail.details === 'string' ? detail.details.slice(0, 500) : undefined,
+      };
+
       void chrome.runtime?.sendMessage?.({
         type: 'MAIN_WORLD_LEADS_EVENT',
-        url: location.href,
+        url: sanitizeClientUrl(location.href),
         origin: location.origin,
-        event: customEvent.detail,
+        event: safeDetail,
       }).catch(() => undefined);
     } catch {
       // Ignore messaging errors
@@ -295,7 +362,7 @@ export function initDomCollector(): void {
       const data = collectDomLeads();
       void chrome.runtime?.sendMessage?.({
         type: 'DOM_LEADS_COLLECTED',
-        url: location.href,
+        url: sanitizeClientUrl(location.href),
         origin: location.origin,
         data,
       }).catch(() => undefined);

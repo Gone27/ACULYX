@@ -1,7 +1,13 @@
 import type { Lead, Masked } from '../types';
-import { maskSecret, maskLocation, hasCanary, sha256Hex } from '../sieve/mask';
+import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
 
 const MAX_LEADS_PER_ORIGIN = 200;
+const SESSION_STORAGE_KEY = 'aculyx_session_leads_v2';
+
+interface SerializedSessionStore {
+  leads: Lead[];
+  tabToLeads: Array<[number, string[]]>;
+}
 
 export class LeadStore {
   /** Map from origin -> list of leads for that origin (bounded to MAX_LEADS_PER_ORIGIN) */
@@ -16,29 +22,105 @@ export class LeadStore {
   /** Map from tabId -> Set of leadIds */
   private tabToLeads = new Map<number, Set<string>>();
 
+  private saveTimeout: any = null;
+  private isInitialized = false;
+
+  constructor() {
+    void this.init();
+  }
+
+  public async init(): Promise<void> {
+    if (this.isInitialized) return;
+    this.isInitialized = true;
+    await this.loadFromSession();
+  }
+
+  private hasStorageSession(): boolean {
+    return typeof chrome !== 'undefined' && Boolean(chrome?.storage?.session);
+  }
+
+  private async loadFromSession(): Promise<void> {
+    if (!this.hasStorageSession()) return;
+    try {
+      const res = await chrome.storage.session.get([SESSION_STORAGE_KEY]);
+      const data = res[SESSION_STORAGE_KEY] as SerializedSessionStore | undefined;
+      if (!data || !Array.isArray(data.leads)) return;
+
+      this.originLeads.clear();
+      this.leadById.clear();
+      this.dedupMap.clear();
+      this.tabToLeads.clear();
+
+      for (const rawLead of data.leads) {
+        const lead = this.sanitizeLeadEvidence(rawLead);
+        const origin = lead.origin;
+        const dedupKey = this.computeDedupKey(lead);
+
+        this.leadById.set(lead.id, lead);
+        this.dedupMap.set(dedupKey, lead.id);
+
+        if (!this.originLeads.has(origin)) {
+          this.originLeads.set(origin, []);
+        }
+        this.originLeads.get(origin)!.push(lead);
+      }
+
+      if (Array.isArray(data.tabToLeads)) {
+        for (const [tabId, leadIds] of data.tabToLeads) {
+          if (Array.isArray(leadIds)) {
+            this.tabToLeads.set(tabId, new Set(leadIds));
+          }
+        }
+      }
+    } catch {
+      // Graceful fallback to empty in-memory state
+    }
+  }
+
+  private scheduleSave(): void {
+    if (!this.hasStorageSession()) return;
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+    }
+    this.saveTimeout = setTimeout(() => {
+      void this.persistToSession();
+    }, 150);
+  }
+
+  private async persistToSession(): Promise<void> {
+    if (!this.hasStorageSession()) return;
+    try {
+      const allLeads = Array.from(this.leadById.values());
+      const serializedTabs: Array<[number, string[]]> = [];
+      for (const [tabId, ids] of this.tabToLeads.entries()) {
+        serializedTabs.push([tabId, Array.from(ids)]);
+      }
+      const payload: SerializedSessionStore = {
+        leads: allLeads,
+        tabToLeads: serializedTabs,
+      };
+      await chrome.storage.session.set({ [SESSION_STORAGE_KEY]: payload });
+    } catch {
+      // Storage quota or communication error ignored
+    }
+  }
+
   private computeDedupKey(lead: Lead): string {
     const raw = `${lead.ruleId}|${lead.evidence.location}|${lead.evidence.preview}`;
     return sha256Hex(raw).slice(0, 16);
   }
 
   /**
-   * Sanitizes evidence to guarantee it conforms to Masked branding and never leaks raw secrets.
+   * Sanitizes evidence to guarantee it conforms to Masked branding and never leaks raw secrets or query tokens.
    */
   private sanitizeLeadEvidence(lead: Lead): Lead {
-    let preview = lead.evidence.preview;
-    let location = lead.evidence.location;
-
-    // Safety checks against unmasked or leaked canary data
-    if (!preview || hasCanary(preview)) {
-      preview = maskSecret(preview || '');
-    }
-
-    if (!location || hasCanary(location)) {
-      location = maskLocation(location || '');
-    }
+    const preview = maskSecret(lead.evidence.preview || '');
+    const location = maskLocation(lead.evidence.location || '');
+    const url = (maskLocation(lead.url || '') as string) || lead.url;
 
     return {
       ...lead,
+      url,
       evidence: {
         ...lead.evidence,
         preview: preview as Masked<string>,
@@ -69,6 +151,7 @@ export class LeadStore {
       if (tabId !== undefined) {
         this.associateTabLead(tabId, existing.id);
       }
+      this.scheduleSave();
       return;
     }
 
@@ -95,6 +178,7 @@ export class LeadStore {
     if (tabId !== undefined) {
       this.associateTabLead(tabId, lead.id);
     }
+    this.scheduleSave();
   }
 
   public associateTabLead(tabId: number, leadId: string): void {
@@ -140,6 +224,7 @@ export class LeadStore {
       this.dedupMap.delete(this.computeDedupKey(lead));
     }
     this.originLeads.delete(origin);
+    this.scheduleSave();
   }
 
   public clearAll(): void {
@@ -147,6 +232,9 @@ export class LeadStore {
     this.leadById.clear();
     this.dedupMap.clear();
     this.tabToLeads.clear();
+    if (this.hasStorageSession()) {
+      void chrome.storage.session.remove([SESSION_STORAGE_KEY]).catch(() => undefined);
+    }
   }
 
   public updateLeadTriage(id: string, state?: Lead['triageState'], pinned?: boolean): void {
@@ -159,6 +247,7 @@ export class LeadStore {
     if (pinned !== undefined) {
       lead.pinned = pinned;
     }
+    this.scheduleSave();
   }
 }
 

@@ -169,7 +169,7 @@ export async function handleDomLeadsCollected(
     for (const f of data.forms) {
       if (f.action) {
         await recordEndpoint({
-          path: f.action,
+          path: (maskLocation(f.action) as string) || f.action,
           origin,
           method: f.method,
           tags: ['form'],
@@ -442,29 +442,34 @@ export function handleMainWorldEvent(
   settings: SettingsV2
 ): LeadStateUpdateMessage {
   const { url, origin, event, tabId } = msg;
-  const scopeStatus = resolveScopeStatus(url, settings);
+  if (!event || typeof event !== 'object' || typeof event.eventType !== 'string') {
+    return getLeadsState(tabId, origin);
+  }
+
+  const sanitizedUrl = (maskLocation(url || '') as string) || url;
+  const scopeStatus = resolveScopeStatus(sanitizedUrl, settings);
 
   if (event.eventType === 'sink') {
     const lead: Lead = {
       id: nextId('SINK-TAINT'),
       ruleId: 'PAR-004',
       family: 'F5',
-      tier: 'observed',
-      potential: 'high',
-      confidence: 0.9,
+      tier: 'weak',
+      potential: 'medium',
+      confidence: 0.7,
       title: `Client-Side DOM Sink Execution with Controlled Input (${event.sinkName || 'sink'})`,
       needs: ['audit whether input reaches sink unescaped to verify DOM XSS'],
       doesNotProve: ['exploitable DOM XSS execution'],
       evidence: {
         preview: maskSecret(event.sourceValue || 'tainted-input'),
-        location: maskLocation(url),
+        location: maskLocation(sanitizedUrl),
         context: event.details || `Assigned to ${event.sinkName}`,
       },
       tags: ['dom-xss', 'sink', 'taint-lite', event.sinkName || 'sink'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: sanitizedUrl,
       sourceSensor: 'S3',
     };
     globalLeadStore.addLead(lead, tabId);
@@ -473,22 +478,22 @@ export function handleMainWorldEvent(
       id: nextId('POST-WILD'),
       ruleId: 'IFR-001',
       family: 'F8',
-      tier: 'observed',
-      potential: 'medium',
-      confidence: 0.85,
+      tier: 'weak',
+      potential: 'low',
+      confidence: 0.65,
       title: `window.postMessage Dispatched to Wildcard Target Origin "*"`,
       needs: ['inspect message payload and determine if sensitive tokens or state can be intercepted'],
       doesNotProve: ['unauthorized cross-origin token interception'],
       evidence: {
         preview: maskSecret(event.details || 'postMessage(*)'),
-        location: maskLocation(url),
+        location: maskLocation(sanitizedUrl),
         context: event.details,
       },
       tags: ['postmessage', 'wildcard-origin', 'cross-origin'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: sanitizedUrl,
       sourceSensor: 'S3',
     };
     globalLeadStore.addLead(lead, tabId);
@@ -497,22 +502,22 @@ export function handleMainWorldEvent(
       id: nextId('POST-NO-ORIGIN'),
       ruleId: 'IFR-002',
       family: 'F8',
-      tier: 'observed',
-      potential: 'medium',
-      confidence: 0.8,
+      tier: 'whisper',
+      potential: 'info',
+      confidence: 0.6,
       title: `window message Event Listener Registered Without Origin Validation Check`,
       needs: ['verify if listener handler processes untrusted cross-origin postMessage payloads'],
       doesNotProve: ['cross-origin message manipulation'],
       evidence: {
         preview: maskSecret(event.details || 'message listener missing origin check'),
-        location: maskLocation(url),
+        location: maskLocation(sanitizedUrl),
         context: event.details,
       },
       tags: ['postmessage', 'missing-origin-check', 'event-listener'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: sanitizedUrl,
       sourceSensor: 'S3',
     };
     globalLeadStore.addLead(lead, tabId);
@@ -521,22 +526,22 @@ export function handleMainWorldEvent(
       id: nextId('STOR-TOKEN'),
       ruleId: 'AUTH-003',
       family: 'F4',
-      tier: 'observed',
-      potential: 'low',
-      confidence: 0.9,
-      title: `Sensitive Token Stored in Web Storage (${event.storageKey})`,
+      tier: 'whisper',
+      potential: 'info',
+      confidence: 0.65,
+      title: `Sensitive Token Stored in Web Storage (${event.storageKey || 'key'})`,
       needs: ['check if tokens stored in localStorage are vulnerable to XSS exfiltration'],
       doesNotProve: ['token compromise'],
       evidence: {
         preview: maskSecret(event.storageKey || 'storage-token'),
-        location: maskLocation(url),
+        location: maskLocation(sanitizedUrl),
         context: event.details || `Key: ${event.storageKey}`,
       },
       tags: ['storage', 'jwt', 'auth-token', event.storageKey || 'key'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: sanitizedUrl,
       sourceSensor: 'S3',
     };
     globalLeadStore.addLead(lead, tabId);
@@ -637,7 +642,8 @@ export function getLeadsState(
 export async function handleHunterProbe(
   probe: HunterProbeRequest,
   scopeStatus: Lead['scopeStatus'] = 'unknown',
-  config: HunterConfig = { enabled: true, maxRequestsPerSecond: 1 }
+  config: HunterConfig = { enabled: true, maxRequestsPerSecond: 1 },
+  confirmedByUser = false
 ): Promise<HunterLedgerEntry> {
-  return executeHunterProbe(probe, scopeStatus, config);
+  return executeHunterProbe(probe, scopeStatus, config, confirmedByUser);
 }

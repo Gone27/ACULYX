@@ -37,10 +37,25 @@ async function throttle(maxReqPerSec: number): Promise<void> {
 export async function executeHunterProbe(
   probe: HunterProbeRequest,
   scopeStatus: Lead['scopeStatus'],
-  config: HunterConfig
+  config: HunterConfig,
+  confirmedByUser = false
 ): Promise<HunterLedgerEntry> {
   const entryId = nextHunterId();
   const timestamp = Date.now();
+
+  // User Confirmation Gate: Probe must be explicitly authorized by the user
+  if (!confirmedByUser) {
+    const unconfirmedEntry: HunterLedgerEntry = {
+      id: entryId,
+      timestamp,
+      request: probe,
+      confirmedByUser: false,
+      scopeStatus,
+      resultNotes: 'Blocked: Probe was not explicitly confirmed by the user.',
+    };
+    recordLedgerEntry(unconfirmedEntry);
+    return unconfirmedEntry;
+  }
 
   // Scope Gating Check 1: strictly in-scope only
   if (scopeStatus !== 'in-scope') {
@@ -48,7 +63,7 @@ export async function executeHunterProbe(
       id: entryId,
       timestamp,
       request: probe,
-      confirmedByUser: false,
+      confirmedByUser,
       scopeStatus,
       resultNotes: `Blocked: Target URL is ${scopeStatus}. Active validation is strictly forbidden outside declared scope.`,
     };
@@ -62,7 +77,7 @@ export async function executeHunterProbe(
       id: entryId,
       timestamp,
       request: probe,
-      confirmedByUser: false,
+      confirmedByUser,
       scopeStatus,
       resultNotes: 'Blocked: Hunter active tier is disabled in configuration.',
     };
@@ -78,7 +93,7 @@ export async function executeHunterProbe(
       id: entryId,
       timestamp,
       request: probe,
-      confirmedByUser: false,
+      confirmedByUser,
       scopeStatus,
       resultNotes: `Prohibited method: Only GET, HEAD, and OPTIONS are allowed. Method '${method}' is disallowed for safe verification.`,
     };
@@ -133,13 +148,17 @@ export async function executeHunterProbe(
   } catch (err) {
     const elapsedMs = Date.now() - startTime;
     const msg = err instanceof Error ? err.message : String(err);
+    const isCspError = msg.includes('Failed to fetch') || msg.includes('CSP') || msg.includes('Refused to connect');
+    const hint = isCspError
+      ? ' (Active HTTP probes are blocked by passive CSP connect-src \'none\' in standard build. Use ACULYX Hunter build flavor).'
+      : '';
     const errorEntry: HunterLedgerEntry = {
       id: entryId,
       timestamp,
       request: probe,
-      confirmedByUser: false,
+      confirmedByUser,
       scopeStatus,
-      resultNotes: `Probe network error: ${msg} (${elapsedMs}ms)`,
+      resultNotes: `Probe network error: ${msg}${hint} (${elapsedMs}ms)`,
     };
     recordLedgerEntry(errorEntry);
     return errorEntry;

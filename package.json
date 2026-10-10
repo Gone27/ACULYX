@@ -13,6 +13,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:firefox": "vite build && node scripts/build-firefox.js",
+    "build:hunter": "vite build && node scripts/build-hunter.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -5,9 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-10-08
+## [2.0.0] - 2026-10-10
 
 ### Added
+- **Lead Radar Multi-Sensor Detection Architecture (v2)**:
+  - **S1 (Passive Network Headers)**: Continuous passive extraction from response headers and metadata.
+  - **S2 (DOM Collector)**: Isolated-world client script extracting forms, scripts, iframes, meta tags, comments, framework hydration state (`__NEXT_DATA__`, `__NUXT_DATA__`, `__INITIAL_STATE__`), resource timings, and storage key names (never values).
+  - **S3 (Deep Mode Sinks & Taint Analysis)**: Opt-in MAIN-world execution hooking dangerous DOM sinks (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, `setTimeout(string)`, `location.assign`, `location.replace`), wildcard `postMessage` calls, listeners without origin checks, and sensitive token writes to `Storage.prototype.setItem`. Protected with private closure isolation and unforgeable `Symbol` guards.
+  - **S4 (DevTools Network Body Analyzer)**: Dedicated Chrome DevTools panel ("ACULYX Leads" at `src/devtools/panel.html`) inspecting live network response bodies in-memory via `chrome.devtools.network.onRequestFinished` for debug stack traces (F7), leaked credentials (F1), and hidden endpoints (F2).
+  - **S5 (Worker & Cache Surface)**: Service worker registration and cache surface intelligence.
+- **Lead Radar Detector Families (F1–F8)**:
+  - **F1 (Secrets & Credentials)**: High-precision secret detection across AWS keys (`AKIA...`), GitHub PATs/fine-grained tokens, Stripe secrets, Slack bot tokens (`xoxb-...` with multi-segment IDs), unsigned JWTs (`alg=none`), MongoDB/PostgreSQL URIs, and private key PEM blocks. Zero false positives on test corpora, with strict classification separating public identifiers (e.g. `pk_live_...`) from secrets.
+  - **F2 (Endpoints & Hidden Surface)**: Harvests internal REST routes, admin paths, and GraphQL queries from client bundles and fetch calls.
+  - **F3 (Source Maps)**: Discovers `sourceMappingURL` references, enabling source inspection for unminified codebases.
+  - **F4 (Auth & OAuth)**: Detects implicit OAuth grants (`response_type=token`), missing CSRF on state-changing forms, and unhardened storage keys.
+  - **F5 (Parameter Intelligence)**: Classifies query parameters into vulnerability classes (SSRF, IDOR, Open Redirect, SQLi, LFI).
+  - **F6 (Security Headers)**: Flags missing hardening headers, overly permissive CORS, and weak cookies.
+  - **F7 (Response Bodies & Errors)**: Discloses framework stack traces (Django, Flask/Werkzeug, Spring, Laravel, ASP.NET), GraphQL error leaks, and JSON excessive data exposure.
+  - **F8 (Reconnaissance & Cloud Storage)**: Identifies AWS S3 buckets, Google Cloud Storage buckets, Azure Blob containers, and cross-origin iframe scopes.
+- **The Sieve Privacy & Masking Engine (`src/leads/sieve/mask.ts`)**:
+  - Invariant: Raw secrets and authentication tokens NEVER enter memory or storage.
+  - Formats secrets into redacted previews preserving only prefix, suffix, length, and 64-bit cryptographic entropy hash (e.g., `AKIA...GH (len 20) [hash]`).
+  - Automatic query parameter masking across all constructed leads and recon data, stripping credentials and high-entropy parameters from URLs.
+- **MV3 Session Storage Persistence (`chrome.storage.session`)**:
+  - Replaces volatile in-memory Maps with debounced persistence into `chrome.storage.session`, ensuring leads and tab associations survive service worker sleep and wake cycles cleanly.
+- **Chains & Attack Surface Ranking**:
+  - Correlates multi-lead attack paths into composite exploit scenarios (e.g., Open Redirect + OAuth Implicit Grant &rarr; Account Takeover).
+  - Dynamic prioritization algorithm balancing finding potential, confidence, evidence tier, and scope status.
+- **Hunter Active Verification Engine & Hunter Edition Build Flavor**:
+  - Controlled, rate-limited, user-confirmed active HTTP probes (GET, HEAD, OPTIONS) for safe out-of-band vulnerability verification.
+  - Recomputes scope status on background and enforces explicit user confirmation.
+  - Introduced dedicated **ACULYX Hunter Edition** build flavor (`npm run build:hunter`) outputting to `dist-hunter/` with configured active probe CSP permissions (`connect-src 'self' http: https:`).
 - **ACULYX Canonical Identity & Branding**:
   - Rebranded the extension from SecCheck to **ACULYX** (descriptor: *Header & Cookie Security Checker*).
   - Authored and owned by **Dhyan Patel**; updated `LICENSE` to Copyright 2024–2026 Dhyan Patel.

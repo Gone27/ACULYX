@@ -36,6 +36,38 @@ describe('Detector F1: Secrets', () => {
     expect(dbLead?.tags).toContain('database');
   });
 
+  it('detects Slack xoxb- bot token with numeric ID segments', () => {
+    const slackToken = ['xoxb', '1234567890', '1234567890', 'abcdef123456'].join('-');
+    const code = `const token = "${slackToken}";`;
+    const leads = detectSecrets(code, 'https://example.com/slack.js', 'in-scope');
+    const slackLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('slack'));
+    expect(slackLead).toBeDefined();
+    expect(slackLead?.potential).toBe('high');
+    expect(slackLead?.evidence.preview).toContain('xoxb...');
+  });
+
+  it('detects unsigned JWT with alg=none and empty signature', () => {
+    const jwt = ['eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0', 'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0', ''].join('.');
+    const code = `const authJwt = "${jwt}";`;
+    const leads = detectSecrets(code, 'https://example.com/auth.js', 'in-scope');
+    const jwtLead = leads.find(l => l.ruleId === 'SEC-004');
+    expect(jwtLead).toBeDefined();
+    expect(jwtLead?.potential).toBe('high');
+    expect(jwtLead?.title).toContain('alg=none');
+    expect(jwtLead?.tags).toContain('alg-none');
+  });
+
+  it('sanitizes query parameters in lead url and location to prevent secret leakage', () => {
+    const code = 'const apiKey = "AKIAIOSFODNN7EXAMPLE";';
+    const rawUrl = 'https://example.com/api?token=SUPERSECRETTOKEN123456789&secret=PRIVATEKEY';
+    const leads = detectSecrets(code, rawUrl, 'in-scope');
+    const lead = leads[0];
+    expect(lead).toBeDefined();
+    expect(lead.url).not.toContain('SUPERSECRETTOKEN');
+    expect(lead.url).toContain('token=***');
+    expect(lead.evidence.location).not.toContain('SUPERSECRETTOKEN');
+  });
+
   it('filters out common placeholders', () => {
     const code = 'const fake = "AKIA_YOUR_KEY_HERE_123"; const dummy = "xxxx-xxxx-xxxx";';
     const leads = detectSecrets(code, 'https://example.com/test.js', 'in-scope');

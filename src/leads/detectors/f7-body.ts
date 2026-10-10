@@ -58,7 +58,7 @@ export function detectBodyLeads(
         scopeStatus,
         timestamp: Date.now(),
         origin,
-        url,
+        url: (maskLocation(url) as string) || url,
         sourceSensor: 'S1',
         remediation: 'Disable debug mode and implement generic error pages in production.',
       });
@@ -114,7 +114,7 @@ export function detectBodyLeads(
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url,
+          url: (maskLocation(url) as string) || url,
           sourceSensor: 'S1',
           remediation: 'Use explicit DTO/serializer allowlists rather than serializing internal entities directly.',
         });
@@ -144,7 +144,7 @@ export function detectBodyLeads(
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: (maskLocation(url) as string) || url,
       sourceSensor: 'S1',
     });
   }

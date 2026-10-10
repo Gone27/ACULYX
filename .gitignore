@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-firefox/
+dist-hunter/
+*.zip
 *.local
 .env
 .DS_Store

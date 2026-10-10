@@ -28,6 +28,7 @@ import {
   handleLeadAction,
   getLeadsState,
   handleHunterProbe,
+  resolveScopeStatus,
 } from './leads-handler';
 import { getReconMemory, clearReconMemory } from '../leads';
 import { runRules, runApiRules } from '../rules/engine';
@@ -135,6 +136,10 @@ export class TabActionQueue {
 
 export const tabActionQueue = new TabActionQueue();
 export let currentResetEpoch = getStorageResetEpoch();
+export const sensorInjectionFailures = {
+  s2: 0,
+  s3: 0,
+};
 
 onEpochChange((newEpoch: number): void => {
   currentResetEpoch = newEpoch;
@@ -957,15 +962,21 @@ chrome.webNavigation.onCompleted.addListener((details): void => {
   if (typeof chrome.scripting !== 'undefined') {
     void chrome.scripting.executeScript({
       target: { tabId: details.tabId, frameIds: [0] },
-      files: ['src/content/dom-collector.ts'],
-    }).catch(() => undefined);
+      files: ['content/dom-collector.js'],
+    }).catch((err: unknown) => {
+      sensorInjectionFailures.s2++;
+      console.warn(`[ACULYX] S2 dom-collector injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s2}):`, err);
+    });
 
     if (currentSettings.deepModeEnabled) {
       void chrome.scripting.executeScript({
         target: { tabId: details.tabId, frameIds: [0] },
         world: 'MAIN',
-        files: ['src/content/main-world-hooks.ts'],
-      }).catch(() => undefined);
+        files: ['content/main-world-hooks.js'],
+      }).catch((err: unknown) => {
+        sensorInjectionFailures.s3++;
+        console.warn(`[ACULYX] S3 main-world-hooks injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s3}):`, err);
+      });
     }
   }
 });
@@ -1697,7 +1708,11 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'HUNTER_RUN_PROBE') {
-      void handleHunterProbe(message.probe, message.scopeStatus, currentSettings.hunterConfig).then((entry) => {
+      const probe = message.probe;
+      const targetUrl = probe?.targetUrl || '';
+      const recomputedScope = resolveScopeStatus(targetUrl, currentSettings);
+      const confirmedByUser = message.confirmedByUser === true;
+      void handleHunterProbe(probe, recomputedScope, currentSettings.hunterConfig, confirmedByUser).then((entry) => {
         sendResponse({ type: 'HUNTER_RUN_PROBE_RESPONSE', entry });
       });
       return true;

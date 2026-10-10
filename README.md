@@ -28,6 +28,16 @@ Because ACULYX evaluates traffic within the browser's own authenticated network 
 
 ## Features
 
+- **Lead Radar Multi-Sensor Surface Intelligence (v2)**:
+  - **S1 (Passive Headers)**: HTTP response header extraction and policy evaluation.
+  - **S2 (DOM Collector)**: Client-side DOM extraction of forms, scripts, meta tags, framework hydration state, and storage keys without values.
+  - **S3 (Deep Mode Sinks & Taint Analysis)**: MAIN-world hooking of DOM sinks (`innerHTML`, `document.write`, `eval`, `location.assign`), wildcard postMessage calls, and listener origin checks.
+  - **S4 (DevTools Network Body Sensor)**: In-memory live network response inspection via Chrome DevTools (`src/devtools/panel.html`) for stack traces, credentials, and exposed endpoints.
+  - **S5 (Worker & Cache Surface)**: Service worker registration and cache surface auditing.
+- **Lead Radar Detector Families (F1–F8)**: High-recall, zero-false-positive detector suite covering Secrets (F1), Endpoints (F2), Source Maps (F3), Auth/OAuth (F4), Params (F5), Headers (F6), Response Bodies (F7), and Cloud Reconnaissance (F8).
+- **The Sieve Privacy & Masking Layer**: Ensures zero raw secrets or sensitive query tokens leak into memory, storage, or exports, backed by 64-bit cryptographic entropy hashing.
+- **MV3 Storage Session Persistence**: Seamless session recovery across background service worker idle/sleep cycles via `chrome.storage.session`.
+- **Hunter Active Verification Engine**: Controlled, user-confirmed active HTTP probes for out-of-band vulnerability verification. Available via the dedicated Hunter Edition (`npm run build:hunter`).
 - **Real-Time Passive Inspection**: Evaluates response headers and cookie configurations continuously during active navigation.
 - **Two-Stage Redirect Tracking**: Observes headers at `onHeadersReceived` and `onResponseStarted` across every redirect hop to catch intermediate header stripping and internal HSTS upgrades.
 - **Privacy-Safe Cookie Jar Correlation**: Cross-references `Set-Cookie` response headers with the live browser cookie jar to identify prefix compliance (`__Host-`, `__Secure-`), missing `HttpOnly`/`Secure` flags, `SameSite` misconfigurations, and CHIPS partitioning. **Cookie values are never accessed, persisted, or exported.**
