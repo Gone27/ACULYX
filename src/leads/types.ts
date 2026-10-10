@@ -12,8 +12,8 @@ export type Masked<T> = T & { readonly [MASKED]: true };
 export interface LeadEvidence {
   preview: Masked<string>;
   location: Masked<string>;
-  context?: string;
-  extractedNames?: string[];
+  context?: string | undefined;
+  extractedNames?: string[] | undefined;
 }
 
 export interface Lead {
@@ -33,12 +33,12 @@ export interface Lead {
   origin: string;
   url: string;
   sourceSensor: LeadSensor;
-  chainIds?: string[];
-  priority?: number;
-  novelty?: boolean;
-  pinned?: boolean;
-  triageState?: 'open' | 'triaged' | 'false_positive' | 'resolved';
-  remediation?: string;
+  chainIds?: string[] | undefined;
+  priority?: number | undefined;
+  novelty?: boolean | undefined;
+  pinned?: boolean | undefined;
+  triageState?: 'open' | 'triaged' | 'false_positive' | 'resolved' | undefined;
+  remediation?: string | undefined;
 }
 
 export interface ChainRule {
@@ -110,8 +110,9 @@ export interface HunterLedgerEntry {
 
 export interface HunterConfig {
   enabled: boolean;
-  programHeaderName?: string;
-  programHeaderValue?: string;
-  customUserAgent?: string;
+  programHeaderName?: string | undefined;
+  programHeaderValue?: string | undefined;
+  customUserAgent?: string | undefined;
   maxRequestsPerSecond: number;
+  customHeaders?: Record<string, string> | undefined;
 }

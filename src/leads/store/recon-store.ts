@@ -21,12 +21,19 @@ function hasChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && Boolean(chrome?.storage?.local);
 }
 
+interface SerializedReconMemory {
+  hosts?: ReconHost[];
+  params?: ReconParam[];
+  endpoints?: ReconEndpoint[];
+  buckets?: ReconBucket[];
+}
+
 export async function getReconMemory(): Promise<ReconMemory> {
   if (hasChromeStorage()) {
     try {
       const result = await chrome.storage.local.get([STORAGE_KEY]);
-      const data = result[STORAGE_KEY];
-      if (data && typeof data === 'object') {
+      const data = result[STORAGE_KEY] as SerializedReconMemory | undefined;
+      if (typeof data === 'object' && data !== null) {
         inMemoryCache = {
           hosts: Array.isArray(data.hosts) ? data.hosts : [],
           params: Array.isArray(data.params) ? data.params : [],
@@ -60,9 +67,9 @@ async function persistReconMemory(mem: ReconMemory): Promise<void> {
 export async function recordHost(host: ReconHost): Promise<void> {
   const mem = await getReconMemory();
   const existingIdx = mem.hosts.findIndex(h => h.hostname === host.hostname);
+  const existing = existingIdx !== -1 ? mem.hosts[existingIdx] : undefined;
 
-  if (existingIdx !== -1) {
-    const existing = mem.hosts[existingIdx];
+  if (existing !== undefined) {
     existing.lastSeen = Math.max(existing.lastSeen, host.lastSeen);
     if (host.scopeStatus !== 'unknown') {
       existing.scopeStatus = host.scopeStatus;
@@ -85,12 +92,12 @@ export async function recordParam(param: ReconParam): Promise<void> {
   const existingIdx = mem.params.findIndex(
     p => p.name === param.name && p.origin === param.origin
   );
+  const existing = existingIdx !== -1 ? mem.params[existingIdx] : undefined;
 
-  if (existingIdx !== -1) {
-    const existing = mem.params[existingIdx];
+  if (existing !== undefined) {
     const mergedContexts = Array.from(new Set([...existing.contexts, ...param.contexts]));
     existing.contexts = mergedContexts;
-    if (param.category && (!existing.category || existing.category === 'general')) {
+    if (typeof param.category === 'string' && param.category.length > 0 && (existing.category === undefined || existing.category === 'general')) {
       existing.category = param.category;
     }
     mem.params.splice(existingIdx, 1);
@@ -98,7 +105,7 @@ export async function recordParam(param: ReconParam): Promise<void> {
   } else {
     mem.params.push({
       ...param,
-      contexts: [...(param.contexts || [])],
+      contexts: [...(param.contexts !== undefined ? param.contexts : [])],
     });
     if (mem.params.length > LIMITS.maxParams) {
       mem.params.shift();
@@ -110,14 +117,16 @@ export async function recordParam(param: ReconParam): Promise<void> {
 
 export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
   const mem = await getReconMemory();
-  const method = ep.method || 'GET';
-  const sanitizedPath = (maskLocation(ep.path || '') as string) || ep.path;
+  const method = typeof ep.method === 'string' && ep.method.length > 0 ? ep.method : 'GET';
+  const rawPath = ep.path;
+  const maskedPath = maskLocation(typeof rawPath === 'string' && rawPath.length > 0 ? rawPath : '');
+  const sanitizedPath = maskedPath.length > 0 ? maskedPath : ep.path;
   const existingIdx = mem.endpoints.findIndex(
-    e => e.origin === ep.origin && e.path === sanitizedPath && (e.method || 'GET') === method
+    e => e.origin === ep.origin && e.path === sanitizedPath && (typeof e.method === 'string' && e.method.length > 0 ? e.method : 'GET') === method
   );
+  const existing = existingIdx !== -1 ? mem.endpoints[existingIdx] : undefined;
 
-  if (existingIdx !== -1) {
-    const existing = mem.endpoints[existingIdx];
+  if (existing !== undefined) {
     const mergedTags = Array.from(new Set([...existing.tags, ...ep.tags]));
     existing.tags = mergedTags;
     if (ep.status !== undefined) {
@@ -129,7 +138,7 @@ export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
     mem.endpoints.push({
       ...ep,
       path: sanitizedPath,
-      tags: [...(ep.tags || [])],
+      tags: [...(ep.tags !== undefined ? ep.tags : [])],
     });
     if (mem.endpoints.length > LIMITS.maxEndpoints) {
       mem.endpoints.shift();
@@ -144,9 +153,9 @@ export async function recordBucket(bucket: ReconBucket): Promise<void> {
   const existingIdx = mem.buckets.findIndex(
     b => b.bucket === bucket.bucket && b.provider === bucket.provider && b.origin === bucket.origin
   );
+  const existing = existingIdx !== -1 ? mem.buckets[existingIdx] : undefined;
 
-  if (existingIdx !== -1) {
-    const existing = mem.buckets[existingIdx];
+  if (existing !== undefined) {
     mem.buckets.splice(existingIdx, 1);
     mem.buckets.push(existing);
   } else {

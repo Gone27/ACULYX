@@ -53,7 +53,7 @@ export function detectEndpoints(
     let match: RegExpExecArray | null;
     while ((match = regex.exec(code)) !== null) {
       const path = match[1];
-      if (path && path.length > 2 && !discoveredPaths.has(path)) {
+      if (path !== undefined && path.length > 2 && !discoveredPaths.has(path)) {
         discoveredPaths.add(path);
 
         const tags: string[] = ['endpoint', 'discovered-url'];
@@ -96,12 +96,13 @@ export function detectEndpoints(
     }
   }
 
-  // 2. END-002: Router Tables & Webpack Chunk Maps
   const routerPathRegex = /(?:<Route\s+[^>]*path=["']([^"']+)["']|path:\s*["'](\/[a-zA-Z0-9_\-./]+)["'])/g;
   let routeMatch: RegExpExecArray | null;
   while ((routeMatch = routerPathRegex.exec(code)) !== null) {
-    const route = routeMatch[1] || routeMatch[2];
-    if (route && !discoveredPaths.has(route)) {
+    const r1 = routeMatch[1];
+    const r2 = routeMatch[2];
+    const route = r1 !== undefined && r1.length > 0 ? r1 : (r2 !== undefined && r2.length > 0 ? r2 : undefined);
+    if (route !== undefined && route.length > 0 && !discoveredPaths.has(route)) {
       discoveredPaths.add(route);
       const tags = ['router-path'];
       for (const [kw, t] of Object.entries(SEMANTIC_TAGS)) {
@@ -157,13 +158,13 @@ export function detectEndpoints(
     });
   }
 
-  // 3. END-003: GraphQL operations, introspection & endpoint
   const gqlQueryRegex = /(?:query|mutation|subscription)\s+([A-Za-z0-9_]+)\s*[{]/g;
   let gqlMatch: RegExpExecArray | null;
   const gqlOps: string[] = [];
   while ((gqlMatch = gqlQueryRegex.exec(code)) !== null) {
-    if (gqlMatch[1]) {
-      gqlOps.push(gqlMatch[1]);
+    const op = gqlMatch[1];
+    if (op !== undefined && op.length > 0) {
+      gqlOps.push(op);
     }
   }
 

@@ -159,7 +159,7 @@ export function detectReflectedInput(
   scopeStatus: Lead['scopeStatus'] = 'unknown'
 ): Lead[] {
   const leads: Lead[] = [];
-  if (!html || !params) return leads;
+  if (html.length === 0) return leads;
 
   const origin = (() => {
     try {

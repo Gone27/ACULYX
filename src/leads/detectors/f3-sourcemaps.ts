@@ -14,7 +14,7 @@ export function detectSourceMaps(
   scopeStatus: Lead['scopeStatus'] = 'unknown'
 ): Lead[] {
   const leads: Lead[] = [];
-  if (!code && !headers) return leads;
+  if (code.length === 0 && Object.keys(headers).length === 0) return leads;
 
   const origin = (() => {
     try {
@@ -25,11 +25,14 @@ export function detectSourceMaps(
   })();
 
   // 1. MAP-001: sourceMappingURL comment or header
-  const smHeader = headers['sourcemap'] || headers['x-sourcemap'];
-  const smCommentMatch = code ? code.match(/(?:\/\/|[\/][*])#\s*sourceMappingURL=([^\s*]+)/) : null;
-  const smTarget = smHeader || (smCommentMatch ? smCommentMatch[1] : null);
+  const h1 = headers['sourcemap'];
+  const h2 = headers['x-sourcemap'];
+  const smHeader = typeof h1 === 'string' && h1.length > 0 ? h1 : (typeof h2 === 'string' && h2.length > 0 ? h2 : undefined);
+  const smCommentMatch = code.length > 0 ? code.match(/(?:\/\/|[\/][*])#\s*sourceMappingURL=([^\s*]+)/) : null;
+  const smComment = smCommentMatch !== null && smCommentMatch[1] !== undefined ? smCommentMatch[1] : undefined;
+  const smTarget = smHeader !== undefined ? smHeader : smComment;
 
-  if (smTarget) {
+  if (smTarget !== undefined && smTarget.length > 0) {
     leads.push({
       id: nextLeadId('MAP-REF'),
       ruleId: 'MAP-001',
@@ -43,7 +46,7 @@ export function detectSourceMaps(
       evidence: {
         preview: maskSecret(smTarget),
         location: maskLocation(url),
-        context: smHeader ? 'SourceMap HTTP response header' : 'sourceMappingURL comment in script',
+        context: smHeader !== undefined ? 'SourceMap HTTP response header' : 'sourceMappingURL comment in script',
       },
       tags: ['sourcemap', 'recon'],
       scopeStatus,
@@ -56,16 +59,16 @@ export function detectSourceMaps(
   }
 
   // 2. MAP-002: Inline Source Maps
-  if (code && code.includes('sourceMappingURL=data:application/json')) {
+  if (code.length > 0 && code.includes('sourceMappingURL=data:application/json')) {
     const inlineMatch = code.match(/sourceMappingURL=data:application\/json;base64,([A-Za-z0-9+/=]+)/);
     const internalPaths: string[] = [];
 
-    if (inlineMatch && inlineMatch[1]) {
+    if (inlineMatch !== null && inlineMatch[1] !== undefined && inlineMatch[1].length > 0) {
       try {
         const decoded = typeof atob !== 'undefined'
           ? atob(inlineMatch[1])
           : Buffer.from(inlineMatch[1], 'base64').toString('utf8');
-        const parsed = JSON.parse(decoded);
+        const parsed = JSON.parse(decoded) as Record<string, unknown>;
         if (Array.isArray(parsed.sources)) {
           for (const s of parsed.sources) {
             if (typeof s === 'string' && (s.includes('/Users/') || s.includes('/home/') || s.includes('C:\\') || s.startsWith('webpack:///'))) {
@@ -103,7 +106,7 @@ export function detectSourceMaps(
   }
 
   // 3. MAP-003: Version fingerprinting from code banners
-  if (code) {
+  if (code.length > 0) {
     const librarySignatures = [
       { name: 'jQuery', regex: /jQuery\s+v?([0-9]+\.[0-9]+\.[0-9]+)/i },
       { name: 'Lodash', regex: /lodash\s+v?([0-9]+\.[0-9]+\.[0-9]+)/i },
@@ -114,7 +117,7 @@ export function detectSourceMaps(
 
     for (const lib of librarySignatures) {
       const match = code.match(lib.regex);
-      if (match && match[1]) {
+      if (match !== null && match[1] !== undefined && match[1].length > 0) {
         leads.push({
           id: nextLeadId('MAP-LIB'),
           ruleId: 'MAP-003',

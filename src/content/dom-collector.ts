@@ -22,27 +22,27 @@ export interface ExtractedIframeData {
 
 export interface ExtractedScriptData {
   src: string;
-  inlineContent?: string;
-  sourceMappingURL?: string;
+  inlineContent?: string | undefined;
+  sourceMappingURL?: string | undefined;
 }
 
 export interface ExtractedLinkData {
   href: string;
-  rel?: string;
+  rel?: string | undefined;
 }
 
 export interface ExtractedMetaData {
   name: string;
   content: string;
-  generator?: string;
+  generator?: string | undefined;
 }
 
 export interface ExtractedHydrationGlobals {
-  nextData?: string;
-  nuxt?: string;
-  initialState?: string;
-  apolloState?: string;
-  env?: string;
+  nextData?: string | undefined;
+  nuxt?: string | undefined;
+  initialState?: string | undefined;
+  apolloState?: string | undefined;
+  env?: string | undefined;
 }
 
 export interface DomCollectionResult {
@@ -79,7 +79,7 @@ export function collectDomLeads(): DomCollectionResult {
     );
     for (const ctrl of Array.from(controls)) {
       const name = ctrl.getAttribute('name');
-      if (name && name.trim().length > 0) {
+      if (typeof name === 'string' && name.trim().length > 0) {
         inputNames.push(name.trim());
       }
     }
@@ -110,13 +110,13 @@ export function collectDomLeads(): DomCollectionResult {
 
     const rawText = script.textContent ?? '';
     // Check for sourceMappingURL in both inline and linked script annotations
-    const mapMatch = rawText.match(/\/\/[#@]\s*sourceMappingURL=([^\s]+)/) ||
+    const mapMatch = rawText.match(/\/\/[#@]\s*sourceMappingURL=([^\s]+)/) ??
                      rawText.match(/\/\*[#@]\s*sourceMappingURL=([^\s]+)\s*\*\//);
-    if (mapMatch && mapMatch[1]) {
+    if (mapMatch !== null && mapMatch[1] !== undefined && mapMatch[1].length > 0) {
       sourceMappingURL = mapMatch[1];
     }
 
-    if (!src && rawText.length > 0 && remainingBudget > 0) {
+    if (src.length === 0 && rawText.length > 0 && remainingBudget > 0) {
       const sliceLen = Math.min(rawText.length, remainingBudget);
       inlineContent = rawText.slice(0, sliceLen);
       remainingBudget -= sliceLen;
@@ -162,7 +162,7 @@ export function collectDomLeads(): DomCollectionResult {
     let count = 0;
     while ((node = iterator.nextNode()) !== null && count < MAX_COMMENTS) {
       const val = node.nodeValue?.trim();
-      if (val && val.length > 0) {
+      if (typeof val === 'string' && val.length > 0) {
         comments.push(val.slice(0, 2048));
         count++;
       }
@@ -176,36 +176,36 @@ export function collectDomLeads(): DomCollectionResult {
 
   // Next.js: <script id="__NEXT_DATA__" type="application/json">
   const nextDataEl = document.getElementById('__NEXT_DATA__');
-  if (nextDataEl && nextDataEl.textContent) {
+  if (nextDataEl !== null && typeof nextDataEl.textContent === 'string' && nextDataEl.textContent.length > 0) {
     hydrationGlobals.nextData = nextDataEl.textContent.slice(0, 100_000);
   }
 
   // Nuxt.js: <script id="__NUXT_DATA__"> or window.__NUXT__
   const nuxtDataEl = document.getElementById('__NUXT_DATA__');
-  if (nuxtDataEl && nuxtDataEl.textContent) {
+  if (nuxtDataEl !== null && typeof nuxtDataEl.textContent === 'string' && nuxtDataEl.textContent.length > 0) {
     hydrationGlobals.nuxt = nuxtDataEl.textContent.slice(0, 100_000);
   }
 
   // Check script tags for state assignments or data attributes
   for (const script of scriptElements) {
     const txt = script.textContent ?? '';
-    if (!hydrationGlobals.nuxt && txt.includes('window.__NUXT__')) {
+    if (hydrationGlobals.nuxt === undefined && txt.includes('window.__NUXT__')) {
       hydrationGlobals.nuxt = txt.slice(0, 50_000);
     }
-    if (!hydrationGlobals.initialState && txt.includes('__INITIAL_STATE__')) {
+    if (hydrationGlobals.initialState === undefined && txt.includes('__INITIAL_STATE__')) {
       hydrationGlobals.initialState = txt.slice(0, 50_000);
     }
-    if (!hydrationGlobals.apolloState && txt.includes('__APOLLO_STATE__')) {
+    if (hydrationGlobals.apolloState === undefined && txt.includes('__APOLLO_STATE__')) {
       hydrationGlobals.apolloState = txt.slice(0, 50_000);
     }
-    if (!hydrationGlobals.env && (txt.includes('window.__ENV__') || txt.includes('window.ENV'))) {
+    if (hydrationGlobals.env === undefined && (txt.includes('window.__ENV__') || txt.includes('window.ENV'))) {
       hydrationGlobals.env = txt.slice(0, 50_000);
     }
   }
 
   // Check dataset on root or body
   const rootDataEnv = document.documentElement.getAttribute('data-env') ?? document.body?.getAttribute('data-env');
-  if (rootDataEnv && !hydrationGlobals.env) {
+  if (typeof rootDataEnv === 'string' && rootDataEnv.length > 0 && hydrationGlobals.env === undefined) {
     hydrationGlobals.env = rootDataEnv;
   }
 
@@ -216,7 +216,7 @@ export function collectDomLeads(): DomCollectionResult {
       const entries = performance.getEntriesByType('resource');
       for (let i = 0; i < Math.min(entries.length, MAX_RESOURCES); i++) {
         const item = entries[i];
-        if (item && item.name) {
+        if (item !== undefined && typeof item.name === 'string' && item.name.length > 0) {
           resourceTiming.push(item.name);
         }
       }
@@ -230,10 +230,10 @@ export function collectDomLeads(): DomCollectionResult {
   const sessionStorageKeys: string[] = [];
 
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
+    if (typeof window !== 'undefined' && 'localStorage' in window && window.localStorage !== null) {
       for (let i = 0; i < window.localStorage.length; i++) {
         const key = window.localStorage.key(i);
-        if (key) {
+        if (typeof key === 'string' && key.length > 0) {
           localStorageKeys.push(key);
         }
       }
@@ -243,10 +243,10 @@ export function collectDomLeads(): DomCollectionResult {
   }
 
   try {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
+    if (typeof window !== 'undefined' && 'sessionStorage' in window && window.sessionStorage !== null) {
       for (let i = 0; i < window.sessionStorage.length; i++) {
         const key = window.sessionStorage.key(i);
-        if (key) {
+        if (typeof key === 'string' && key.length > 0) {
           sessionStorageKeys.push(key);
         }
       }
@@ -272,7 +272,7 @@ export function collectDomLeads(): DomCollectionResult {
 }
 
 function sanitizeClientUrl(rawUrl: string): string {
-  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  if (typeof rawUrl !== 'string' || rawUrl.length === 0) return '';
   try {
     const u = new URL(rawUrl);
     // 1. Strip fragments entirely to prevent OAuth tokens from leaking
@@ -291,7 +291,8 @@ function sanitizeClientUrl(rawUrl: string): string {
   } catch {
     // Relative or malformed URL fallback:
     // Drop fragment
-    let sanitized = rawUrl.split('#')[0] || '';
+    const splitHash = rawUrl.split('#')[0];
+    let sanitized = typeof splitHash === 'string' ? splitHash : '';
     // Strip user:pass
     sanitized = sanitized.replace(/\/\/[^/:@\s]+:[^/@\s]+@/g, '//');
     // Mask all query parameter values
@@ -321,17 +322,29 @@ export function initDomCollector(): void {
 
   let mainWorldEventCount = 0;
 
+  interface RawMainWorldDetail {
+    eventType?: unknown;
+    sinkName?: unknown;
+    sourceValue?: unknown;
+    targetOrigin?: unknown;
+    hasOriginCheck?: unknown;
+    storageKey?: unknown;
+    tokenShape?: unknown;
+    details?: unknown;
+  }
+
   // Listen for S3 (Main World Hooks) CustomEvents and relay to background as untrusted with strict payload caps
   window.addEventListener('__ACULYX_MAIN_WORLD_EVENT__', (event: Event) => {
     try {
       // 1. Strict event count cap
       if (mainWorldEventCount >= MAX_MAIN_WORLD_EVENTS) return;
 
-      const customEvent = event as CustomEvent;
-      const detail = customEvent.detail;
-      if (!detail || typeof detail !== 'object') return;
+      const customEvent = event as CustomEvent<unknown>;
+      if (typeof customEvent.detail !== 'object' || customEvent.detail === null) return;
+      const detail = customEvent.detail as RawMainWorldDetail;
 
       // 2. Validate eventType whitelist
+      if (typeof detail.eventType !== 'string') return;
       const eventType = detail.eventType;
       if (!['sink', 'postmessage_call', 'postmessage_listener', 'storage_write'].includes(eventType)) {
         return;
@@ -339,7 +352,7 @@ export function initDomCollector(): void {
 
       // 3. Validate sink payload
       if (eventType === 'sink') {
-        if (!detail.sinkName || !ALLOWED_SINKS.has(detail.sinkName)) {
+        if (typeof detail.sinkName !== 'string' || !ALLOWED_SINKS.has(detail.sinkName)) {
           return;
         }
       }

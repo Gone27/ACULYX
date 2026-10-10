@@ -147,16 +147,16 @@ export interface MainWorldLeadsEventMessage {
 
 export interface GetLeadsStateMessage {
   type: 'GET_LEADS_STATE';
-  tabId?: number;
-  origin?: string;
+  tabId?: number | undefined;
+  origin?: string | undefined;
 }
 
 export interface LeadStateUpdateMessage {
   type: 'LEAD_STATE_UPDATE';
-  tabId?: number;
+  tabId?: number | undefined;
   origin: string;
   leads: import('../leads/types').Lead[];
-  activeChains?: Array<{ chain: import('../leads/types').ChainRule; matchedLeads: import('../leads/types').Lead[] }>;
+  activeChains?: Array<{ chain: import('../leads/types').ChainRule; matchedLeads: import('../leads/types').Lead[] }> | undefined;
   stats?: {
     total: number;
     critical: number;
@@ -164,28 +164,28 @@ export interface LeadStateUpdateMessage {
     medium: number;
     low: number;
     info: number;
-  };
+  } | undefined;
 }
 
 export interface LeadActionMessage {
   type: 'LEAD_ACTION';
   leadId: string;
   action: 'pin' | 'unpin' | 'triage';
-  triageState?: import('../leads/types').Lead['triageState'];
-  pinned?: boolean;
-  origin?: string;
+  triageState?: import('../leads/types').Lead['triageState'] | undefined;
+  pinned?: boolean | undefined;
+  origin?: string | undefined;
 }
 
 export interface LeadActionResponse {
   type: 'LEAD_ACTION_RESPONSE';
   success: boolean;
   leadId: string;
-  error?: string;
+  error?: string | undefined;
 }
 
 export interface ReconGetMessage {
   type: 'RECON_GET';
-  origin?: string;
+  origin?: string | undefined;
 }
 
 export interface ReconGetResponse {
@@ -195,7 +195,7 @@ export interface ReconGetResponse {
 
 export interface ReconResetMessage {
   type: 'RECON_RESET';
-  origin?: string;
+  origin?: string | undefined;
 }
 
 export interface ReconResetResponse {
@@ -206,7 +206,8 @@ export interface ReconResetResponse {
 export interface HunterRunProbeMessage {
   type: 'HUNTER_RUN_PROBE';
   probe: import('../leads/types').HunterProbeRequest;
-  scopeStatus?: import('../leads/types').Lead['scopeStatus'];
+  scopeStatus?: import('../leads/types').Lead['scopeStatus'] | undefined;
+  confirmedByUser?: boolean | undefined;
 }
 
 export interface HunterRunProbeResponse {

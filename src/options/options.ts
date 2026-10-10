@@ -1216,7 +1216,7 @@ async function refreshReconCounts(): Promise<void> {
         params?: unknown[];
       };
     };
-    if (res && res.type === 'RECON_GET_RESPONSE' && res.memory) {
+    if (res.type === 'RECON_GET_RESPONSE' && res.memory !== undefined) {
       optionsReconHostsCount.textContent = String(res.memory.hosts?.length ?? 0);
       optionsReconEndpointsCount.textContent = String(res.memory.endpoints?.length ?? 0);
       optionsReconParamsCount.textContent = String(res.memory.params?.length ?? 0);

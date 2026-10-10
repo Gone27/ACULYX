@@ -34,8 +34,8 @@ export function calculateLeadPriority(
   const confidenceFactor = CONFIDENCE_FACTORS[lead.tier] ?? 0.5;
   const scopeFactor = SCOPE_FACTORS[lead.scopeStatus] ?? 0.5;
 
-  const noveltyMultiplier = isNew || lead.novelty ? 1.2 : 1.0;
-  const chainMultiplier = inChain || (lead.chainIds && lead.chainIds.length > 0) ? 1.5 : 1.0;
+  const noveltyMultiplier = isNew || lead.novelty === true ? 1.2 : 1.0;
+  const chainMultiplier = inChain || (lead.chainIds !== undefined && lead.chainIds.length > 0) ? 1.5 : 1.0;
 
   const priority = potentialWeight * confidenceFactor * scopeFactor * noveltyMultiplier * chainMultiplier;
   return Math.round(priority * 100) / 100;

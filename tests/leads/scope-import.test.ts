@@ -19,10 +19,10 @@ describe('Scope Import Parsers', () => {
     const profile = parseHackerOneScope(h1Json);
     expect(profile.name).toBe('Acme-Security');
     expect(profile.rules.length).toBe(2);
-    expect(profile.rules[0].pattern).toBe('*.acme.com');
-    expect(profile.rules[0].effect).toBe('in-scope');
-    expect(profile.rules[1].pattern).toBe('out-of-scope.acme.com');
-    expect(profile.rules[1].effect).toBe('out-of-scope');
+    expect(profile.rules[0]?.pattern).toBe('*.acme.com');
+    expect(profile.rules[0]?.effect).toBe('in-scope');
+    expect(profile.rules[1]?.pattern).toBe('out-of-scope.acme.com');
+    expect(profile.rules[1]?.effect).toBe('out-of-scope');
   });
 
   it('parses Bugcrowd target scope JSON into ScopeProfile', () => {
@@ -36,8 +36,8 @@ describe('Scope Import Parsers', () => {
 
     const profile = parseBugcrowdScope(bcJson);
     expect(profile.name).toBe('Bugcrowd-Target');
-    expect(profile.rules[0].effect).toBe('in-scope');
-    expect(profile.rules[1].effect).toBe('out-of-scope');
+    expect(profile.rules[0]?.effect).toBe('in-scope');
+    expect(profile.rules[1]?.effect).toBe('out-of-scope');
   });
 
   it('parses Intigriti scope JSON into ScopeProfile', () => {
@@ -51,8 +51,8 @@ describe('Scope Import Parsers', () => {
 
     const profile = parseIntigritiScope(intigritiJson);
     expect(profile.name).toBe('Intigriti-Program');
-    expect(profile.rules[0].effect).toBe('in-scope');
-    expect(profile.rules[1].effect).toBe('out-of-scope');
+    expect(profile.rules[0]?.effect).toBe('in-scope');
+    expect(profile.rules[1]?.effect).toBe('out-of-scope');
   });
 
   it('generates deduped name-only wordlist from discovered parameters and endpoints', () => {

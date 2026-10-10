@@ -139,7 +139,7 @@ npm run typecheck
 # 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
 npm run lint -- --max-warnings=0
 
-# 3. Unit & Integration Tests (633+ tests across 41 test suites)
+# 3. Unit & Integration Tests (688 tests across 49 test suites)
 npm test
 
 # 4. Playwright End-to-End Tests (9 browser tests across 2 suites; auto-builds dist/)
@@ -156,19 +156,24 @@ npm audit --audit-level=low
 ```
 src/
 ├── background/       # MV3 service worker — capture, write barrier, lifecycle
-├── content/          # Isolated page signal detectors (CSP, SRI)
+├── content/          # S2 DOM collector & S3 Main-World hook scripts
+├── devtools/         # S4 DevTools panel for in-memory network body analysis
+├── leads/            # Lead Radar — F1-F8 detectors, sieve, chains, ranking, hunter
 ├── options/          # Full-page settings & About/Copyright dashboard
 ├── popup/            # Extension action popup & live scoring interface
 ├── rules/            # Pure TypeScript rule engine, weights, registry
 ├── sandbox/          # Sandboxed iframe verification workspace
-├── shared/           # Appearance tokens, storage write-barrier, messaging
+├── shared/           # Appearance tokens, storage write-barrier, messaging, scope
 └── sidepanel/        # Attack Surface Graph & entity relationship explorer
 tests/
 ├── background/       # Permissions, state pipeline, capture listener tests
 ├── e2e/              # Playwright browser integration tests
 ├── fuzz/             # Property fuzzing and payload mutators
 ├── integration/      # Write barrier races, reset drainage, canary leak suites
+├── leads/            # Lead Radar detectors, sieve, hunter, ranking, scope tests
+├── reporting/        # Report builder and triage store test suites
 ├── rules/            # Header family fixtures and evaluation assertions
+├── scope/            # Scope engine, contracts, normalization, and stress tests
 └── shared/           # Storage envelopes, coalescing, and migration tests
 ```
 

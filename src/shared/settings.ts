@@ -252,6 +252,28 @@ export function migrateSettings(raw: unknown): SettingsV2 {
     activeScopeProfileId = obj.activeScopeProfileId.trim();
   }
 
+  const leadsEnabled: boolean = typeof obj.leadsEnabled === 'boolean'
+    ? obj.leadsEnabled
+    : (DEFAULT_SETTINGS.leadsEnabled ?? false);
+
+  const deepModeEnabled: boolean = typeof obj.deepModeEnabled === 'boolean'
+    ? obj.deepModeEnabled
+    : (DEFAULT_SETTINGS.deepModeEnabled ?? false);
+
+  let hunterConfig: import('../leads/types').HunterConfig = DEFAULT_SETTINGS.hunterConfig ?? {
+    enabled: false,
+    maxRequestsPerSecond: 1,
+  };
+  if (typeof obj.hunterConfig === 'object' && obj.hunterConfig !== null) {
+    const rawHunter = obj.hunterConfig as Record<string, unknown>;
+    hunterConfig = {
+      enabled: typeof rawHunter.enabled === 'boolean' ? rawHunter.enabled : false,
+      maxRequestsPerSecond: typeof rawHunter.maxRequestsPerSecond === 'number' && Number.isFinite(rawHunter.maxRequestsPerSecond)
+        ? Math.max(1, Math.min(10, Math.floor(rawHunter.maxRequestsPerSecond)))
+        : 1,
+    };
+  }
+
   const result: SettingsV2 = {
     schemaVersion: 2,
     monitoringMode,
@@ -266,6 +288,9 @@ export function migrateSettings(raw: unknown): SettingsV2 {
     theme,
     density,
     reducedMotion,
+    leadsEnabled,
+    deepModeEnabled,
+    hunterConfig,
   };
 
   if (legacyAllowedOrigins !== undefined && legacyAllowedOrigins.length > 0) {

@@ -36,9 +36,9 @@ describe('Hunter Active Tier Scope Gating & Safety', () => {
   });
 
   it('rejects forbidden HTTP methods like POST/PUT', async () => {
-    const probe: any = {
+    const probe: HunterProbeRequest = {
       targetUrl: 'https://in-scope.example.com/api/test',
-      method: 'POST',
+      method: 'POST' as unknown as HunterProbeRequest['method'],
       reason: 'Active payload injection',
     };
 

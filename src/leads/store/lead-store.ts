@@ -1,4 +1,4 @@
-import type { Lead, Masked } from '../types';
+import type { Lead } from '../types';
 import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
 
 const MAX_LEADS_PER_ORIGIN = 200;
@@ -22,7 +22,7 @@ export class LeadStore {
   /** Map from tabId -> Set of leadIds */
   private tabToLeads = new Map<number, Set<string>>();
 
-  private saveTimeout: any = null;
+  private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private isInitialized = false;
 
   constructor() {
@@ -59,10 +59,12 @@ export class LeadStore {
         this.leadById.set(lead.id, lead);
         this.dedupMap.set(dedupKey, lead.id);
 
-        if (!this.originLeads.has(origin)) {
-          this.originLeads.set(origin, []);
+        const existingOriginList = this.originLeads.get(origin);
+        if (existingOriginList !== undefined) {
+          existingOriginList.push(lead);
+        } else {
+          this.originLeads.set(origin, [lead]);
         }
-        this.originLeads.get(origin)!.push(lead);
       }
 
       if (Array.isArray(data.tabToLeads)) {
@@ -79,7 +81,7 @@ export class LeadStore {
 
   private scheduleSave(): void {
     if (!this.hasStorageSession()) return;
-    if (this.saveTimeout) {
+    if (this.saveTimeout !== null) {
       clearTimeout(this.saveTimeout);
     }
     this.saveTimeout = setTimeout(() => {
@@ -114,17 +116,20 @@ export class LeadStore {
    * Sanitizes evidence to guarantee it conforms to Masked branding and never leaks raw secrets or query tokens.
    */
   private sanitizeLeadEvidence(lead: Lead): Lead {
-    const preview = maskSecret(lead.evidence.preview || '');
-    const location = maskLocation(lead.evidence.location || '');
-    const url = (maskLocation(lead.url || '') as string) || lead.url;
+    const rawPreview = lead.evidence.preview;
+    const rawLoc = lead.evidence.location;
+    const rawUrl = lead.url;
+    const preview = maskSecret(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '');
+    const location = maskLocation(typeof rawLoc === 'string' && rawLoc.length > 0 ? rawLoc : '');
+    const url = (maskLocation(typeof rawUrl === 'string' && rawUrl.length > 0 ? rawUrl : '') as string) || lead.url;
 
     return {
       ...lead,
       url,
       evidence: {
         ...lead.evidence,
-        preview: preview as Masked<string>,
-        location: location as Masked<string>,
+        preview: preview,
+        location: location,
       },
     };
   }
@@ -139,17 +144,19 @@ export class LeadStore {
 
     const existingLeadId = this.dedupMap.get(dedupKey);
 
-    if (existingLeadId && this.leadById.has(existingLeadId)) {
+    if (existingLeadId !== undefined && existingLeadId.length > 0 && this.leadById.has(existingLeadId)) {
       // Update existing lead in place
-      const existing = this.leadById.get(existingLeadId)!;
-      existing.timestamp = Math.max(existing.timestamp, lead.timestamp);
-      existing.confidence = Math.max(existing.confidence, lead.confidence);
-      if (lead.chainIds && lead.chainIds.length > 0) {
-        const mergedChains = new Set([...(existing.chainIds || []), ...lead.chainIds]);
-        existing.chainIds = Array.from(mergedChains);
-      }
-      if (tabId !== undefined) {
-        this.associateTabLead(tabId, existing.id);
+      const existing = this.leadById.get(existingLeadId);
+      if (existing !== undefined) {
+        existing.timestamp = Math.max(existing.timestamp, lead.timestamp);
+        existing.confidence = Math.max(existing.confidence, lead.confidence);
+        if (lead.chainIds !== undefined && lead.chainIds.length > 0) {
+          const mergedChains = new Set([...(existing.chainIds !== undefined ? existing.chainIds : []), ...lead.chainIds]);
+          existing.chainIds = Array.from(mergedChains);
+        }
+        if (tabId !== undefined) {
+          this.associateTabLead(tabId, existing.id);
+        }
       }
       this.scheduleSave();
       return;
@@ -159,16 +166,17 @@ export class LeadStore {
     this.leadById.set(lead.id, lead);
     this.dedupMap.set(dedupKey, lead.id);
 
-    if (!this.originLeads.has(origin)) {
-      this.originLeads.set(origin, []);
+    let originList = this.originLeads.get(origin);
+    if (originList === undefined) {
+      originList = [];
+      this.originLeads.set(origin, originList);
     }
-    const originList = this.originLeads.get(origin)!;
     originList.push(lead);
 
     // Enforce LRU bounding per origin
     if (originList.length > MAX_LEADS_PER_ORIGIN) {
       const removed = originList.shift();
-      if (removed) {
+      if (removed !== undefined) {
         this.leadById.delete(removed.id);
         const oldKey = this.computeDedupKey(removed);
         this.dedupMap.delete(oldKey);
@@ -182,14 +190,16 @@ export class LeadStore {
   }
 
   public associateTabLead(tabId: number, leadId: string): void {
-    if (!this.tabToLeads.has(tabId)) {
-      this.tabToLeads.set(tabId, new Set());
+    let set = this.tabToLeads.get(tabId);
+    if (set === undefined) {
+      set = new Set();
+      this.tabToLeads.set(tabId, set);
     }
-    this.tabToLeads.get(tabId)!.add(leadId);
+    set.add(leadId);
   }
 
   public getLeadsForOrigin(origin: string): Lead[] {
-    const leads = this.originLeads.get(origin) || [];
+    const leads = this.originLeads.get(origin) ?? [];
     return [...leads];
   }
 

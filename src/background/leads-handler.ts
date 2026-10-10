@@ -8,31 +8,24 @@
 
 import {
   LeadStore,
-  getReconMemory,
   recordHost,
   recordParam,
   recordEndpoint,
   recordBucket,
-  clearReconMemory,
 } from '../leads';
 import { detectSecrets } from '../leads/detectors/f1-secrets';
 import { detectEndpoints } from '../leads/detectors/f2-endpoints';
 import { detectSourceMaps } from '../leads/detectors/f3-sourcemaps';
 import { detectAuthLeads } from '../leads/detectors/f4-auth';
 import { detectParamLeads, classifyParamName } from '../leads/detectors/f5-params';
-import { detectHeaderLeads } from '../leads/detectors/f6-headers';
-import { detectBodyLeads } from '../leads/detectors/f7-body';
 import { detectReconLeads } from '../leads/detectors/f8-recon';
 import { evaluateChains } from '../leads/chains/chains';
-import { calculateLeadPriority, rankLeads } from '../leads/ranking/ranking';
+import { rankLeads } from '../leads/ranking/ranking';
 import { executeHunterProbe } from '../leads/hunter/hunter';
 import { maskSecret, maskLocation } from '../leads/sieve/mask';
 import { ScopeEngine } from '../shared/scope/engine';
 import type {
   Lead,
-  LeadPotential,
-  ChainRule,
-  ReconMemory,
   HunterProbeRequest,
   HunterLedgerEntry,
   HunterConfig,
@@ -57,12 +50,13 @@ export function resolveScopeStatus(
   settings: SettingsV2
 ): Lead['scopeStatus'] {
   if (
-    settings.activeScopeProfileId &&
-    settings.scopeProfiles &&
+    typeof settings.activeScopeProfileId === 'string' &&
+    settings.activeScopeProfileId.length > 0 &&
+    settings.scopeProfiles !== undefined &&
     settings.scopeProfiles.length > 0
   ) {
     const profile = settings.scopeProfiles.find((p) => p.id === settings.activeScopeProfileId);
-    if (profile) {
+    if (profile !== undefined) {
       const engine = new ScopeEngine(profile);
       const res = engine.evaluate(targetUrl);
       return res.status;
@@ -148,7 +142,7 @@ export async function handleDomLeadsCollected(
   });
 
   // 2. Analyze Forms
-  if (data.forms && data.forms.length > 0) {
+  if (data.forms !== undefined && data.forms.length > 0) {
     const authLeads = detectAuthLeads(
       {
         url,
@@ -167,9 +161,10 @@ export async function handleDomLeadsCollected(
     }
 
     for (const f of data.forms) {
-      if (f.action) {
+      if (typeof f.action === 'string' && f.action.length > 0) {
+        const maskedAct = maskLocation(f.action);
         await recordEndpoint({
-          path: (maskLocation(f.action) as string) || f.action,
+          path: maskedAct.length > 0 ? maskedAct : f.action,
           origin,
           method: f.method,
           tags: ['form'],
@@ -188,11 +183,11 @@ export async function handleDomLeadsCollected(
   }
 
   // 3. Analyze Scripts (Secrets, Endpoints, SourceMaps)
-  if (data.scripts && data.scripts.length > 0) {
+  if (data.scripts !== undefined && data.scripts.length > 0) {
     for (const script of data.scripts) {
-      const scriptUrl = script.src || url;
+      const scriptUrl = typeof script.src === 'string' && script.src.length > 0 ? script.src : url;
 
-      if (script.src) {
+      if (typeof script.src === 'string' && script.src.length > 0) {
         try {
           const sHost = new URL(script.src).hostname;
           if (sHost !== hostname) {
@@ -209,7 +204,7 @@ export async function handleDomLeadsCollected(
         }
       }
 
-      if (script.inlineContent && script.inlineContent.length > 0) {
+      if (typeof script.inlineContent === 'string' && script.inlineContent.length > 0) {
         // F1: Secrets
         const secretLeads = detectSecrets(script.inlineContent, scriptUrl, scopeStatus);
         for (const lead of secretLeads) {
@@ -220,7 +215,7 @@ export async function handleDomLeadsCollected(
         const endpointLeads = detectEndpoints(script.inlineContent, scriptUrl, scopeStatus);
         for (const lead of endpointLeads) {
           globalLeadStore.addLead(lead, tabId);
-          if (lead.evidence.extractedNames) {
+          if (lead.evidence.extractedNames !== undefined) {
             for (const ep of lead.evidence.extractedNames) {
               await recordEndpoint({
                 path: ep,
@@ -238,7 +233,8 @@ export async function handleDomLeadsCollected(
         }
       }
 
-      if (script.sourceMappingURL) {
+      if (typeof script.sourceMappingURL === 'string' && script.sourceMappingURL.length > 0) {
+        const maskedScriptUrl = maskLocation(scriptUrl);
         const smLead: Lead = {
           id: nextId('MAP-REF'),
           ruleId: 'MAP-001',
@@ -258,7 +254,7 @@ export async function handleDomLeadsCollected(
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url: (maskLocation(scriptUrl) as string) || scriptUrl,
+          url: maskedScriptUrl.length > 0 ? maskedScriptUrl : scriptUrl,
           sourceSensor: 'S2',
         };
         globalLeadStore.addLead(smLead, tabId);
@@ -267,9 +263,9 @@ export async function handleDomLeadsCollected(
   }
 
   // 4. Analyze Iframes (IFR-001)
-  if (data.iframes && data.iframes.length > 0) {
+  if (data.iframes !== undefined && data.iframes.length > 0) {
     for (const iframe of data.iframes) {
-      if (iframe.src) {
+      if (typeof iframe.src === 'string' && iframe.src.length > 0) {
         try {
           const ifHost = new URL(iframe.src).hostname;
           if (ifHost !== hostname) {
@@ -286,7 +282,11 @@ export async function handleDomLeadsCollected(
         }
       }
 
-      if (!iframe.sandbox || iframe.sandbox.includes('allow-scripts') && iframe.sandbox.includes('allow-same-origin')) {
+      const hasScripts = typeof iframe.sandbox === 'string' && iframe.sandbox.includes('allow-scripts');
+      const hasSameOrigin = typeof iframe.sandbox === 'string' && iframe.sandbox.includes('allow-same-origin');
+      if (iframe.sandbox === undefined || iframe.sandbox === '' || (hasScripts && hasSameOrigin)) {
+        const maskedUrl = maskLocation(url);
+        const iframeSrc = typeof iframe.src === 'string' && iframe.src.length > 0 ? iframe.src : 'inline';
         const ifrLead: Lead = {
           id: nextId('IFR-PERM'),
           ruleId: 'IFR-001',
@@ -294,19 +294,19 @@ export async function handleDomLeadsCollected(
           tier: 'observed',
           potential: 'low',
           confidence: 0.85,
-          title: `Iframe Embed Without Strict Sandbox Isolation (${iframe.src || 'inline'})`,
+          title: `Iframe Embed Without Strict Sandbox Isolation (${iframeSrc})`,
           needs: ['verify whether embedded content is untrusted and can execute scripts'],
           doesNotProve: ['clickjacking or iframe escape'],
           evidence: {
-            preview: maskSecret(iframe.src || 'inline-iframe'),
+            preview: maskSecret(iframeSrc),
             location: maskLocation(url),
-            context: `sandbox="${iframe.sandbox || 'none'}", allow="${iframe.allow || 'none'}"`,
+            context: `sandbox="${typeof iframe.sandbox === 'string' ? iframe.sandbox : 'none'}", allow="${typeof iframe.allow === 'string' ? iframe.allow : 'none'}"`,
           },
           tags: ['iframe', 'sandbox', 'cross-origin'],
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url: (maskLocation(url) as string) || url,
+          url: maskedUrl.length > 0 ? maskedUrl : url,
           sourceSensor: 'S2',
         };
         globalLeadStore.addLead(ifrLead, tabId);
@@ -315,12 +315,12 @@ export async function handleDomLeadsCollected(
   }
 
   // 5. Analyze Links & Content for Cloud Buckets & Recon
-  if (data.links && data.links.length > 0) {
+  if (data.links !== undefined && data.links.length > 0) {
     const combinedHrefs = data.links.map((l) => l.href).join('\n');
     const reconLeads = detectReconLeads(combinedHrefs, url, scopeStatus);
     for (const lead of reconLeads) {
       globalLeadStore.addLead(lead, tabId);
-      if (lead.ruleId === 'CLD-001' && lead.evidence.extractedNames) {
+      if (lead.ruleId === 'CLD-001' && lead.evidence.extractedNames !== undefined) {
         for (const bucketName of lead.evidence.extractedNames) {
           const prov = lead.tags.includes('aws')
             ? 'aws'
@@ -341,7 +341,7 @@ export async function handleDomLeadsCollected(
     for (const link of data.links) {
       try {
         const u = new URL(link.href);
-        if (u.hostname && u.hostname !== hostname) {
+        if (typeof u.hostname === 'string' && u.hostname.length > 0 && u.hostname !== hostname) {
           await recordHost({
             hostname: u.hostname,
             scopeStatus: resolveScopeStatus(link.href, settings),
@@ -358,8 +358,10 @@ export async function handleDomLeadsCollected(
 
   // 6. Analyze Framework Hydration Globals
   const hyd = data.hydrationGlobals;
-  if (hyd) {
-    const stateBlobs = [hyd.nextData, hyd.nuxt, hyd.initialState, hyd.apolloState, hyd.env].filter(Boolean) as string[];
+  if (hyd !== undefined) {
+    const stateBlobs = [hyd.nextData, hyd.nuxt, hyd.initialState, hyd.apolloState, hyd.env].filter(
+      (b): b is string => typeof b === 'string' && b.length > 0
+    );
     for (const blob of stateBlobs) {
       const secrets = detectSecrets(blob, url, scopeStatus);
       for (const s of secrets) {
@@ -374,7 +376,7 @@ export async function handleDomLeadsCollected(
   }
 
   // 7. Analyze HTML Comments
-  if (data.comments && data.comments.length > 0) {
+  if (data.comments !== undefined && data.comments.length > 0) {
     for (const comment of data.comments) {
       const secretLeads = detectSecrets(comment, url, scopeStatus);
       for (const s of secretLeads) {
@@ -412,11 +414,11 @@ export async function handleDomLeadsCollected(
   }
 
   // 9. Resource Timing Harvesting
-  if (data.resourceTiming && data.resourceTiming.length > 0) {
+  if (data.resourceTiming !== undefined && data.resourceTiming.length > 0) {
     for (const resUrl of data.resourceTiming) {
       try {
         const u = new URL(resUrl);
-        if (u.hostname !== hostname) {
+        if (typeof u.hostname === 'string' && u.hostname.length > 0 && u.hostname !== hostname) {
           await recordHost({
             hostname: u.hostname,
             scopeStatus: resolveScopeStatus(resUrl, settings),
@@ -442,14 +444,19 @@ export function handleMainWorldEvent(
   settings: SettingsV2
 ): LeadStateUpdateMessage {
   const { url, origin, event, tabId } = msg;
-  if (!event || typeof event !== 'object' || typeof event.eventType !== 'string') {
+  if (typeof event !== 'object' || event === null || typeof event.eventType !== 'string') {
     return getLeadsState(tabId, origin);
   }
 
-  const sanitizedUrl = (maskLocation(url || '') as string) || url;
+  const safeUrl = typeof url === 'string' ? url : '';
+  const maskedLoc = maskLocation(safeUrl);
+  const sanitizedUrl = maskedLoc.length > 0 ? maskedLoc : safeUrl;
   const scopeStatus = resolveScopeStatus(sanitizedUrl, settings);
 
   if (event.eventType === 'sink') {
+    const sinkName = typeof event.sinkName === 'string' && event.sinkName.length > 0 ? event.sinkName : 'sink';
+    const sourceVal = typeof event.sourceValue === 'string' && event.sourceValue.length > 0 ? event.sourceValue : 'tainted-input';
+    const contextStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : `Assigned to ${sinkName}`;
     const lead: Lead = {
       id: nextId('SINK-TAINT'),
       ruleId: 'PAR-004',
@@ -457,15 +464,15 @@ export function handleMainWorldEvent(
       tier: 'weak',
       potential: 'medium',
       confidence: 0.7,
-      title: `[Page-Reported] Client-Side DOM Sink Execution with Controlled Input (${event.sinkName || 'sink'})`,
+      title: `[Page-Reported] Client-Side DOM Sink Execution with Controlled Input (${sinkName})`,
       needs: ['audit whether input reaches sink unescaped to verify DOM XSS'],
       doesNotProve: ['exploitable DOM XSS execution'],
       evidence: {
-        preview: maskSecret(event.sourceValue || 'tainted-input'),
+        preview: maskSecret(sourceVal),
         location: maskLocation(sanitizedUrl),
-        context: event.details || `Assigned to ${event.sinkName}`,
+        context: contextStr,
       },
-      tags: ['page-reported', 'dom-xss', 'sink', 'taint-lite', event.sinkName || 'sink'],
+      tags: ['page-reported', 'dom-xss', 'sink', 'taint-lite', sinkName],
       scopeStatus,
       timestamp: Date.now(),
       origin,
@@ -474,6 +481,7 @@ export function handleMainWorldEvent(
     };
     globalLeadStore.addLead(lead, tabId);
   } else if (event.eventType === 'postmessage_call') {
+    const detailsStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : 'postMessage(*)';
     const lead: Lead = {
       id: nextId('POST-WILD'),
       ruleId: 'IFR-001',
@@ -485,9 +493,9 @@ export function handleMainWorldEvent(
       needs: ['inspect message payload and determine if sensitive tokens or state can be intercepted'],
       doesNotProve: ['unauthorized cross-origin token interception'],
       evidence: {
-        preview: maskSecret(event.details || 'postMessage(*)'),
+        preview: maskSecret(detailsStr),
         location: maskLocation(sanitizedUrl),
-        context: event.details,
+        context: detailsStr,
       },
       tags: ['page-reported', 'postmessage', 'wildcard-origin', 'cross-origin'],
       scopeStatus,
@@ -498,6 +506,7 @@ export function handleMainWorldEvent(
     };
     globalLeadStore.addLead(lead, tabId);
   } else if (event.eventType === 'postmessage_listener') {
+    const detailsStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : 'message listener missing origin check';
     const lead: Lead = {
       id: nextId('POST-NO-ORIGIN'),
       ruleId: 'IFR-002',
@@ -509,9 +518,9 @@ export function handleMainWorldEvent(
       needs: ['verify if listener handler processes untrusted cross-origin postMessage payloads'],
       doesNotProve: ['cross-origin message manipulation'],
       evidence: {
-        preview: maskSecret(event.details || 'message listener missing origin check'),
+        preview: maskSecret(detailsStr),
         location: maskLocation(sanitizedUrl),
-        context: event.details,
+        context: detailsStr,
       },
       tags: ['page-reported', 'postmessage', 'missing-origin-check', 'event-listener'],
       scopeStatus,
@@ -522,6 +531,9 @@ export function handleMainWorldEvent(
     };
     globalLeadStore.addLead(lead, tabId);
   } else if (event.eventType === 'storage_write') {
+    const keyStr = typeof event.storageKey === 'string' && event.storageKey.length > 0 ? event.storageKey : 'key';
+    const previewStr = typeof event.storageKey === 'string' && event.storageKey.length > 0 ? event.storageKey : 'storage-token';
+    const contextStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : `Key: ${keyStr}`;
     const lead: Lead = {
       id: nextId('STOR-TOKEN'),
       ruleId: 'AUTH-003',
@@ -529,15 +541,15 @@ export function handleMainWorldEvent(
       tier: 'whisper',
       potential: 'info',
       confidence: 0.65,
-      title: `[Page-Reported] Sensitive Token Stored in Web Storage (${event.storageKey || 'key'})`,
+      title: `[Page-Reported] Sensitive Token Stored in Web Storage (${keyStr})`,
       needs: ['check if tokens stored in localStorage are vulnerable to XSS exfiltration'],
       doesNotProve: ['token compromise'],
       evidence: {
-        preview: maskSecret(event.storageKey || 'storage-token'),
+        preview: maskSecret(previewStr),
         location: maskLocation(sanitizedUrl),
-        context: event.details || `Key: ${event.storageKey}`,
+        context: contextStr,
       },
-      tags: ['page-reported', 'storage', 'jwt', 'auth-token', event.storageKey || 'key'],
+      tags: ['page-reported', 'storage', 'jwt', 'auth-token', keyStr],
       scopeStatus,
       timestamp: Date.now(),
       origin,
@@ -561,7 +573,7 @@ export function handleDevToolsLeads(
   for (const lead of leads) {
     lead.sourceSensor = 'S4';
     globalLeadStore.addLead(lead, tabId);
-    if (lead.origin && lead.origin !== 'https://unknown') {
+    if (typeof lead.origin === 'string' && lead.origin.length > 0 && lead.origin !== 'https://unknown') {
       origin = lead.origin;
     }
   }
@@ -596,10 +608,10 @@ export function getLeadsState(
 ): LeadStateUpdateMessage {
   let leads: Lead[] = [];
 
-  if (origin && origin.length > 0) {
+  if (typeof origin === 'string' && origin.length > 0) {
     leads = globalLeadStore.getLeadsForOrigin(origin);
   } else if (tabId !== undefined && tabId >= 0) {
-    leads = globalLeadStore.getLeadsForTab(tabId, origin || '');
+    leads = globalLeadStore.getLeadsForTab(tabId, typeof origin === 'string' && origin.length > 0 ? origin : '');
   } else {
     leads = globalLeadStore.getAllLeads();
   }
@@ -629,7 +641,7 @@ export function getLeadsState(
   return {
     type: 'LEAD_STATE_UPDATE',
     tabId,
-    origin: origin || 'https://unknown',
+    origin: typeof origin === 'string' && origin.length > 0 ? origin : 'https://unknown',
     leads: ranked,
     activeChains: chainResult.activeChains,
     stats,

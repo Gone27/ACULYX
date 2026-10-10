@@ -20,14 +20,14 @@ import type { Lead } from '../leads/types';
 const collectedLeads: Lead[] = [];
 
 // DOM Element references
-const tbody = document.getElementById('leads-tbody') as HTMLTableSectionElement;
-const btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
-const statTotal = document.getElementById('stat-total-count') as HTMLSpanElement;
-const statCritical = document.getElementById('stat-critical-count') as HTMLSpanElement;
-const statHigh = document.getElementById('stat-high-count') as HTMLSpanElement;
-const statMedium = document.getElementById('stat-medium-count') as HTMLSpanElement;
-const statLow = document.getElementById('stat-low-count') as HTMLSpanElement;
-const statInfo = document.getElementById('stat-info-count') as HTMLSpanElement;
+const tbody = document.getElementById('leads-tbody');
+const btnClear = document.getElementById('btn-clear');
+const statTotal = document.getElementById('stat-total-count');
+const statCritical = document.getElementById('stat-critical-count');
+const statHigh = document.getElementById('stat-high-count');
+const statMedium = document.getElementById('stat-medium-count');
+const statLow = document.getElementById('stat-low-count');
+const statInfo = document.getElementById('stat-info-count');
 
 function updateStats(): void {
   let crit = 0;
@@ -46,17 +46,18 @@ function updateStats(): void {
     }
   }
 
-  if (statTotal) statTotal.textContent = String(collectedLeads.length);
-  if (statCritical) statCritical.textContent = String(crit);
-  if (statHigh) statHigh.textContent = String(high);
-  if (statMedium) statMedium.textContent = String(med);
-  if (statLow) statLow.textContent = String(low);
-  if (statInfo) statInfo.textContent = String(info);
+  if (statTotal !== null) statTotal.textContent = String(collectedLeads.length);
+  if (statCritical !== null) statCritical.textContent = String(crit);
+  if (statHigh !== null) statHigh.textContent = String(high);
+  if (statMedium !== null) statMedium.textContent = String(med);
+  if (statLow !== null) statLow.textContent = String(low);
+  if (statInfo !== null) statInfo.textContent = String(info);
 }
 
 function renderLeadRow(lead: Lead): void {
+  if (tbody === null) return;
   const emptyRow = document.getElementById('empty-row');
-  if (emptyRow && emptyRow.parentNode === tbody) {
+  if (emptyRow !== null && emptyRow.parentNode === tbody) {
     tbody.removeChild(emptyRow);
   }
 
@@ -117,7 +118,7 @@ function renderLeadRow(lead: Lead): void {
   }
 }
 
-if (btnClear) {
+if (btnClear !== null && tbody !== null) {
   btnClear.addEventListener('click', () => {
     collectedLeads.length = 0;
     while (tbody.firstChild) {
@@ -136,10 +137,10 @@ if (btnClear) {
 }
 
 // ── Network listener ──────────────────────────────────────────────────────────
-if (typeof chrome !== 'undefined' && chrome.devtools?.network?.onRequestFinished) {
+if (typeof chrome !== 'undefined' && typeof chrome.devtools?.network?.onRequestFinished?.addListener === 'function') {
   chrome.devtools.network.onRequestFinished.addListener((request) => {
     const url = request.request?.url;
-    if (!url || url.startsWith('chrome-extension://') || url.startsWith('data:')) {
+    if (typeof url !== 'string' || url.length === 0 || url.startsWith('chrome-extension://') || url.startsWith('data:')) {
       return;
     }
 
@@ -157,7 +158,7 @@ if (typeof chrome !== 'undefined' && chrome.devtools?.network?.onRequestFinished
     if (!isInspectable) return;
 
     request.getContent((rawContent) => {
-      if (!rawContent || typeof rawContent !== 'string') return;
+      if (typeof rawContent !== 'string' || rawContent.length === 0) return;
 
       // In-memory detector evaluation (F7: Body, F1: Secrets, F2: Endpoints)
       const bodyLeads = detectBodyLeads(rawContent, mimeType, url, 'in-scope');
@@ -174,7 +175,7 @@ if (typeof chrome !== 'undefined' && chrome.devtools?.network?.onRequestFinished
 
       for (const lead of allLeads) {
         lead.sourceSensor = 'S4';
-        lead.url = (maskLocation(lead.url) as string) || lead.url;
+        lead.url = maskLocation(lead.url);
         lead.evidence.location = maskLocation(lead.evidence.location);
         collectedLeads.push(lead);
         renderLeadRow(lead);

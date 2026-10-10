@@ -29,7 +29,7 @@ export function detectHeaderLeads(
   scopeStatus: Lead['scopeStatus'] = 'unknown'
 ): Lead[] {
   const leads: Lead[] = [];
-  if (!headers) return leads;
+  if (Object.keys(headers).length === 0) return leads;
 
   // Normalize header keys to lowercase
   const lowerHeaders: Record<string, string> = {};
@@ -52,9 +52,9 @@ export function detectHeaderLeads(
   const aceh = lowerHeaders['access-control-expose-headers'];
   const vary = lowerHeaders['vary'];
 
-  if (acao) {
+  if (typeof acao === 'string' && acao.length > 0) {
     const isCredentialsTrue = acac?.trim().toLowerCase() === 'true';
-    const reflectsOrigin = requestOrigin && acao.trim() === requestOrigin;
+    const reflectsOrigin = requestOrigin !== null && requestOrigin.length > 0 && acao.trim() === requestOrigin;
     const isNullOrigin = acao.trim() === 'null';
     const isHttpAllowed = acao.startsWith('http://');
 
@@ -86,7 +86,7 @@ export function detectHeaderLeads(
       });
     }
 
-    if (reflectsOrigin && (!vary || !vary.toLowerCase().includes('origin'))) {
+    if (reflectsOrigin && (typeof vary !== 'string' || !vary.toLowerCase().includes('origin'))) {
       leads.push({
         id: nextLeadId('COR-NOVARY'),
         ruleId: 'COR-001',
@@ -111,7 +111,7 @@ export function detectHeaderLeads(
     }
 
     // COR-002: Methods and exposed auth headers
-    if (acam && isCredentialsTrue && /(PUT|DELETE|PATCH)/i.test(acam)) {
+    if (typeof acam === 'string' && acam.length > 0 && isCredentialsTrue && /(PUT|DELETE|PATCH)/i.test(acam)) {
       leads.push({
         id: nextLeadId('COR-METHODS'),
         ruleId: 'COR-002',
@@ -135,7 +135,7 @@ export function detectHeaderLeads(
       });
     }
 
-    if (aceh && /(authorization|cookie|set-cookie|x-auth-token)/i.test(aceh)) {
+    if (typeof aceh === 'string' && aceh.length > 0 && /(authorization|cookie|set-cookie|x-auth-token)/i.test(aceh)) {
       leads.push({
         id: nextLeadId('COR-EXPOSE'),
         ruleId: 'COR-002',
@@ -161,8 +161,10 @@ export function detectHeaderLeads(
   }
 
   // 2. CSP-101: Bypass Domains in CSP
-  const csp = lowerHeaders['content-security-policy'] || lowerHeaders['content-security-policy-report-only'];
-  if (csp) {
+  const csp1 = lowerHeaders['content-security-policy'];
+  const csp2 = lowerHeaders['content-security-policy-report-only'];
+  const csp = typeof csp1 === 'string' && csp1.length > 0 ? csp1 : (typeof csp2 === 'string' && csp2.length > 0 ? csp2 : undefined);
+  if (csp !== undefined && csp.length > 0) {
     const matchedBypassDomains = CSP_BYPASS_DOMAINS.filter(d => csp.includes(d));
     if (matchedBypassDomains.length > 0) {
       leads.push({
@@ -172,7 +174,7 @@ export function detectHeaderLeads(
         tier: 'strong',
         potential: 'medium',
         confidence: 0.8,
-        title: `CSP Policy Allowlist Contains User-Controllable / CDN Host: ${matchedBypassDomains[0]}`,
+        title: `CSP Policy Allowlist Contains User-Controllable / CDN Host: ${matchedBypassDomains[0] !== undefined ? matchedBypassDomains[0] : ''}`,
         needs: ['verify if script-gadget or uploaded JSONP can be referenced'],
         doesNotProve: ['CSP execution bypass without injectable script tag'],
         evidence: {
@@ -192,8 +194,10 @@ export function detectHeaderLeads(
 
   // 3. CAC-001: Authenticated-Looking Response with Public Caching
   const cacheControl = lowerHeaders['cache-control'];
-  const hasAuth = lowerHeaders['authorization'] || lowerHeaders['set-cookie'];
-  if (cacheControl && hasAuth) {
+  const authHeader = lowerHeaders['authorization'];
+  const cookieHeader = lowerHeaders['set-cookie'];
+  const hasAuth = (typeof authHeader === 'string' && authHeader.length > 0) || (typeof cookieHeader === 'string' && cookieHeader.length > 0);
+  if (typeof cacheControl === 'string' && cacheControl.length > 0 && hasAuth) {
     if (/(public|s-maxage)/i.test(cacheControl) && !/no-store/i.test(cacheControl)) {
       leads.push({
         id: nextLeadId('CAC-AUTH'),
@@ -225,8 +229,8 @@ export function detectHeaderLeads(
     const rfcMatch = headerVal.match(RFC1918_REGEX);
     const internalHostMatch = headerVal.match(INTERNAL_HOST_REGEX);
 
-    if (rfcMatch || internalHostMatch) {
-      const matchVal = (rfcMatch ? rfcMatch[0] : internalHostMatch?.[0]) || '';
+    if (rfcMatch !== null || internalHostMatch !== null) {
+      const matchVal = rfcMatch !== null ? rfcMatch[0] : (internalHostMatch !== null ? internalHostMatch[0] : '');
       leads.push({
         id: nextLeadId('INF-IP'),
         ruleId: 'INF-001',
@@ -256,7 +260,8 @@ export function detectHeaderLeads(
   // 5. INF-002: Infrastructure Disclosures (Server-Timing, Via, X-Backend, X-Jenkins)
   const infraHeaders = ['server-timing', 'via', 'x-backend-server', 'x-debug-token', 'x-jenkins', 'x-powered-by'];
   for (const ih of infraHeaders) {
-    if (lowerHeaders[ih]) {
+    const headerValue = lowerHeaders[ih];
+    if (typeof headerValue === 'string' && headerValue.length > 0) {
       leads.push({
         id: nextLeadId('INF-HEADER'),
         ruleId: 'INF-002',
@@ -268,7 +273,7 @@ export function detectHeaderLeads(
         needs: ['reconnaissance only'],
         doesNotProve: ['vulnerability'],
         evidence: {
-          preview: maskSecret(lowerHeaders[ih]),
+          preview: maskSecret(headerValue),
           location: maskLocation(url),
         },
         tags: ['infrastructure', 'fingerprint'],

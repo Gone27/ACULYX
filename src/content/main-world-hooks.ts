@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 /**
  * main-world-hooks.ts - Sensor 3 (S3)
  *
@@ -10,15 +11,15 @@
 
 export interface MainWorldLeadEventDetail {
   eventType: 'sink' | 'postmessage_call' | 'postmessage_listener' | 'storage_write';
-  nonce?: string;
-  sinkName?: string;
-  sourceValue?: string;
-  targetOrigin?: string;
-  hasOriginCheck?: boolean;
-  storageKey?: string;
-  tokenShape?: string;
-  location?: string;
-  details?: string;
+  nonce?: string | undefined;
+  sinkName?: string | undefined;
+  sourceValue?: string | undefined;
+  targetOrigin?: string | undefined;
+  hasOriginCheck?: boolean | undefined;
+  storageKey?: string | undefined;
+  tokenShape?: string | undefined;
+  location?: string | undefined;
+  details?: string | undefined;
 }
 
 let hooksInstalledInClosure = false;
@@ -31,7 +32,11 @@ export function installMainWorldHooks(): void {
   const recentPostMessages: string[] = [];
 
   function emitEvent(detail: MainWorldLeadEventDetail): void {
-    const hash = `${detail.eventType}|${detail.sinkName || ''}|${detail.storageKey || ''}|${detail.targetOrigin || ''}|${detail.details || ''}`;
+    const sinkNamePart = typeof detail.sinkName === 'string' ? detail.sinkName : '';
+    const storageKeyPart = typeof detail.storageKey === 'string' ? detail.storageKey : '';
+    const targetOriginPart = typeof detail.targetOrigin === 'string' ? detail.targetOrigin : '';
+    const detailsPart = typeof detail.details === 'string' ? detail.details : '';
+    const hash = `${detail.eventType}|${sinkNamePart}|${storageKeyPart}|${targetOriginPart}|${detailsPart}`;
     if (dispatchedEventHashes.has(hash)) return;
     if (dispatchedEventHashes.size > 200) {
       dispatchedEventHashes.clear();
@@ -39,7 +44,8 @@ export function installMainWorldHooks(): void {
     dispatchedEventHashes.add(hash);
 
     try {
-      const cleanLocation = window.location.href ? window.location.href.split('#')[0] : '';
+      const href = window.location.href;
+      const cleanLocation = href.length > 0 ? (href.split('#')[0] ?? '') : '';
       const event = new CustomEvent('__ACULYX_MAIN_WORLD_EVENT__', {
         detail: {
           ...detail,
@@ -57,17 +63,17 @@ export function installMainWorldHooks(): void {
     const sources: Array<{ name: string; value: string }> = [];
 
     // 1. location.hash
-    if (window.location.hash && window.location.hash.length > 2) {
+    if (window.location.hash.length > 2) {
       sources.push({ name: 'location.hash', value: window.location.hash.slice(1) });
     }
 
     // 2. location.search & individual query params
-    if (window.location.search && window.location.search.length > 2) {
+    if (window.location.search.length > 2) {
       sources.push({ name: 'location.search', value: window.location.search.slice(1) });
       try {
         const sp = new URLSearchParams(window.location.search);
         sp.forEach((v, k) => {
-          if (v && v.length >= 3) {
+          if (v.length >= 3) {
             sources.push({ name: `query_param:${k}`, value: v });
           }
         });
@@ -77,19 +83,19 @@ export function installMainWorldHooks(): void {
     }
 
     // 3. document.referrer
-    if (document.referrer && document.referrer.length > 5) {
+    if (document.referrer.length > 5) {
       sources.push({ name: 'document.referrer', value: document.referrer });
     }
 
     // 4. window.name
-    if (window.name && window.name.length >= 3) {
+    if (window.name.length >= 3) {
       sources.push({ name: 'window.name', value: window.name });
     }
 
     // 5. Recent postMessage strings
     for (let i = 0; i < recentPostMessages.length; i++) {
       const msg = recentPostMessages[i];
-      if (msg && msg.length >= 4) {
+      if (typeof msg === 'string' && msg.length >= 4) {
         sources.push({ name: 'postMessage_data', value: msg });
       }
     }
@@ -120,30 +126,40 @@ export function installMainWorldHooks(): void {
     const innerHtmlDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
     if (innerHtmlDescriptor?.set) {
       const origInnerHtmlSet = innerHtmlDescriptor.set;
-      Object.defineProperty(Element.prototype, 'innerHTML', {
-        set(value: unknown) {
+      const desc: PropertyDescriptor = {
+        set(this: Element, value: unknown) {
           checkTaint(value, 'Element.innerHTML');
           return origInnerHtmlSet.call(this, value);
         },
         configurable: true,
-        enumerable: innerHtmlDescriptor.enumerable,
-        get: innerHtmlDescriptor.get,
-      });
+      };
+      if (innerHtmlDescriptor.enumerable !== undefined) {
+        desc.enumerable = innerHtmlDescriptor.enumerable;
+      }
+      if (innerHtmlDescriptor.get) {
+        desc.get = innerHtmlDescriptor.get;
+      }
+      Object.defineProperty(Element.prototype, 'innerHTML', desc);
     }
 
     // outerHTML
     const outerHtmlDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML');
     if (outerHtmlDescriptor?.set) {
       const origOuterHtmlSet = outerHtmlDescriptor.set;
-      Object.defineProperty(Element.prototype, 'outerHTML', {
-        set(value: unknown) {
+      const desc: PropertyDescriptor = {
+        set(this: Element, value: unknown) {
           checkTaint(value, 'Element.outerHTML');
           return origOuterHtmlSet.call(this, value);
         },
         configurable: true,
-        enumerable: outerHtmlDescriptor.enumerable,
-        get: outerHtmlDescriptor.get,
-      });
+      };
+      if (outerHtmlDescriptor.enumerable !== undefined) {
+        desc.enumerable = outerHtmlDescriptor.enumerable;
+      }
+      if (outerHtmlDescriptor.get) {
+        desc.get = outerHtmlDescriptor.get;
+      }
+      Object.defineProperty(Element.prototype, 'outerHTML', desc);
     }
 
     // insertAdjacentHTML
@@ -179,18 +195,18 @@ export function installMainWorldHooks(): void {
 
     // setTimeout with string handler
     const origSetTimeout = window.setTimeout;
-    window.setTimeout = function (handler: TimerHandler, timeout?: number, ...args: unknown[]) {
+    window.setTimeout = function (this: unknown, handler: TimerHandler, timeout?: number, ...args: any[]) {
       if (typeof handler === 'string') {
         checkTaint(handler, 'setTimeout(string)');
       }
-      return origSetTimeout.call(this, handler, timeout, ...args);
-    } as typeof window.setTimeout;
+      return (origSetTimeout as any).apply(this, [handler, timeout, ...args]);
+    } as any;
 
     // location.assign & location.replace
-    if (window.location) {
+    if (typeof window.location === 'object' && window.location !== null) {
       const origAssign = window.location.assign;
       if (typeof origAssign === 'function') {
-        window.location.assign = function (url: string) {
+        window.location.assign = function (this: unknown, url: string) {
           checkTaint(url, 'location.assign');
           return origAssign.call(this, url);
         };
@@ -198,7 +214,7 @@ export function installMainWorldHooks(): void {
 
       const origReplace = window.location.replace;
       if (typeof origReplace === 'function') {
-        window.location.replace = function (url: string) {
+        window.location.replace = function (this: unknown, url: string) {
           checkTaint(url, 'location.replace');
           return origReplace.call(this, url);
         };
@@ -211,7 +227,7 @@ export function installMainWorldHooks(): void {
   // ── 2. window.postMessage Calls & Listeners ───────────────────────────────
   try {
     const origPostMessage = window.postMessage;
-    window.postMessage = function (message: unknown, targetOriginOrOptions: unknown, ...rest: unknown[]) {
+    window.postMessage = function (this: unknown, message: unknown, targetOriginOrOptions: unknown, ...rest: unknown[]) {
       const targetOrigin = typeof targetOriginOrOptions === 'string'
         ? targetOriginOrOptions
         : (targetOriginOrOptions as WindowPostMessageOptions | undefined)?.targetOrigin ?? '*';
@@ -227,11 +243,12 @@ export function installMainWorldHooks(): void {
             : 'window.postMessage sent message to wildcard target origin "*"',
         });
       }
-      return origPostMessage.call(this, message, targetOriginOrOptions as string, ...(rest as any));
+      return (origPostMessage as any).apply(this, [message, targetOriginOrOptions, ...rest]);
     };
 
     const origAddEventListener = window.addEventListener;
     window.addEventListener = function (
+      this: unknown,
       type: string,
       listener: EventListenerOrEventListenerObject | null,
       options?: boolean | AddEventListenerOptions
@@ -241,14 +258,15 @@ export function installMainWorldHooks(): void {
         const fnSource = originalFn.toString();
         const hasOriginCheckInSource = /\.origin\b/.test(fnSource);
 
-        const wrapped = function (event: MessageEvent) {
+        const wrapped = function (this: unknown, event: Event) {
+          const msgEvent = event as MessageEvent;
           // Track postMessage data in recent list for source-to-sink correlation
           try {
-            if (typeof event.data === 'string') {
-              recentPostMessages.push(event.data);
+            if (typeof msgEvent.data === 'string') {
+              recentPostMessages.push(msgEvent.data);
               if (recentPostMessages.length > 20) recentPostMessages.shift();
-            } else if (typeof event.data === 'object' && event.data !== null) {
-              const str = JSON.stringify(event.data);
+            } else if (typeof msgEvent.data === 'object' && msgEvent.data !== null) {
+              const str = JSON.stringify(msgEvent.data);
               recentPostMessages.push(str);
               if (recentPostMessages.length > 20) recentPostMessages.shift();
             }
@@ -264,13 +282,13 @@ export function installMainWorldHooks(): void {
             });
           }
 
-          return originalFn.call(this, event);
+          return (originalFn as any).call(this, msgEvent);
         };
 
-        return origAddEventListener.call(this, type, wrapped, options);
+        return (origAddEventListener as any).call(this, type, wrapped, options);
       }
 
-      return origAddEventListener.call(this, type, listener, options);
+      return (origAddEventListener as any).call(this, type, listener, options);
     };
   } catch {
     // PostMessage hooking error swallowed
@@ -303,12 +321,13 @@ export function installMainWorldHooks(): void {
           }
         }
 
-        if (isSensitiveKey || tokenShape) {
+        const hasShape = typeof tokenShape === 'string' && tokenShape.length > 0;
+        if (isSensitiveKey || hasShape) {
           emitEvent({
             eventType: 'storage_write',
             storageKey: key,
             tokenShape,
-            details: tokenShape
+            details: hasShape
               ? `Storage write to key "${key}" contains ${tokenShape} shape in memory`
               : `Storage write to sensitive key "${key}" observed`,
           });

@@ -39,7 +39,7 @@ export function detectReconLeads(
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
       const bucketName = match[1];
-      if (bucketName && !seenBuckets.has(bucketName)) {
+      if (bucketName !== undefined && bucketName.length > 0 && !seenBuckets.has(bucketName)) {
         seenBuckets.add(bucketName);
         leads.push({
           id: nextLeadId('CLD-BUCKET'),

@@ -22,7 +22,7 @@ import {
 import type { GraphNode, GraphEdge, AttackSurfaceGraph, TabState } from '../shared/types';
 import type { Lead, ChainRule, ReconMemory } from '../leads/types';
 import { sendToBackground } from '../shared/messaging';
-import type { LeadStateUpdateMessage, ReconGetResponse } from '../shared/messaging';
+import type { LeadStateUpdateMessage } from '../shared/messaging';
 import { SIDEPANEL_PORT_NAME } from '../shared/constants';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { bootstrapAppearance, applyAppearance } from '../shared/appearance';
@@ -396,10 +396,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await sendToBackground({
         type: 'GET_LEADS_STATE',
         tabId: activeTabId ?? undefined,
-        origin: activeOrigin || undefined,
+        origin: typeof activeOrigin === 'string' && activeOrigin.length > 0 ? activeOrigin : undefined,
       });
-      if (res && res.type === 'LEAD_STATE_UPDATE') {
-        handleLeadStateUpdate(res as LeadStateUpdateMessage);
+      if (typeof res === 'object' && res !== null && res.type === 'LEAD_STATE_UPDATE') {
+        handleLeadStateUpdate(res);
       }
     } catch {
       // SW might be warming up
@@ -743,7 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
         text.setAttribute('font-size', '8');
         text.setAttribute('font-weight', '600');
         text.setAttribute('fill', '#a78bfa');
-        text.textContent = FAMILIES[i].id;
+        text.textContent = FAMILIES[i]?.id ?? '';
         spRadarAxes.appendChild(text);
       }
     }
@@ -837,12 +837,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tier !== 'all' && lead.tier !== tier) return false;
       if (scope !== 'all' && lead.scopeStatus !== scope) return false;
       if (newOnly && lead.novelty === false) return false;
-      if (chainOnly && (!lead.chainIds || lead.chainIds.length === 0)) return false;
-      if (query) {
+      if (chainOnly && (lead.chainIds === undefined || lead.chainIds.length === 0)) return false;
+      if (typeof query === 'string' && query.length > 0) {
         const matchTitle = lead.title.toLowerCase().includes(query);
         const matchRule = lead.ruleId.toLowerCase().includes(query);
         const matchTags = lead.tags.some((t) => t.toLowerCase().includes(query));
-        const matchEvidence = (lead.evidence?.preview || '').toLowerCase().includes(query);
+        const prevText = (lead.evidence !== undefined && typeof lead.evidence.preview === 'string') ? lead.evidence.preview : '';
+        const matchEvidence = prevText.toLowerCase().includes(query);
         if (!matchTitle && !matchRule && !matchTags && !matchEvidence) return false;
       }
       return true;
@@ -866,14 +867,18 @@ document.addEventListener('DOMContentLoaded', () => {
     spLeadsList.hidden = false;
 
     const sorted = [...filtered].sort((a, b) => {
-      if (a.pinned && !b.pinned) return -1;
-      if (!a.pinned && b.pinned) return 1;
+      const aPinned = a.pinned === true;
+      const bPinned = b.pinned === true;
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
       return (b.priority ?? 0) - (a.priority ?? 0);
     });
 
     for (let i = 0; i < sorted.length; i++) {
       const lead = sorted[i];
-      spLeadsList.appendChild(createSidepanelLeadCard(lead, i));
+      if (lead) {
+        spLeadsList.appendChild(createSidepanelLeadCard(lead, i));
+      }
     }
   }
 
@@ -882,7 +887,7 @@ document.addEventListener('DOMContentLoaded', () => {
     card.className = 'lead-card';
     card.id = `sp-lead-card-${lead.id}`;
     card.setAttribute('tabindex', '0');
-    if (lead.pinned) {
+    if (lead.pinned === true) {
       card.classList.add('card-pinned');
     }
     if (index === selectedLeadIndex) {
@@ -925,14 +930,14 @@ document.addEventListener('DOMContentLoaded', () => {
     title.textContent = lead.title;
     card.appendChild(title);
 
-    if (lead.evidence?.preview) {
+    if (lead.evidence !== undefined && typeof lead.evidence.preview === 'string' && lead.evidence.preview.length > 0) {
       const pre = document.createElement('pre');
       pre.className = 'lead-evidence-pre';
       pre.textContent = lead.evidence.preview;
       card.appendChild(pre);
     }
 
-    if (lead.evidence?.location) {
+    if (lead.evidence !== undefined && typeof lead.evidence.location === 'string' && lead.evidence.location.length > 0) {
       const locLine = document.createElement('div');
       locLine.className = 'lead-detail-line';
       const locLabel = document.createElement('span');
@@ -944,7 +949,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(locLine);
     }
 
-    if (lead.chainIds && lead.chainIds.length > 0) {
+    if (lead.chainIds !== undefined && lead.chainIds.length > 0) {
       const chainLine = document.createElement('div');
       chainLine.className = 'lead-detail-line';
       const chainLabel = document.createElement('span');
@@ -956,7 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(chainLine);
     }
 
-    if (lead.needs && lead.needs.length > 0) {
+    if (lead.needs !== undefined && lead.needs.length > 0) {
       const needsLine = document.createElement('div');
       needsLine.className = 'lead-detail-line';
       const needsLabel = document.createElement('span');
@@ -974,22 +979,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Pin
     const pinBtn = document.createElement('button');
     pinBtn.className = 'lead-btn';
-    pinBtn.textContent = lead.pinned ? '📌 Pinned' : '📍 Pin';
-    if (lead.pinned) pinBtn.classList.add('btn-active');
-    pinBtn.addEventListener('click', async (e) => {
+    pinBtn.textContent = lead.pinned === true ? '📌 Pinned' : '📍 Pin';
+    if (lead.pinned === true) pinBtn.classList.add('btn-active');
+    pinBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      await togglePinLead(lead);
+      void togglePinLead(lead);
     });
     actions.appendChild(pinBtn);
 
     // Triage
     const triageBtn = document.createElement('button');
     triageBtn.className = 'lead-btn';
-    const triageText = lead.triageState ? lead.triageState : 'Triage';
+    const triageText = typeof lead.triageState === 'string' && lead.triageState.length > 0 ? lead.triageState : 'Triage';
     triageBtn.textContent = `🎯 ${triageText}`;
-    triageBtn.addEventListener('click', async (e) => {
+    triageBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      await cycleTriageLead(lead);
+      void cycleTriageLead(lead);
     });
     actions.appendChild(triageBtn);
 
@@ -997,13 +1002,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const reportBtn = document.createElement('button');
     reportBtn.className = 'lead-btn';
     reportBtn.textContent = '📄 Copy Report';
-    reportBtn.addEventListener('click', async (e) => {
+    reportBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const md = formatLeadsReportMarkdown([lead]);
-      await navigator.clipboard.writeText(md);
-      const orig = reportBtn.textContent;
-      reportBtn.textContent = '✔ Copied!';
-      setTimeout(() => { reportBtn.textContent = orig; }, 1500);
+      void navigator.clipboard.writeText(md).then(() => {
+        const orig = reportBtn.textContent;
+        reportBtn.textContent = '✔ Copied!';
+        setTimeout(() => { reportBtn.textContent = orig; }, 1500);
+      });
     });
     actions.appendChild(reportBtn);
 
@@ -1012,16 +1018,17 @@ document.addEventListener('DOMContentLoaded', () => {
     curlBtn.className = 'lead-btn';
     curlBtn.textContent = '💻 Copy cURL';
     const isInScope = lead.scopeStatus === 'in-scope';
-    const isSafeUrl = lead.url && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
+    const isSafeUrl = typeof lead.url === 'string' && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
     if (isInScope && isSafeUrl) {
       curlBtn.title = 'Copy safe in-scope GET cURL command without cookies';
-      curlBtn.addEventListener('click', async (e) => {
+      curlBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const curlCmd = `curl -s -i "${lead.url}"`;
-        await navigator.clipboard.writeText(curlCmd);
-        const orig = curlBtn.textContent;
-        curlBtn.textContent = '✔ Copied!';
-        setTimeout(() => { curlBtn.textContent = orig; }, 1500);
+        void navigator.clipboard.writeText(curlCmd).then(() => {
+          const orig = curlBtn.textContent;
+          curlBtn.textContent = '✔ Copied!';
+          setTimeout(() => { curlBtn.textContent = orig; }, 1500);
+        });
       });
     } else {
       curlBtn.disabled = true;
@@ -1043,7 +1050,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function togglePinLead(lead: Lead): Promise<void> {
-    const newPinned = !lead.pinned;
+    const newPinned = lead.pinned !== true;
     lead.pinned = newPinned;
     await sendToBackground({
       type: 'LEAD_ACTION',
@@ -1056,9 +1063,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function cycleTriageLead(lead: Lead): Promise<void> {
-    const states: Array<Lead['triageState']> = ['open', 'triaged', 'false_positive', 'resolved'];
-    const currentIdx = states.indexOf(lead.triageState ?? 'open');
-    const nextState = states[(currentIdx + 1) % states.length];
+    const states: Array<NonNullable<Lead['triageState']>> = ['open', 'triaged', 'false_positive', 'resolved'];
+    const currentIdx = states.indexOf((lead.triageState ?? 'open'));
+    const nextIdx = (currentIdx + 1) % states.length;
+    const nextState = states[nextIdx] ?? 'open';
     lead.triageState = nextState;
     await sendToBackground({
       type: 'LEAD_ACTION',
@@ -1082,7 +1090,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateSelectedLeadCard(filtered: Lead[]): void {
     if (selectedLeadIndex < 0 || selectedLeadIndex >= filtered.length) return;
     const lead = filtered[selectedLeadIndex];
-    focusLeadCardInSidepanel(lead.id);
+    if (lead) {
+      focusLeadCardInSidepanel(lead.id);
+    }
   }
 
   leadsSearchInput.addEventListener('input', () => renderLeadsList());
@@ -1192,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       card.appendChild(needsList);
 
-      if (isActive && matched && matched.matchedLeads.length > 0) {
+      if (isActive && matched !== undefined && matched.matchedLeads.length > 0) {
         const matchedTitle = document.createElement('div');
         matchedTitle.className = 'chain-step-title';
         matchedTitle.textContent = `Correlated Leads (${matched.matchedLeads.length}):`;
@@ -1214,7 +1224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         card.appendChild(matchedList);
       }
 
-      if (chain.next && chain.next.length > 0) {
+      if (chain.next !== undefined && chain.next.length > 0) {
         const nextTitle = document.createElement('div');
         nextTitle.className = 'chain-step-title';
         nextTitle.textContent = 'Next Manual Testing Step:';
@@ -1237,10 +1247,10 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await sendToBackground({
         type: 'RECON_GET',
-        origin: activeOrigin || undefined,
+        origin: typeof activeOrigin === 'string' && activeOrigin.length > 0 ? activeOrigin : undefined,
       });
-      if (res && res.type === 'RECON_GET_RESPONSE') {
-        currentRecon = (res as ReconGetResponse).memory;
+      if (typeof res === 'object' && res !== null && res.type === 'RECON_GET_RESPONSE') {
+        currentRecon = (res).memory;
         renderReconView();
       }
     } catch {
@@ -1373,18 +1383,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `aculyx-wordlist-${activeApexDomain || 'recon'}.txt`;
+    a.download = `aculyx-wordlist-${typeof activeApexDomain === 'string' && activeApexDomain.length > 0 ? activeApexDomain : 'recon'}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   });
 
-  resetReconBtn.addEventListener('click', async () => {
+  resetReconBtn.addEventListener('click', () => {
     if (!confirm('Are you sure you want to reset all discovered recon memory?')) return;
-    await sendToBackground({ type: 'RECON_RESET' });
-    currentRecon = { hosts: [], params: [], endpoints: [], buckets: [] };
-    renderReconView();
+    void sendToBackground({ type: 'RECON_RESET' }).then(() => {
+      currentRecon = { hosts: [], params: [], endpoints: [], buckets: [] };
+      renderReconView();
+    });
   });
 
   // ── Timeline View Implementation ─────────────────────────────
@@ -1435,7 +1446,7 @@ document.addEventListener('DOMContentLoaded', () => {
       title.textContent = `[${lead.ruleId}] ${lead.title}`;
       eventEl.appendChild(title);
 
-      if (lead.evidence?.preview) {
+      if (lead.evidence !== undefined && typeof lead.evidence.preview === 'string' && lead.evidence.preview.length > 0) {
         const preview = document.createElement('div');
         preview.className = 'timeline-event-preview';
         preview.textContent = lead.evidence.preview;
@@ -1498,6 +1509,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (let i = 0; i < matched.length; i++) {
       const cmd = matched[i];
+      if (!cmd) continue;
       const li = document.createElement('li');
       li.className = `cmd-palette-item ${i === 0 ? 'selected' : ''}`;
       li.setAttribute('role', 'option');
@@ -1528,8 +1540,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   cmdPaletteInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      const selected = cmdPaletteResults.querySelector('.cmd-palette-item.selected') as HTMLLIElement | null;
-      if (selected) {
+      const selected = cmdPaletteResults.querySelector<HTMLElement>('.cmd-palette-item.selected');
+      if (selected !== null) {
         selected.click();
       }
     }
@@ -1571,13 +1583,17 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       if (selectedLeadIndex >= 0 && selectedLeadIndex < filtered.length) {
         const lead = filtered[selectedLeadIndex];
-        void togglePinLead(lead);
+        if (lead) {
+          void togglePinLead(lead);
+        }
       }
     } else if (e.key === 'v') {
       e.preventDefault();
       if (selectedLeadIndex >= 0 && selectedLeadIndex < filtered.length) {
         const lead = filtered[selectedLeadIndex];
-        void cycleTriageLead(lead);
+        if (lead) {
+          void cycleTriageLead(lead);
+        }
       }
     }
   });

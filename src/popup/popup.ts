@@ -42,7 +42,6 @@ let tabBtnLeads:         HTMLButtonElement;
 let hygieneView:         HTMLDivElement;
 let leadsView:           HTMLDivElement;
 let leadsCountBadge:     HTMLSpanElement;
-let radarSvg:            SVGSVGElement;
 let radarRings:          SVGGElement;
 let radarAxes:           SVGGElement;
 let radarBlips:          SVGGElement;
@@ -206,7 +205,6 @@ document.addEventListener('DOMContentLoaded', () => {
   hygieneView         = getEl<HTMLDivElement>('hygiene-view');
   leadsView           = getEl<HTMLDivElement>('leads-view');
   leadsCountBadge     = getEl<HTMLSpanElement>('leads-count-badge');
-  radarSvg            = getEl<SVGSVGElement>('radar-svg');
   radarRings          = getEl<SVGGElement>('radar-rings');
   radarAxes           = getEl<SVGGElement>('radar-axes');
   radarBlips          = getEl<SVGGElement>('radar-blips');
@@ -1803,14 +1801,14 @@ function wireSegmentedControl(): void {
 }
 
 async function refreshLeads(): Promise<void> {
-  if (currentTabId === null && !currentOrigin) return;
+  if (currentTabId === null && (currentOrigin === null || currentOrigin.length === 0)) return;
   try {
     const res = await sendToBackground({
       type: 'GET_LEADS_STATE',
       tabId: currentTabId ?? undefined,
-      origin: currentOrigin || undefined,
+      origin: currentOrigin !== null && currentOrigin.length > 0 ? currentOrigin : undefined,
     });
-    if (res && res.type === 'LEAD_STATE_UPDATE') {
+    if (res.type === 'LEAD_STATE_UPDATE') {
       currentLeads = res.leads ?? [];
       renderLeadsTab(currentLeads);
     }
@@ -1872,7 +1870,7 @@ function renderRadarBase(): void {
     text.setAttribute('font-size', '8');
     text.setAttribute('font-weight', '600');
     text.setAttribute('fill', '#a78bfa');
-    text.textContent = FAMILIES[i].id;
+    text.textContent = FAMILIES[i]?.id ?? '';
     radarAxes.appendChild(text);
   }
 }
@@ -1946,8 +1944,10 @@ function renderLeadsTab(leads: Lead[]): void {
   leadsCardList.hidden = false;
 
   const sorted = [...leads].sort((a, b) => {
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
+    const aPinned = a.pinned === true;
+    const bPinned = b.pinned === true;
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
     return (b.priority ?? 0) - (a.priority ?? 0);
   });
 
@@ -1960,7 +1960,7 @@ function createLeadCard(lead: Lead): HTMLDivElement {
   const card = document.createElement('div');
   card.className = 'lead-card';
   card.id = `lead-card-${lead.id}`;
-  if (lead.pinned) {
+  if (lead.pinned === true) {
     card.classList.add('card-pinned');
   }
 
@@ -2000,14 +2000,14 @@ function createLeadCard(lead: Lead): HTMLDivElement {
   title.textContent = lead.title;
   card.appendChild(title);
 
-  if (lead.evidence?.preview) {
+  if (typeof lead.evidence?.preview === 'string' && lead.evidence.preview.length > 0) {
     const pre = document.createElement('pre');
     pre.className = 'lead-evidence-pre';
     pre.textContent = lead.evidence.preview;
     card.appendChild(pre);
   }
 
-  if (lead.evidence?.location) {
+  if (typeof lead.evidence?.location === 'string' && lead.evidence.location.length > 0) {
     const locLine = document.createElement('div');
     locLine.className = 'lead-detail-line';
     const locLabel = document.createElement('span');
@@ -2019,7 +2019,7 @@ function createLeadCard(lead: Lead): HTMLDivElement {
     card.appendChild(locLine);
   }
 
-  if (lead.chainIds && lead.chainIds.length > 0) {
+  if (lead.chainIds !== undefined && lead.chainIds.length > 0) {
     const chainLine = document.createElement('div');
     chainLine.className = 'lead-detail-line';
     const chainLabel = document.createElement('span');
@@ -2031,7 +2031,7 @@ function createLeadCard(lead: Lead): HTMLDivElement {
     card.appendChild(chainLine);
   }
 
-  if (lead.needs && lead.needs.length > 0) {
+  if (lead.needs !== undefined && lead.needs.length > 0) {
     const needsLine = document.createElement('div');
     needsLine.className = 'lead-detail-line';
     const needsLabel = document.createElement('span');
@@ -2049,11 +2049,11 @@ function createLeadCard(lead: Lead): HTMLDivElement {
   // Pin
   const pinBtn = document.createElement('button');
   pinBtn.className = 'lead-btn';
-  pinBtn.textContent = lead.pinned ? '📌 Pinned' : '📍 Pin';
-  if (lead.pinned) pinBtn.classList.add('btn-active');
-  pinBtn.addEventListener('click', async (e) => {
+  pinBtn.textContent = lead.pinned === true ? '📌 Pinned' : '📍 Pin';
+  if (lead.pinned === true) pinBtn.classList.add('btn-active');
+  pinBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    const newPinned = !lead.pinned;
+    const newPinned = lead.pinned !== true;
     lead.pinned = newPinned;
     pinBtn.textContent = newPinned ? '📌 Pinned' : '📍 Pin';
     if (newPinned) {
@@ -2063,7 +2063,7 @@ function createLeadCard(lead: Lead): HTMLDivElement {
       pinBtn.classList.remove('btn-active');
       card.classList.remove('card-pinned');
     }
-    await sendToBackground({
+    void sendToBackground({
       type: 'LEAD_ACTION',
       leadId: lead.id,
       action: newPinned ? 'pin' : 'unpin',
@@ -2076,16 +2076,16 @@ function createLeadCard(lead: Lead): HTMLDivElement {
   // Triage
   const triageBtn = document.createElement('button');
   triageBtn.className = 'lead-btn';
-  const triageText = lead.triageState ? lead.triageState : 'Triage';
+  const triageText = typeof lead.triageState === 'string' && lead.triageState.length > 0 ? lead.triageState : 'Triage';
   triageBtn.textContent = `🎯 ${triageText}`;
-  triageBtn.addEventListener('click', async (e) => {
+  triageBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    const states: Array<Lead['triageState']> = ['open', 'triaged', 'false_positive', 'resolved'];
+    const states: Array<NonNullable<Lead['triageState']>> = ['open', 'triaged', 'false_positive', 'resolved'];
     const currentIdx = states.indexOf(lead.triageState ?? 'open');
-    const nextState = states[(currentIdx + 1) % states.length];
+    const nextState = states[(currentIdx + 1) % states.length] ?? 'open';
     lead.triageState = nextState;
     triageBtn.textContent = `🎯 ${nextState}`;
-    await sendToBackground({
+    void sendToBackground({
       type: 'LEAD_ACTION',
       leadId: lead.id,
       action: 'triage',
@@ -2099,13 +2099,14 @@ function createLeadCard(lead: Lead): HTMLDivElement {
   const reportBtn = document.createElement('button');
   reportBtn.className = 'lead-btn';
   reportBtn.textContent = '📄 Copy Report';
-  reportBtn.addEventListener('click', async (e) => {
+  reportBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const md = formatLeadsReportMarkdown([lead]);
-    await navigator.clipboard.writeText(md);
-    const orig = reportBtn.textContent;
-    reportBtn.textContent = '✔ Copied!';
-    setTimeout(() => { reportBtn.textContent = orig; }, 1500);
+    void navigator.clipboard.writeText(md).then(() => {
+      const orig = reportBtn.textContent;
+      reportBtn.textContent = '✔ Copied!';
+      setTimeout(() => { reportBtn.textContent = orig; }, 1500);
+    });
   });
   actions.appendChild(reportBtn);
 
@@ -2114,16 +2115,17 @@ function createLeadCard(lead: Lead): HTMLDivElement {
   curlBtn.className = 'lead-btn';
   curlBtn.textContent = '💻 Copy cURL';
   const isInScope = lead.scopeStatus === 'in-scope';
-  const isSafeUrl = lead.url && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
+  const isSafeUrl = typeof lead.url === 'string' && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
   if (isInScope && isSafeUrl) {
     curlBtn.title = 'Copy safe in-scope GET cURL command without cookies';
-    curlBtn.addEventListener('click', async (e) => {
+    curlBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const curlCmd = `curl -s -i "${lead.url}"`;
-      await navigator.clipboard.writeText(curlCmd);
-      const orig = curlBtn.textContent;
-      curlBtn.textContent = '✔ Copied!';
-      setTimeout(() => { curlBtn.textContent = orig; }, 1500);
+      void navigator.clipboard.writeText(curlCmd).then(() => {
+        const orig = curlBtn.textContent;
+        curlBtn.textContent = '✔ Copied!';
+        setTimeout(() => { curlBtn.textContent = orig; }, 1500);
+      });
     });
   } else {
     curlBtn.disabled = true;

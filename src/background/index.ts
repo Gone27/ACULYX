@@ -948,38 +948,42 @@ registerPageSignalInjection();
 
 // S1: Register parameter harvester for query parameter extraction
 registerParamHarvester((url, paramNames, tabId) => {
-  if (currentSettings.leadsEnabled) {
+  if (currentSettings.leadsEnabled === true) {
     void handleParamHarvest(url, paramNames, tabId, currentSettings);
   }
 });
 
 // S2 & S3: Navigation completion leads collector injection
-chrome.webNavigation.onCompleted.addListener((details): void => {
-  if (details.frameId !== 0 || details.tabId < 0) return;
-  if (!currentSettings.leadsEnabled) return;
-  if (isRestrictedUrl(details.url)) return;
+if (typeof chrome.webNavigation?.onCompleted?.addListener === 'function') {
+  chrome.webNavigation.onCompleted.addListener((details): void => {
+    if (details.frameId !== 0 || details.tabId < 0) return;
+    if (currentSettings.leadsEnabled !== true) return;
+    if (isRestrictedUrl(details.url)) return;
 
-  if (typeof chrome.scripting !== 'undefined') {
-    void chrome.scripting.executeScript({
-      target: { tabId: details.tabId, frameIds: [0] },
-      files: ['content/dom-collector.js'],
-    }).catch((err: unknown) => {
-      sensorInjectionFailures.s2++;
-      console.warn(`[ACULYX] S2 dom-collector injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s2}):`, err);
-    });
-
-    if (currentSettings.deepModeEnabled) {
+    if (typeof chrome.scripting !== 'undefined') {
       void chrome.scripting.executeScript({
         target: { tabId: details.tabId, frameIds: [0] },
-        world: 'MAIN',
-        files: ['content/main-world-hooks.js'],
+        files: ['content/dom-collector.js'],
       }).catch((err: unknown) => {
-        sensorInjectionFailures.s3++;
-        console.warn(`[ACULYX] S3 main-world-hooks injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s3}):`, err);
+        sensorInjectionFailures.s2++;
+        // eslint-disable-next-line no-console
+        console.warn(`[ACULYX] S2 dom-collector injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s2}):`, err);
       });
+
+      if (currentSettings.deepModeEnabled === true) {
+        void chrome.scripting.executeScript({
+          target: { tabId: details.tabId, frameIds: [0] },
+          world: 'MAIN',
+          files: ['content/main-world-hooks.js'],
+        }).catch((err: unknown) => {
+          sensorInjectionFailures.s3++;
+          // eslint-disable-next-line no-console
+          console.warn(`[ACULYX] S3 main-world-hooks injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s3}):`, err);
+        });
+      }
     }
-  }
-});
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Cookie change listener
@@ -1160,7 +1164,7 @@ chrome.runtime.onConnect.addListener((port: chrome.runtime.Port): void => {
         };
         portSend(port, response);
 
-        if (currentSettings.leadsEnabled) {
+        if (currentSettings.leadsEnabled === true) {
           const tabState = tabStates.get(resolvedTabId);
           const leadsState = getLeadsState(resolvedTabId, tabState?.origin);
           portSend(port, leadsState);
@@ -1712,18 +1716,18 @@ chrome.runtime.onMessage.addListener(
         sendResponse({
           type: 'HUNTER_RUN_PROBE_RESPONSE',
           entry: {
-            probeId: message.probe?.id || 'unknown',
-            ruleId: message.probe?.ruleId || 'unknown',
-            targetUrl: message.probe?.targetUrl || '',
-            status: 'blocked',
-            notes: 'Unauthorized sender: HUNTER_RUN_PROBE is strictly restricted to internal extension pages without tab context',
+            id: `ledger-unauthorized-${Date.now()}`,
             timestamp: Date.now(),
+            request: message.probe ?? { targetUrl: '', method: 'GET', reason: 'unauthorized sender' },
+            confirmedByUser: false,
+            scopeStatus: 'unknown',
+            resultNotes: 'Unauthorized sender: HUNTER_RUN_PROBE is strictly restricted to internal extension pages without tab context',
           },
         });
         return false;
       }
       const probe = message.probe;
-      const targetUrl = probe?.targetUrl || '';
+      const targetUrl = probe !== undefined ? probe.targetUrl : '';
       const recomputedScope = resolveScopeStatus(targetUrl, currentSettings);
       const confirmedByUser = message.confirmedByUser === true;
       void handleHunterProbe(probe, recomputedScope, currentSettings.hunterConfig, confirmedByUser).then((entry) => {

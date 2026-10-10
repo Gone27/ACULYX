@@ -34,7 +34,9 @@ export function registerLeadLabRoutes(app: Express): void {
 
   // 2. CORS Reflection with Credentials and missing Vary (COR-001)
   app.get('/lead-lab/cors-reflect', (req: Request, res: Response) => {
-    const origin = req.headers.origin || 'http://attacker-controlled.example';
+    const origin = typeof req.headers.origin === 'string' && req.headers.origin.length > 0
+      ? req.headers.origin
+      : 'http://attacker-controlled.example';
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');

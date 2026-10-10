@@ -6,7 +6,7 @@ export function calculateEntropy(str: string): number {
   if (len === 0) return 0;
   const counts = new Map<string, number>();
   for (const c of str) {
-    counts.set(c, (counts.get(c) || 0) + 1);
+    counts.set(c, (counts.get(c) ?? 0) + 1);
   }
   let entropy = 0;
   for (const count of counts.values()) {
@@ -44,12 +44,14 @@ function parseJwtHeader(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split('.');
     if (parts.length < 2 || parts.length > 3) return null;
-    let b64 = parts[0].replace(/-/g, '+').replace(/_/g, '/');
+    const headerPart = parts[0];
+    if (headerPart === undefined || headerPart.length === 0) return null;
+    let b64 = headerPart.replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4 !== 0) b64 += '=';
     const json = typeof atob !== 'undefined'
       ? atob(b64)
       : Buffer.from(b64, 'base64').toString('utf8');
-    return JSON.parse(json);
+    return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -313,7 +315,7 @@ export function detectSecrets(
         scopeStatus,
         timestamp: Date.now(),
         origin,
-        url: (maskLocation(url) as string) || url,
+        url: maskLocation(url),
         sourceSensor: 'S2',
       });
     }
@@ -641,7 +643,7 @@ export function detectSecrets(
   let assignMatch: RegExpExecArray | null;
   while ((assignMatch = genericAssignRegex.exec(code)) !== null) {
     const val = assignMatch[1];
-    if (isPlaceholder(val)) continue;
+    if (val === undefined || val.length === 0 || isPlaceholder(val)) continue;
     // Discard standard library or common words
     if (val.length < 16) continue;
     const entropy = calculateEntropy(val);
@@ -678,8 +680,9 @@ export function detectSecrets(
     for (const token of jwtMatches) {
       if (isPlaceholder(token)) continue;
       const header = parseJwtHeader(token);
-      const alg = header?.alg ? String(header.alg) : 'unknown';
-      const isUnsigned = alg.toLowerCase() === 'none' || token.endsWith('.') || !token.split('.')[2];
+      const alg = typeof header?.alg === 'string' && header.alg.length > 0 ? header.alg : 'unknown';
+      const sigPart = token.split('.')[2];
+      const isUnsigned = alg.toLowerCase() === 'none' || token.endsWith('.') || sigPart === undefined || sigPart.length === 0;
       const potential = isUnsigned ? 'high' : 'medium';
       const title = isUnsigned
         ? 'Unsigned / alg=none Static JWT Token Disclosed'
@@ -698,13 +701,13 @@ export function detectSecrets(
         evidence: {
           preview: maskSecret(token),
           location: maskLocation(url),
-          context: `JWT alg: ${alg}, isUnsigned: ${isUnsigned}, claims inspected in memory`,
+          context: `JWT alg: ${alg}, isUnsigned: ${String(isUnsigned)}, claims inspected in memory`,
         },
         tags: ['jwt', 'token', 'auth', ...(isUnsigned ? ['alg-none', 'unsigned'] : [])],
         scopeStatus,
         timestamp: Date.now(),
         origin,
-        url: (maskLocation(url) as string) || url,
+        url: maskLocation(url),
         sourceSensor: 'S2',
       });
     }

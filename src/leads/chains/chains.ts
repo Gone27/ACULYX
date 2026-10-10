@@ -9,7 +9,7 @@ export function extractApex(originOrUrl: string): string {
     const parts = hostname.split('.');
     if (parts.length <= 2) return hostname;
     const secondLast = parts[parts.length - 2];
-    if (['co', 'com', 'org', 'net', 'edu', 'gov'].includes(secondLast) && parts.length >= 3) {
+    if (secondLast !== undefined && secondLast.length > 0 && ['co', 'com', 'org', 'net', 'edu', 'gov'].includes(secondLast) && parts.length >= 3) {
       return parts.slice(-3).join('.');
     }
     return parts.slice(-2).join('.');
@@ -77,7 +77,7 @@ export interface ChainEvaluationResult {
 
 export function evaluateChains(leads: Lead[]): ChainEvaluationResult {
   // Clone leads to avoid mutating input directly
-  const updatedLeads = leads.map(l => ({ ...l, tags: [...l.tags], chainIds: [...(l.chainIds || [])] }));
+  const updatedLeads = leads.map(l => ({ ...l, tags: [...l.tags], chainIds: [...(l.chainIds !== undefined ? l.chainIds : [])] }));
   const activeChains: { chain: ChainRule; matchedLeads: Lead[] }[] = [];
 
   for (const chain of CHAINS) {
@@ -91,19 +91,27 @@ export function evaluateChains(leads: Lead[]): ChainEvaluationResult {
 
     // Group leads by domain/origin boundary if required
     let groups: Lead[][] = [];
-    if (chain.sameOrigin) {
+    if (chain.sameOrigin === true) {
       const originMap = new Map<string, Lead[]>();
       for (const lead of candidateLeads) {
-        if (!originMap.has(lead.origin)) originMap.set(lead.origin, []);
-        originMap.get(lead.origin)!.push(lead);
+        const list = originMap.get(lead.origin);
+        if (list !== undefined) {
+          list.push(lead);
+        } else {
+          originMap.set(lead.origin, [lead]);
+        }
       }
       groups = Array.from(originMap.values());
-    } else if (chain.sameApex) {
+    } else if (chain.sameApex === true) {
       const apexMap = new Map<string, Lead[]>();
       for (const lead of candidateLeads) {
         const apex = extractApex(lead.origin);
-        if (!apexMap.has(apex)) apexMap.set(apex, []);
-        apexMap.get(apex)!.push(lead);
+        const list = apexMap.get(apex);
+        if (list !== undefined) {
+          list.push(lead);
+        } else {
+          apexMap.set(apex, [lead]);
+        }
       }
       groups = Array.from(apexMap.values());
     } else {
@@ -134,6 +142,9 @@ export function evaluateChains(leads: Lead[]): ChainEvaluationResult {
         for (const lead of matchedGroupLeads) {
           if (lead.tier === 'whisper') {
             lead.tier = 'strong';
+          }
+          if (!lead.chainIds) {
+            lead.chainIds = [];
           }
           if (!lead.chainIds.includes(chain.id)) {
             lead.chainIds.push(chain.id);

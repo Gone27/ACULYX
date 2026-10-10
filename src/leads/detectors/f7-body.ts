@@ -58,7 +58,7 @@ export function detectBodyLeads(
         scopeStatus,
         timestamp: Date.now(),
         origin,
-        url: (maskLocation(url) as string) || url,
+        url: maskLocation(url),
         sourceSensor: 'S1',
         remediation: 'Disable debug mode and implement generic error pages in production.',
       });
@@ -69,11 +69,11 @@ export function detectBodyLeads(
   // 2. API-001: Excess Data Exposure in JSON Responses
   if (contentType.toLowerCase().includes('application/json') || body.trim().startsWith('{') || body.trim().startsWith('[')) {
     try {
-      const parsed = JSON.parse(body);
+      const parsed: unknown = JSON.parse(body);
       const sensitiveKeysFound = new Set<string>();
 
       const inspectObject = (obj: unknown, depth = 0) => {
-        if (!obj || typeof obj !== 'object' || depth > 5) return;
+        if (typeof obj !== 'object' || obj === null || depth > 5) return;
         if (Array.isArray(obj)) {
           for (let i = 0; i < Math.min(obj.length, 5); i++) {
             inspectObject(obj[i], depth + 1);
@@ -114,7 +114,7 @@ export function detectBodyLeads(
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url: (maskLocation(url) as string) || url,
+          url: maskLocation(url),
           sourceSensor: 'S1',
           remediation: 'Use explicit DTO/serializer allowlists rather than serializing internal entities directly.',
         });
@@ -144,7 +144,7 @@ export function detectBodyLeads(
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url: (maskLocation(url) as string) || url,
+      url: maskLocation(url),
       sourceSensor: 'S1',
     });
   }

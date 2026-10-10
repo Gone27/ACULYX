@@ -73,7 +73,7 @@ export function detectAuthLeads(
           needs: ['verify if token is returned in URL fragment and susceptible to token leakage'],
           doesNotProve: ['token interception'],
           evidence: {
-            preview: maskSecret(`response_type=token redirect_uri=${redirectUri || 'none'}`),
+            preview: maskSecret(`response_type=token redirect_uri=${redirectUri !== null && redirectUri.length > 0 ? redirectUri : 'none'}`),
             location: maskLocation(url),
             context: 'OAuth authorization request with implicit token grant',
           },
@@ -87,7 +87,9 @@ export function detectAuthLeads(
         });
       }
 
-      if (!hasState && (responseType || redirectUri)) {
+      const hasRt = responseType !== null && responseType.length > 0;
+      const hasRu = redirectUri !== null && redirectUri.length > 0;
+      if (!hasState && (hasRt || hasRu)) {
         leads.push({
           id: nextLeadId('AUTH-NOSTATE'),
           ruleId: 'AUTH-001',
@@ -142,12 +144,15 @@ export function detectAuthLeads(
 
   // 2. AUTH-002: State-Changing Forms without Anti-CSRF Token
   for (const form of forms) {
-    const method = (form.method || 'GET').toUpperCase();
+    const rawMethod = form.method;
+    const method = (typeof rawMethod === 'string' && rawMethod.length > 0 ? rawMethod : 'GET').toUpperCase();
     if (method === 'POST') {
-      const inputs = form.inputs || [];
-      const hasCsrf = inputs.some(i => i.name && CSRF_INPUT_NAMES.test(i.name.trim()));
+      const inputs = form.inputs !== undefined ? form.inputs : [];
+      const hasCsrf = inputs.some(i => typeof i.name === 'string' && i.name.length > 0 && CSRF_INPUT_NAMES.test(i.name.trim()));
 
       if (!hasCsrf) {
+        const actionStr = typeof form.action === 'string' && form.action.length > 0 ? form.action : 'self';
+        const targetStr = typeof form.action === 'string' && form.action.length > 0 ? form.action : url;
         leads.push({
           id: nextLeadId('AUTH-CSRF'),
           ruleId: 'AUTH-002',
@@ -159,10 +164,10 @@ export function detectAuthLeads(
           needs: ['verify cookie SameSite attribute and custom request headers'],
           doesNotProve: ['cross-site request forgery without session cookie analysis'],
           evidence: {
-            preview: maskSecret(`form action=${form.action || 'self'} method=POST inputs=${inputs.length}`),
+            preview: maskSecret(`form action=${actionStr} method=POST inputs=${inputs.length}`),
             location: maskLocation(url),
-            context: `POST form target: ${form.action || url}`,
-            extractedNames: inputs.map(i => i.name).filter(Boolean) as string[],
+            context: `POST form target: ${targetStr}`,
+            extractedNames: inputs.map(i => i.name).filter((n): n is string => typeof n === 'string' && n.length > 0),
           },
           tags: ['csrf', 'missing-csrf', 'state-changing-form'],
           scopeStatus,
@@ -176,7 +181,7 @@ export function detectAuthLeads(
     }
 
     // 3. AUTH-003: Insecure Form Inputs / Password over HTTP / Hidden Privilege fields
-    const inputs = form.inputs || [];
+    const inputs = form.inputs !== undefined ? form.inputs : [];
     for (const input of inputs) {
       if (input.type === 'password' && url.startsWith('http://')) {
         leads.push({
@@ -190,7 +195,7 @@ export function detectAuthLeads(
           needs: ['verify form action protocol'],
           doesNotProve: ['network eavesdropping active'],
           evidence: {
-            preview: maskSecret(input.name || 'password'),
+            preview: maskSecret(typeof input.name === 'string' && input.name.length > 0 ? input.name : 'password'),
             location: maskLocation(url),
           },
           tags: ['cleartext-credentials', 'http-insecure'],
@@ -202,7 +207,7 @@ export function detectAuthLeads(
         });
       }
 
-      if (input.name && PRIVILEGED_INPUT_NAMES.test(input.name.trim())) {
+      if (typeof input.name === 'string' && input.name.length > 0 && PRIVILEGED_INPUT_NAMES.test(input.name.trim())) {
         leads.push({
           id: nextLeadId('AUTH-ROLEFIELD'),
           ruleId: 'AUTH-003',

@@ -102,18 +102,23 @@ export async function executeHunterProbe(
   }
 
   // Rate Limiting
-  await throttle(config.maxRequestsPerSecond || 1);
+  await throttle(config.maxRequestsPerSecond > 0 ? config.maxRequestsPerSecond : 1);
 
   // Prepare Headers
-  const reqHeaders: Record<string, string> = { ...(probe.headers || {}) };
-  if (config.programHeaderName && config.programHeaderValue) {
+  const reqHeaders: Record<string, string> = { ...(probe.headers !== undefined ? probe.headers : {}) };
+  if (
+    typeof config.programHeaderName === 'string' &&
+    config.programHeaderName.length > 0 &&
+    typeof config.programHeaderValue === 'string' &&
+    config.programHeaderValue.length > 0
+  ) {
     reqHeaders[config.programHeaderName] = config.programHeaderValue;
   }
 
   const startTime = Date.now();
   try {
     const res = await fetch(probe.targetUrl, {
-      method: method as 'GET' | 'HEAD' | 'OPTIONS',
+      method: method,
       headers: reqHeaders,
       credentials: 'omit', // INVARIANT: zero cookies sent
       mode: 'cors',
