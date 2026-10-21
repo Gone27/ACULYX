@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-21
+
+### Security & Hardening
+- **Export Redaction & Canary Protection (Issue 1 & 5)**:
+  - Enforced recursive canonicalization and sanitization across all exported strings (`title`, `evidence.context`, `evidence.extractedNames`, and URL path segments like `/tenant-reset/[token]`).
+  - Added `needs` (requirements to confirm impact) and `doesNotProve` fields to all Markdown and JSON exports.
+  - Aligned SARIF 2.1.0 output: rule results use `level: "warning"` (leads are unconfirmed hypotheses, not verified vulnerabilities), preserving `potential` in SARIF properties.
+- **Lead Radar Reset & Incognito Isolation (Issue 2)**:
+  - `executeResetAllData()` now wipes `globalLeadStore`, in-memory and persistent `ReconStore` (`chrome.storage.local`), and Hunter in-memory ledger under the reset write barrier.
+  - Enforced private/incognito tab isolation: private browsing tabs are strictly excluded from Lead Radar collection and persistence.
+- **Message Route Validation & Sender Gating (Issue 3)**:
+  - Route-level validation enforces `isContentScriptSender` for DOM/Main-World events and `isExtensionInternalSender` for DevTools, actions, and recon routes.
+  - Gated message receipt behind `currentSettings.leadsEnabled` and `currentSettings.deepModeEnabled`.
+  - Replaced caller-supplied `message.tabId` with trusted browser state `sender.tab.id`.
+  - Added tab navigation generation validation and DevTools payload schema validation.
+- **Fail-Closed Scope Gating (Issue 4)**:
+  - Handlers (`handleParamHarvest`, `handleDomLeadsCollected`, `handleMainWorldEvent`) discard out-of-scope targets before recording hosts, params, endpoints, or leads.
+  - Enforced out-of-scope gates in `LeadStore.addLead` and `ReconStore.recordHost`.
+- **Chain Correlation Calibration (Issue 5)**:
+  - Calibrated numeric confidence (0.8) when whisper-tier leads are corroborated into multi-lead chains.
+  - Excluded out-of-scope leads from chain candidate grouping.
+- **Vite Security Update (Issue 6)**:
+  - Updated Vite to latest patched version, resolving all advisory vulnerabilities (0 audit vulnerabilities).
+
 ## [2.0.0] - 2026-10-10
 
 ### Added

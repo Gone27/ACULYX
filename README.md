@@ -139,7 +139,7 @@ npm run typecheck
 # 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
 npm run lint -- --max-warnings=0
 
-# 3. Unit & Integration Tests (688 tests across 49 test suites)
+# 3. Unit & Integration Tests (689 tests across 49 test suites)
 npm test
 
 # 4. Playwright End-to-End Tests (9 browser tests across 2 suites; auto-builds dist/)

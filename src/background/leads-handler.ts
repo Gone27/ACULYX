@@ -7,12 +7,13 @@
  */
 
 import {
-  LeadStore,
+  globalLeadStore,
   recordHost,
   recordParam,
   recordEndpoint,
   recordBucket,
 } from '../leads';
+export { globalLeadStore };
 import { detectSecrets } from '../leads/detectors/f1-secrets';
 import { detectEndpoints } from '../leads/detectors/f2-endpoints';
 import { detectSourceMaps } from '../leads/detectors/f3-sourcemaps';
@@ -37,7 +38,6 @@ import type {
 } from '../shared/messaging';
 import type { SettingsV2 } from '../shared/types';
 
-export const globalLeadStore = new LeadStore();
 
 let leadCounter = 0;
 function nextId(prefix: string): string {
@@ -87,6 +87,11 @@ export async function handleParamHarvest(
 
   const scopeStatus = settings ? resolveScopeStatus(rawUrl, settings) : 'unknown';
 
+  // Issue 4: Fail-closed scope gate — discard out-of-scope data from recon and persistent leads
+  if (scopeStatus === 'out-of-scope') {
+    return;
+  }
+
   // 1. Record Host in Recon
   await recordHost({
     hostname,
@@ -124,6 +129,18 @@ export async function handleDomLeadsCollected(
 ): Promise<LeadStateUpdateMessage> {
   const { url, origin, data, tabId } = msg;
   const scopeStatus = resolveScopeStatus(url, settings);
+
+  // Issue 4: Fail-closed scope gate — discard out-of-scope DOM collection
+  if (scopeStatus === 'out-of-scope') {
+    return {
+      type: 'LEAD_STATE_UPDATE',
+      tabId,
+      origin,
+      leads: [],
+      activeChains: [],
+      stats: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+    };
+  }
 
   let hostname = '';
   try {
@@ -452,6 +469,10 @@ export function handleMainWorldEvent(
   const maskedLoc = maskLocation(safeUrl);
   const sanitizedUrl = maskedLoc.length > 0 ? maskedLoc : safeUrl;
   const scopeStatus = resolveScopeStatus(sanitizedUrl, settings);
+
+  if (scopeStatus === 'out-of-scope') {
+    return getLeadsState(tabId, origin);
+  }
 
   if (event.eventType === 'sink') {
     const sinkName = typeof event.sinkName === 'string' && event.sinkName.length > 0 ? event.sinkName : 'sink';

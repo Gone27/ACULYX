@@ -313,17 +313,27 @@ export function redactUrlPath(pathname: string): string {
       continue;
     }
 
-    // 3. Preceding segment keyword indicates a secret, token, or one-time code -> [token]
+    // 3. Preceding segment keyword indicates a secret, token, or one-time code (including compound segments like tenant-reset) -> [token]
     const prev = i > 0 ? segments[i - 1]?.toLowerCase() : undefined;
-    if (prev !== undefined && SENSITIVE_PATH_KEYWORDS.has(prev)) {
+    if (
+      prev !== undefined &&
+      (SENSITIVE_PATH_KEYWORDS.has(prev) ||
+        /(?:^|[-_])(reset|token|auth|password|passwd|pwd|secret|invite|verify|confirm|key|code|session|credential)(?:$|[-_])/i.test(prev))
+    ) {
       if (!COMMON_SAFE_SUBPATHS.has(seg.toLowerCase()) && !COMMON_SAFE_SUBPATHS.has(stem.toLowerCase())) {
         segments[i] = '[token]';
         continue;
       }
     }
 
-    // 4. Hex/Opaque Tokens: 16+ hex characters or 20+ base64/alphanumeric characters -> [token]
-    if (HEX_TOKEN_RE.test(seg) || HEX_TOKEN_RE.test(stem) || LONG_OPAQUE_RE.test(seg) || LONG_OPAQUE_RE.test(stem)) {
+    // 4. Hex/Opaque Tokens or Canaries: 16+ hex characters or 20+ base64/alphanumeric characters, or canary tokens -> [token]
+    if (
+      /canary/i.test(seg) ||
+      HEX_TOKEN_RE.test(seg) ||
+      HEX_TOKEN_RE.test(stem) ||
+      LONG_OPAQUE_RE.test(seg) ||
+      LONG_OPAQUE_RE.test(stem)
+    ) {
       segments[i] = '[token]';
       continue;
     }

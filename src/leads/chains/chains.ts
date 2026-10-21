@@ -84,8 +84,9 @@ export function evaluateChains(leads: Lead[]): ChainEvaluationResult {
     const requiredNeeds = chain.needs;
     if (requiredNeeds.length === 0) continue;
 
-    // Filter leads that match at least one need
+    // Filter leads that match at least one need and are not out-of-scope
     const candidateLeads = updatedLeads.filter(lead =>
+      lead.scopeStatus !== 'out-of-scope' &&
       requiredNeeds.some(need => lead.tags.includes(need) || lead.ruleId === need)
     );
 
@@ -138,10 +139,11 @@ export function evaluateChains(leads: Lead[]): ChainEvaluationResult {
       if (allNeedsSatisfied) {
         activeChains.push({ chain, matchedLeads: matchedGroupLeads });
 
-        // Promote member leads and attach chainId
+        // Correlate member leads and attach chainId with calibrated confidence
         for (const lead of matchedGroupLeads) {
           if (lead.tier === 'whisper') {
             lead.tier = 'strong';
+            lead.confidence = Math.max(lead.confidence, 0.8);
           }
           if (!lead.chainIds) {
             lead.chainIds = [];

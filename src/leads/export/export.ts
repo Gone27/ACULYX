@@ -1,6 +1,7 @@
 import type { Lead } from '../types';
 import type { ScopeProfile, ScopeRule } from '../../shared/scope/contracts';
 import { maskSecret, maskLocation } from '../sieve/mask';
+import { redactAllSecrets } from '../../shared/reporting/report-builder';
 
 export interface ExtendedScopeRule extends ScopeRule {
   effect: 'in-scope' | 'out-of-scope';
@@ -187,21 +188,52 @@ export function generateNameOnlyWordlist(params: string[], endpoints: string[]):
   return Array.from(uniqueNames).join('\n');
 }
 
+/**
+ * Sanitizes a single string field for export: strips secrets, tokens, and canaries,
+ * and redacts query strings, fragments, and sensitive path tokens.
+ */
+function sanitizeExportString(raw: string): string {
+  if (raw.length === 0) return raw;
+  const secretRedacted = redactAllSecrets(raw);
+  const locMasked = maskLocation(secretRedacted);
+  return locMasked.length > 0 ? locMasked : maskSecret(secretRedacted);
+}
+
 function sanitizeReportLead(lead: Lead): Lead {
   const rawPreview = lead.evidence.preview;
   const rawLoc = lead.evidence.location;
   const rawUrl = lead.url;
+  const rawTitle = lead.title;
   const preview = maskSecret(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '');
   const location = maskLocation(typeof rawLoc === 'string' && rawLoc.length > 0 ? rawLoc : '');
   const url = maskLocation(typeof rawUrl === 'string' && rawUrl.length > 0 ? rawUrl : '');
+  // Sanitize title: caller-supplied; may contain canary or secret fragments
+  const title = sanitizeExportString(typeof rawTitle === 'string' && rawTitle.length > 0 ? rawTitle : '');
+
+  // Sanitize context (free-text; may contain parameter values or canary tokens)
+  const rawContext = lead.evidence.context;
+  const sanitizedContext: string | undefined =
+    typeof rawContext === 'string' && rawContext.length > 0
+      ? sanitizeExportString(rawContext)
+      : undefined;
+
+  // Sanitize extractedNames (each name is a potential token)
+  const rawNames = lead.evidence.extractedNames;
+  const sanitizedNames: string[] | undefined =
+    rawNames !== undefined && rawNames.length > 0
+      ? rawNames.map(n => sanitizeExportString(n))
+      : undefined;
 
   return {
     ...lead,
+    title,
     url,
     evidence: {
       ...lead.evidence,
       preview,
       location,
+      ...(sanitizedContext !== undefined ? { context: sanitizedContext } : {}),
+      ...(sanitizedNames !== undefined ? { extractedNames: sanitizedNames } : {}),
     },
   };
 }
@@ -223,8 +255,8 @@ export function formatLeadsReportMarkdown(leads: Lead[]): string {
   ];
 
   for (const lead of sanitized) {
-    lines.push(`## [${lead.potential.toUpperCase()}] ${lead.title} (${lead.ruleId})`);
-    lines.push(`- **Family**: ${lead.family} | **Tier**: ${lead.tier} | **Confidence**: ${lead.confidence}`);
+    lines.push(`## [${lead.potential.toUpperCase()} POTENTIAL (HYPOTHESIS)] ${lead.title} (${lead.ruleId})`);
+    lines.push(`- **Status**: Lead Hypothesis (Not a verified exploit) | **Family**: ${lead.family} | **Tier**: ${lead.tier} | **Confidence**: ${lead.confidence}`);
     lines.push(`- **Scope Status**: ${lead.scopeStatus}`);
     lines.push(`- **Observed Location**: \`${lead.evidence.location}\``);
     lines.push(`- **Evidence Preview**: \`${lead.evidence.preview}\``);
@@ -239,6 +271,12 @@ export function formatLeadsReportMarkdown(leads: Lead[]): string {
     }
     if (lead.chainIds !== undefined && lead.chainIds.length > 0) {
       lines.push(`- **Correlated Chains**: ${lead.chainIds.join(', ')}`);
+    }
+    if (lead.needs !== undefined && lead.needs.length > 0) {
+      lines.push(`- **Needs** (to confirm impact): ${lead.needs.join('; ')}`);
+    }
+    if (lead.doesNotProve !== undefined && lead.doesNotProve.length > 0) {
+      lines.push(`- **Does NOT prove**: ${lead.doesNotProve.join('; ')}`);
     }
     if (typeof lead.remediation === 'string' && lead.remediation.length > 0) {
       lines.push(`- **Remediation**: ${lead.remediation}`);
@@ -259,17 +297,13 @@ export function formatLeadsReportJson(leads: Lead[]): string {
 
 /**
  * Exports leads to SARIF 2.1.0 format.
+ *
+ * SARIF severity note: Lead `potential` is an unconfirmed hypothesis, NOT a confirmed
+ * vulnerability severity. SARIF `level` is always `"warning"` regardless of potential.
+ * The `potential` value is preserved in `properties.potential` for tooling that wants it.
  */
 export function formatLeadsReportSarif(leads: Lead[]): string {
   const sanitized = leads.map(sanitizeReportLead);
-
-  const levelMap: Record<Lead['potential'], string> = {
-    critical: 'error',
-    high: 'error',
-    medium: 'warning',
-    low: 'note',
-    info: 'none',
-  };
 
   const sarif = {
     $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
@@ -288,13 +322,18 @@ export function formatLeadsReportSarif(leads: Lead[]): string {
                 shortDescription: {
                   text: matching !== undefined ? matching.title : ruleId,
                 },
+                properties: {
+                  // potential is a hypothesis label, not a confirmed severity
+                  potentialImpact: matching !== undefined ? matching.potential : 'unknown',
+                },
               };
             }),
           },
         },
         results: sanitized.map(lead => ({
           ruleId: lead.ruleId,
-          level: levelMap[lead.potential] ?? 'note',
+          // INVARIANT: always "warning" — potential is unconfirmed hypothesis, not severity
+          level: 'warning' as const,
           message: {
             text: `${lead.title}: ${lead.evidence.preview}`,
           },
@@ -307,6 +346,16 @@ export function formatLeadsReportSarif(leads: Lead[]): string {
               },
             },
           ],
+          properties: {
+            // Preserve potential as informational, NOT as severity
+            potential: lead.potential,
+            tier: lead.tier,
+            confidence: lead.confidence,
+            scopeStatus: lead.scopeStatus,
+            needs: lead.needs ?? [],
+            doesNotProve: lead.doesNotProve ?? [],
+            corroborationStatus: 'unconfirmed',
+          },
         })),
       },
     ],

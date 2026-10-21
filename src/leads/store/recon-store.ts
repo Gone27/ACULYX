@@ -65,6 +65,9 @@ async function persistReconMemory(mem: ReconMemory): Promise<void> {
 }
 
 export async function recordHost(host: ReconHost): Promise<void> {
+  if (host.scopeStatus === 'out-of-scope') {
+    return;
+  }
   const mem = await getReconMemory();
   const existingIdx = mem.hosts.findIndex(h => h.hostname === host.hostname);
   const existing = existingIdx !== -1 ? mem.hosts[existingIdx] : undefined;

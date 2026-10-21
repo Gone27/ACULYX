@@ -138,6 +138,9 @@ export class LeadStore {
    * Adds or updates a lead, enforcing LRU bounds and deduplication.
    */
   public addLead(rawLead: Lead, tabId?: number): void {
+    if (rawLead.scopeStatus === 'out-of-scope') {
+      return;
+    }
     const lead = this.sanitizeLeadEvidence(rawLead);
     const origin = lead.origin;
     const dedupKey = this.computeDedupKey(lead);

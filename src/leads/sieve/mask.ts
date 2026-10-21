@@ -1,4 +1,6 @@
 import type { Masked } from '../types';
+import { redactUrlPath } from '../../rules/utils';
+import { redactAllSecrets } from '../../shared/reporting/report-builder';
 
 const K = [
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -133,9 +135,12 @@ export function maskLocation(loc: string): Masked<string> {
     return '' as Masked<string>;
   }
 
+  // Pre-redact embedded secrets and canary tokens
+  const cleaned = redactAllSecrets(loc);
+
   try {
     // If it's a parseable full URL
-    const parsed = new URL(loc);
+    const parsed = new URL(cleaned);
 
     // 1. Strip fragments entirely to prevent OAuth tokens / implicit grants from leaking
     parsed.hash = '';
@@ -150,16 +155,28 @@ export function maskLocation(loc: string): Masked<string> {
       parsed.searchParams.set(key, '***');
     }
 
+    // 4. Redact sensitive path segments (e.g., /tenant-reset/[token], UUIDs, JWTs)
+    parsed.pathname = redactUrlPath(parsed.pathname);
+
     return parsed.toString() as Masked<string>;
   } catch {
     // Fallback for relative paths or non-standard URLs
     // 1. Drop fragment entirely
-    const firstPart = loc.split('#')[0];
+    const firstPart = cleaned.split('#')[0];
     let sanitized = firstPart !== undefined ? firstPart : '';
     // 2. Strip user:pass
     sanitized = sanitized.replace(/\/\/[^/:@\s]+:[^/@\s]+@/g, '//');
     // 3. Mask all query parameter values
     sanitized = sanitized.replace(/([?&][^=&#\s]+)=([^&#\s]*)/g, '$1=***');
+    // 4. Redact path segments
+    const queryIdx = sanitized.indexOf('?');
+    if (queryIdx !== -1) {
+      const pathPart = sanitized.slice(0, queryIdx);
+      const queryPart = sanitized.slice(queryIdx);
+      sanitized = `${redactUrlPath(pathPart)}${queryPart}`;
+    } else {
+      sanitized = redactUrlPath(sanitized);
+    }
     return sanitized as Masked<string>;
   }
 }
