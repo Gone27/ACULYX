@@ -35,7 +35,9 @@ Because ACULYX evaluates traffic within the browser's own authenticated network 
   - **S4 (DevTools Network Body Sensor)**: In-memory live network response inspection via Chrome DevTools (`src/devtools/panel.html`) for stack traces, credentials, and exposed endpoints.
   - **S5 (Worker & Cache Surface)**: Service worker registration and cache surface auditing.
 - **Lead Radar Detector Families (F1–F8)**: High-recall, zero-false-positive detector suite covering Secrets (F1), Endpoints (F2), Source Maps (F3), Auth/OAuth (F4), Params (F5), Headers (F6), Response Bodies (F7), and Cloud Reconnaissance (F8).
-- **The Sieve Privacy & Masking Layer**: Ensures zero raw secrets or sensitive query tokens leak into memory, storage, or exports, backed by 64-bit cryptographic entropy hashing.
+- **The Sieve Privacy & Masking Layer**: Ensures zero raw secrets, credentials, or sensitive query tokens leak into memory, storage, or exports, backed by 64-bit cryptographic entropy hashing and recursive field-aware sanitization across TabState, Lead Radar, and SARIF serializers.
+- **Fail-Closed Scope & Resource Isolation**: Multi-sensor pipelines and background handlers independently resolve scope for external scripts, iframes, forms, and network subresources. Out-of-scope targets are strictly excluded from persistent recon memory (`ReconStore`), while S1 parameter harvesting is gated behind active URL capture policies and incognito boundaries.
+- **Content Script Sender Verification & Zero-Leakage Denials**: Strict browser-level sender verification (`sender.tab.id`, `sender.tab.url`) binds content script state queries to the calling tab, returning empty denial responses on rejected routes to prevent cross-origin state leakage.
 - **MV3 Storage Session Persistence**: Seamless session recovery across background service worker idle/sleep cycles via `chrome.storage.session`.
 - **Hunter Active Verification Engine**: Controlled, user-confirmed active HTTP probes for out-of-band vulnerability verification. Available via the dedicated Hunter Edition (`npm run build:hunter`).
 - **Real-Time Passive Inspection**: Evaluates response headers and cookie configurations continuously during active navigation.
@@ -139,7 +141,7 @@ npm run typecheck
 # 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
 npm run lint -- --max-warnings=0
 
-# 3. Unit & Integration Tests (689 tests across 49 test suites)
+# 3. Unit & Integration Tests (702 tests across 50 test suites)
 npm test
 
 # 4. Playwright End-to-End Tests (9 browser tests across 2 suites; auto-builds dist/)

@@ -51,8 +51,10 @@ import {
   setStorageResetEpoch,
   onEpochChange,
 } from '../shared/storage';
-import { PortRegistry, portSend, type DomLeadsCollectedMessage, type MainWorldLeadsEventMessage } from '../shared/messaging';
+import { PortRegistry, portSend, type DomLeadsCollectedMessage, type MainWorldLeadsEventMessage, type LeadStateUpdateMessage } from '../shared/messaging';
 import { BroadcastCoalescer, WriteBatcher } from '../shared/coalescer';
+import { TriageStore } from '../shared/reporting/triage-store';
+import { maskSecret, maskLocation } from '../leads/sieve/mask';
 import {
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
@@ -947,7 +949,10 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 registerPageSignalInjection();
 
 // S1: Register parameter harvester for query parameter extraction
-registerParamHarvester((url, paramNames, tabId) => {
+registerParamHarvester((url, paramNames, tabId, isIncognito) => {
+  if (isIncognito === true || incognitoTabIds.has(tabId)) {
+    return;
+  }
   if (currentSettings.leadsEnabled === true) {
     void handleParamHarvest(url, paramNames, tabId, currentSettings);
   }
@@ -1100,6 +1105,7 @@ chrome.tabs.onRemoved.addListener((tabId: number): void => {
 
 async function clearIncognitoSessionRecords(): Promise<void> {
   try {
+    await TriageStore.clearAll({ isIncognitoOnly: true });
     const all = await chrome.storage.session.get(null);
     const toRemove = Object.entries(all)
       .filter(([k, v]) => k.startsWith('tab:') && typeof v === 'object' && v !== null && (v as { isIncognito?: boolean }).isIncognito === true)
@@ -1220,6 +1226,7 @@ export async function executeResetAllData(): Promise<void> {
   globalLeadStore.clearAll();
   await clearReconMemory();
   clearHunterLedger();
+  await TriageStore.clearAll();
 
   await clearBadgesOnAllTabs();
   await LocalStorage.resetAllData({ skipEpochIncrement: true });
@@ -1655,27 +1662,36 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    const emptyDenialLeadsState = (tabId?: number, origin?: string): LeadStateUpdateMessage => ({
+      type: 'LEAD_STATE_UPDATE',
+      tabId: tabId ?? -1,
+      origin: origin ?? '',
+      leads: [],
+      activeChains: [],
+      stats: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+    });
+
     if (message.type === 'DOM_LEADS_COLLECTED') {
       // 1. Leads feature toggle check
       if (currentSettings.leadsEnabled !== true) {
-        sendResponse(getLeadsState(undefined, message.origin));
+        sendResponse(emptyDenialLeadsState(message.tabId, message.origin));
         return false;
       }
       // 2. Sender validation: MUST come from a web page tab content script
       if (!isContentScriptSender(_sender) || _sender.tab === undefined || typeof _sender.tab.id !== 'number') {
-        sendResponse(getLeadsState(undefined, message.origin));
+        sendResponse(emptyDenialLeadsState());
         return false;
       }
       const tabId = _sender.tab.id;
       // 3. Incognito isolation: private browsing tabs must never enter persistent lead/recon stores
       if (_sender.tab.incognito === true || incognitoTabIds.has(tabId)) {
-        sendResponse(getLeadsState(tabId, message.origin));
+        sendResponse(emptyDenialLeadsState(tabId, message.origin));
         return false;
       }
       // 4. Generation check: discard stale harvests from prior navigations
       const currentGen = getTabGeneration(tabId);
       if (message.generation !== undefined && message.generation !== currentGen) {
-        sendResponse(getLeadsState(tabId, message.origin));
+        sendResponse(emptyDenialLeadsState(tabId, message.origin));
         return false;
       }
       // 5. Derive trusted tab context from browser sender state
@@ -1698,24 +1714,24 @@ chrome.runtime.onMessage.addListener(
     if (message.type === 'MAIN_WORLD_LEADS_EVENT') {
       // 1. Feature toggle check: both leads and deep mode must be enabled
       if (currentSettings.leadsEnabled !== true || currentSettings.deepModeEnabled !== true) {
-        sendResponse(getLeadsState(undefined, message.origin));
+        sendResponse(emptyDenialLeadsState(message.tabId, message.origin));
         return false;
       }
       // 2. Sender validation: MUST come from a web page tab content script
       if (!isContentScriptSender(_sender) || _sender.tab === undefined || typeof _sender.tab.id !== 'number') {
-        sendResponse(getLeadsState(undefined, message.origin));
+        sendResponse(emptyDenialLeadsState());
         return false;
       }
       const tabId = _sender.tab.id;
       // 3. Incognito isolation:
       if (_sender.tab.incognito === true || incognitoTabIds.has(tabId)) {
-        sendResponse(getLeadsState(tabId, message.origin));
+        sendResponse(emptyDenialLeadsState(tabId, message.origin));
         return false;
       }
       // 4. Generation check:
       const currentGen = getTabGeneration(tabId);
       if (message.generation !== undefined && message.generation !== currentGen) {
-        sendResponse(getLeadsState(tabId, message.origin));
+        sendResponse(emptyDenialLeadsState(tabId, message.origin));
         return false;
       }
       const tabUrl = typeof _sender.tab.url === 'string' && _sender.tab.url.length > 0 ? _sender.tab.url : message.url;
@@ -1736,37 +1752,75 @@ chrome.runtime.onMessage.addListener(
     if (message.type === 'DEVTOOLS_LEADS_COLLECTED') {
       // 1. Feature toggle check
       if (currentSettings.leadsEnabled !== true) {
-        sendResponse(getLeadsState(message.tabId));
+        sendResponse(emptyDenialLeadsState(message.tabId));
         return false;
       }
       // 2. Sender validation: must come from internal extension page (DevTools panel), not content scripts
       if (!isExtensionInternalSender(_sender) || _sender.tab !== undefined) {
-        sendResponse(getLeadsState(message.tabId));
+        sendResponse(emptyDenialLeadsState(message.tabId));
         return false;
       }
       // 3. Payload validation
       if (!Array.isArray(message.leads)) {
-        sendResponse(getLeadsState(message.tabId));
+        sendResponse(emptyDenialLeadsState(message.tabId));
         return false;
       }
       // 4. Incognito isolation
       if (message.tabId !== undefined && incognitoTabIds.has(message.tabId)) {
-        sendResponse(getLeadsState(message.tabId));
+        sendResponse(emptyDenialLeadsState(message.tabId));
         return false;
       }
-      const validLeads = message.leads.filter(
-        (l): l is import('../leads/types').Lead =>
-          typeof l === 'object' &&
-          l !== null &&
-          typeof l.id === 'string' &&
-          typeof l.ruleId === 'string' &&
-          typeof l.origin === 'string' &&
-          typeof l.potential === 'string' &&
-          typeof l.tier === 'string' &&
-          typeof l.title === 'string' &&
-          typeof l.evidence === 'object' &&
-          l.evidence !== null
-      );
+      const validLeads: import('../leads/types').Lead[] = [];
+      const validPotentials = new Set(['critical', 'high', 'medium', 'low', 'info']);
+      const validTiers = new Set(['observed', 'strong', 'weak', 'whisper']);
+      for (const raw of (message.leads as unknown[])) {
+        if (typeof raw !== 'object' || raw === null) continue;
+        const l = raw as Record<string, unknown>;
+        if (
+          typeof l.id !== 'string' ||
+          typeof l.ruleId !== 'string' ||
+          typeof l.title !== 'string' ||
+          typeof l.potential !== 'string' ||
+          !validPotentials.has(l.potential) ||
+          typeof l.tier !== 'string' ||
+          !validTiers.has(l.tier) ||
+          typeof l.evidence !== 'object' ||
+          l.evidence === null
+        ) {
+          continue;
+        }
+        const rawEv = l.evidence as Record<string, unknown>;
+        const leadUrl = typeof l.url === 'string' && l.url.length > 0 ? l.url : (typeof l.origin === 'string' ? l.origin : '');
+        const recomputedScope = resolveScopeStatus(leadUrl, currentSettings);
+        if (recomputedScope === 'out-of-scope') {
+          continue;
+        }
+        validLeads.push({
+          id: l.id,
+          ruleId: l.ruleId,
+          family: typeof l.family === 'string' ? (l.family as import('../leads/types').LeadFamily) : 'F7',
+          tier: l.tier as import('../leads/types').EvidenceTier,
+          potential: l.potential as import('../leads/types').LeadPotential,
+          confidence: typeof l.confidence === 'number' && l.confidence >= 0 && l.confidence <= 1 ? l.confidence : 0.8,
+          title: l.title,
+          needs: Array.isArray(l.needs) ? l.needs.filter((x): x is string => typeof x === 'string') : [],
+          doesNotProve: Array.isArray(l.doesNotProve) ? l.doesNotProve.filter((x): x is string => typeof x === 'string') : [],
+          evidence: {
+            preview: maskSecret(typeof rawEv.preview === 'string' ? rawEv.preview : ''),
+            location: maskLocation(typeof rawEv.location === 'string' ? rawEv.location : leadUrl),
+            ...(typeof rawEv.context === 'string' ? { context: rawEv.context } : {}),
+            ...(Array.isArray(rawEv.extractedNames) ? { extractedNames: rawEv.extractedNames.filter((x): x is string => typeof x === 'string') } : {}),
+          },
+          tags: Array.isArray(l.tags) ? l.tags.filter((x): x is string => typeof x === 'string') : [],
+          scopeStatus: recomputedScope,
+          timestamp: typeof l.timestamp === 'number' ? l.timestamp : Date.now(),
+          origin: typeof l.origin === 'string' ? l.origin : (originFromUrl(leadUrl) ?? ''),
+          url: leadUrl,
+          sourceSensor: 'S4',
+          ...(Array.isArray(l.chainIds) ? { chainIds: l.chainIds.filter((x): x is string => typeof x === 'string') } : {}),
+          ...(typeof l.remediation === 'string' ? { remediation: l.remediation } : {}),
+        });
+      }
       const leadState = handleDevToolsLeads(validLeads, message.tabId);
       if (message.tabId !== undefined) {
         portRegistry.broadcast(message.tabId, leadState);
@@ -1777,10 +1831,28 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'GET_LEADS_STATE') {
-      if (!isExtensionInternalSender(_sender) && !isContentScriptSender(_sender)) {
-        sendResponse(getLeadsState(undefined, message.origin));
+      const isInternal = isExtensionInternalSender(_sender) && _sender.tab === undefined;
+      const isContent = isContentScriptSender(_sender) && _sender.tab !== undefined && typeof _sender.tab.id === 'number';
+
+      if (!isInternal && !isContent) {
+        sendResponse(emptyDenialLeadsState());
         return false;
       }
+
+      if (isContent && _sender.tab !== undefined && typeof _sender.tab.id === 'number') {
+        const senderTab = _sender.tab;
+        const senderTabId = senderTab.id ?? -1;
+        if (senderTab.incognito === true || incognitoTabIds.has(senderTabId)) {
+          sendResponse(emptyDenialLeadsState(senderTabId));
+          return false;
+        }
+        const senderOrigin = originFromUrl(senderTab.url ?? '') ?? '';
+        const leadState = getLeadsState(senderTabId, senderOrigin);
+        sendResponse(leadState);
+        return false;
+      }
+
+      // Internal sender (popup, devtools, sidepanel, options)
       const leadState = getLeadsState(message.tabId, message.origin);
       sendResponse(leadState);
       return false;

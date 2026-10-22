@@ -1,5 +1,6 @@
 import type { Lead } from '../types';
 import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
+import { redactAllSecrets } from '../../shared/reporting/report-builder';
 
 const MAX_LEADS_PER_ORIGIN = 200;
 const SESSION_STORAGE_KEY = 'aculyx_session_leads_v2';
@@ -114,6 +115,7 @@ export class LeadStore {
 
   /**
    * Sanitizes evidence to guarantee it conforms to Masked branding and never leaks raw secrets or query tokens.
+   * Enforces pre-storage invariant: all free-text fields and arrays are sanitized and capped before persistence.
    */
   private sanitizeLeadEvidence(lead: Lead): Lead {
     const rawPreview = lead.evidence.preview;
@@ -123,14 +125,51 @@ export class LeadStore {
     const location = maskLocation(typeof rawLoc === 'string' && rawLoc.length > 0 ? rawLoc : '');
     const url = (maskLocation(typeof rawUrl === 'string' && rawUrl.length > 0 ? rawUrl : '') as string) || lead.url;
 
+    const rawTitle = lead.title;
+    const title = redactAllSecrets(typeof rawTitle === 'string' ? rawTitle.slice(0, 300) : '');
+
+    const rawContext = lead.evidence?.context;
+    const context =
+      typeof rawContext === 'string' && rawContext.length > 0
+        ? redactAllSecrets(rawContext.slice(0, 1000))
+        : undefined;
+
+    const rawNames = lead.evidence?.extractedNames;
+    const extractedNames = Array.isArray(rawNames)
+      ? rawNames.slice(0, 50).map((n) => redactAllSecrets(n.slice(0, 150)))
+      : undefined;
+
+    const tags = Array.isArray(lead.tags)
+      ? lead.tags.slice(0, 20).map((t) => redactAllSecrets(t.slice(0, 50)))
+      : [];
+
+    const needs = Array.isArray(lead.needs)
+      ? lead.needs.slice(0, 20).map((n) => redactAllSecrets(n.slice(0, 300)))
+      : [];
+
+    const doesNotProve = Array.isArray(lead.doesNotProve)
+      ? lead.doesNotProve.slice(0, 20).map((d) => redactAllSecrets(d.slice(0, 300)))
+      : [];
+
+    const remediation =
+      typeof lead.remediation === 'string' && lead.remediation.length > 0
+        ? redactAllSecrets(lead.remediation.slice(0, 1000))
+        : undefined;
+
     return {
       ...lead,
+      title,
       url,
       evidence: {
-        ...lead.evidence,
-        preview: preview,
-        location: location,
+        preview,
+        location,
+        ...(context !== undefined ? { context } : {}),
+        ...(extractedNames !== undefined ? { extractedNames } : {}),
       },
+      tags,
+      needs,
+      doesNotProve,
+      ...(remediation !== undefined ? { remediation } : {}),
     };
   }
 

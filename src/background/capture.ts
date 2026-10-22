@@ -125,7 +125,7 @@ export function isCaptureActiveForUrl(url: string): boolean {
   return isCaptureAllowedAtBoundary(url, CapturePolicy.getSnapshot());
 }
 
-export type ParamHarvesterCallback = (url: string, paramNames: string[], tabId: number) => void;
+export type ParamHarvesterCallback = (url: string, paramNames: string[], tabId: number, isIncognito?: boolean) => void;
 let paramHarvesterCallback: ParamHarvesterCallback | null = null;
 
 export function registerParamHarvester(cb: ParamHarvesterCallback): void {
@@ -171,16 +171,7 @@ export function registerCaptureListeners(
       (details: chrome.webRequest.WebRequestHeadersDetails): void => {
         if (details.tabId < 0) return;
 
-        // S1: Extract query parameter names before any redaction occurs
-        const rawParamNames = extractRawQueryParams(details.url);
-        if (rawParamNames.length > 0 && paramHarvesterCallback) {
-          try {
-            paramHarvesterCallback(details.url, rawParamNames, details.tabId);
-          } catch {
-            // Fail-safe
-          }
-        }
-
+        const isIncog = incognitoTabIds.has(details.tabId);
         const snapshot = CapturePolicy.getSnapshot();
         const isAllowed = isCaptureActiveForUrl(details.url);
 
@@ -191,6 +182,18 @@ export function registerCaptureListeners(
             }
           }
           return;
+        }
+
+        // S1: Extract query parameter names AFTER capture policy check and ONLY for non-incognito tabs
+        if (!isIncog) {
+          const rawParamNames = extractRawQueryParams(details.url);
+          if (rawParamNames.length > 0 && paramHarvesterCallback) {
+            try {
+              paramHarvesterCallback(details.url, rawParamNames, details.tabId, isIncog);
+            } catch {
+              // Fail-safe
+            }
+          }
         }
 
         // ONLY track XHR/fetch requests

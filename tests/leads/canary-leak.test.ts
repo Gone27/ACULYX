@@ -139,4 +139,39 @@ describe('Lead Engine Canary Leak Tests', () => {
     expect(parsedSarif.runs[0]?.results[0]?.level).toBe('warning');
     expect(parsedSarif.runs[0]?.results[0]?.properties?.potential).toBe('critical');
   });
+
+  it('guarantees zero canary leakage in lead metadata fields (id, ruleId, origin, tags, chainIds, needs, doesNotProve, remediation) across JSON, Markdown, and SARIF', () => {
+    const META_CANARY = 'METADATA_CANARY_K77';
+    const lead: Lead = {
+      id: `LD-${META_CANARY}-01`,
+      ruleId: `RULE-${META_CANARY}`,
+      family: 'F1',
+      tier: 'strong',
+      potential: 'high',
+      confidence: 0.9,
+      title: 'Valid Lead Title',
+      needs: [`Verify parameter ${META_CANARY} with manual check`],
+      doesNotProve: [`Does not prove exploitability of ${META_CANARY}`],
+      evidence: {
+        preview: maskSecret('token=safe_preview_123'),
+        location: maskLocation('https://example.com/api'),
+      },
+      tags: ['secret', `tag_${META_CANARY}`],
+      chainIds: [`CH-${META_CANARY}-99`],
+      scopeStatus: 'in-scope',
+      timestamp: Date.now(),
+      origin: `https://${META_CANARY}.example.com`,
+      url: 'https://example.com/api',
+      sourceSensor: 'S2',
+      remediation: `Rotate the leaked secret ${META_CANARY} immediately`,
+    };
+
+    const md = formatLeadsReportMarkdown([lead]);
+    const json = formatLeadsReportJson([lead]);
+    const sarif = formatLeadsReportSarif([lead]);
+
+    expect(md, 'Markdown leaked metadata canary').not.toContain(META_CANARY);
+    expect(json, 'JSON leaked metadata canary').not.toContain(META_CANARY);
+    expect(sarif, 'SARIF leaked metadata canary').not.toContain(META_CANARY);
+  });
 });

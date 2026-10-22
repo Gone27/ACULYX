@@ -1,7 +1,7 @@
 # Privacy Policy for ACULYX: Header & Cookie Security Checker
 
 **Effective Date:** September 25, 2026
-**Last Updated:** October 21, 2026
+**Last Updated:** October 22, 2026
 **Author & Maintainer:** Dhyan Patel
 
 ## 1. Overview & Core Philosophy
@@ -15,7 +15,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 - **Zero Remote Telemetry:** ACULYX does not have external tracking servers, analytics endpoints, or cloud backends. Extension pages enforce `connect-src 'none'`. Content scripts make zero network requests and communicate solely through local extension runtime messaging.
 - **Never Retains or Exfiltrates Cookie Values:** ACULYX inspects cookie metadata attributes (such as `Secure`, `HttpOnly`, `SameSite`, and prefix naming) for compliance. Cookie objects returned by browser APIs are accessed for metadata only (never `cookie.value`). Raw in-flight headers are automatically sanitized and query strings and fragments are stripped prior to storage.
 - **No Personal Identifiers:** We do not collect names, email addresses, IP addresses, search queries, or browsing history.
-- **Strict Incognito / Private Window Isolation:** Private and incognito browsing sessions are strictly isolated. Lead Radar findings, reconnaissance memory, and persistent history are never recorded or persisted for incognito tabs. All ephemeral session caches associated with incognito tabs are immediately wiped when tabs close.
+- **Strict Incognito / Private Window Isolation:** Private and incognito browsing sessions are strictly isolated. Lead Radar findings, S1 query parameter harvesting, reconnaissance memory, and persistent history are never recorded or persisted for incognito tabs. All ephemeral session caches and in-memory triage annotations associated with incognito tabs are immediately wiped when tabs close.
 
 ---
 
@@ -23,7 +23,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 When you choose to monitor an origin, ACULYX temporarily processes network headers and cookie attributes locally:
 - **HTTP Response Headers:** Evaluated against security standards (HSTS, CSP, X-Content-Type-Options, CORS, etc.) for top-level navigations and in-page API (`xmlhttprequest`/`fetch`) calls on permitted origins.
 - **API Endpoint Capture:** In-page API requests (`xmlhttprequest` and `fetch`) to first-party and permitted third-party endpoints are captured to evaluate CORS, MIME-sniffing, and security transport configurations. API endpoint states are strictly bounded (LRU capped at 50 per tab) in session storage. Query strings, auth tokens, and credential material in API URLs are automatically redacted before local display or storage.
-- **Lead Radar & Recon Memory:** Discovered attack surface leads and parameters are stored in local session storage and bounded ReconStore (`chrome.storage.local`). Out-of-scope targets are strictly excluded from persistent recon memory. All exported leads and recon reports undergo recursive canary and token redaction.
+- **Lead Radar & Recon Memory:** Discovered attack surface leads and parameters are stored in local session storage and bounded ReconStore (`chrome.storage.local`). Out-of-scope targets and unmonitored origins are strictly excluded from parameter harvesting and persistent recon memory. External scripts, iframes, and forms independently evaluate scope rather than inheriting page scope. All exported leads and hygiene reports undergo recursive canary and token redaction across all serialized fields.
 - **Authentication Posture Diffs (Auth-Diff Storage):** When logging in or out of a monitored site, ACULYX detects transitions based on metadata changes (such as sensitive cookie issuance or rotation). It records a high-level posture comparison (`AuthDiffRecord`) in `chrome.storage.local` to track how security headers and grades evolved between unauthenticated and authenticated states.
 - **Attack Surface Graph Persistence:** The extension analyzes permitted navigation hops, cookies, and API endpoints to map relationships between the apex domain and affiliated subdomains (`AttackSurfaceGraph`). Persisted graphs in `chrome.storage.local` are strictly bounded (maximum 100 nodes, 150 edges) and pruned during periodic maintenance sweeps.
 - **Scope Profiles:** User-configured authorized bug-bounty targets and exclusion patterns are stored in `chrome.storage.local`. Scope rules define matching criteria (`*.example.com`, `host:port`) and are never shared or transmitted off-device.

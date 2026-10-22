@@ -139,7 +139,9 @@ export function evaluateChains(leads: Lead[]): ChainEvaluationResult {
       if (allNeedsSatisfied) {
         activeChains.push({ chain, matchedLeads: matchedGroupLeads });
 
-        // Correlate member leads and attach chainId with calibrated confidence
+        // Correlate member leads and attach chainId using a triage/correlation heuristic
+        // (NOTE: This represents a prioritization boost for multi-signal corroboration,
+        // NOT an empirically calibrated frequentist or statistical confidence score).
         for (const lead of matchedGroupLeads) {
           if (lead.tier === 'whisper') {
             lead.tier = 'strong';

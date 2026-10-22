@@ -91,6 +91,9 @@ export async function recordHost(host: ReconHost): Promise<void> {
 }
 
 export async function recordParam(param: ReconParam): Promise<void> {
+  if (param.scopeStatus === 'out-of-scope') {
+    return;
+  }
   const mem = await getReconMemory();
   const existingIdx = mem.params.findIndex(
     p => p.name === param.name && p.origin === param.origin
@@ -102,6 +105,9 @@ export async function recordParam(param: ReconParam): Promise<void> {
     existing.contexts = mergedContexts;
     if (typeof param.category === 'string' && param.category.length > 0 && (existing.category === undefined || existing.category === 'general')) {
       existing.category = param.category;
+    }
+    if (param.scopeStatus !== undefined && param.scopeStatus !== 'unknown') {
+      existing.scopeStatus = param.scopeStatus;
     }
     mem.params.splice(existingIdx, 1);
     mem.params.push(existing);
@@ -119,6 +125,9 @@ export async function recordParam(param: ReconParam): Promise<void> {
 }
 
 export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
+  if (ep.scopeStatus === 'out-of-scope') {
+    return;
+  }
   const mem = await getReconMemory();
   const method = typeof ep.method === 'string' && ep.method.length > 0 ? ep.method : 'GET';
   const rawPath = ep.path;
@@ -134,6 +143,9 @@ export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
     existing.tags = mergedTags;
     if (ep.status !== undefined) {
       existing.status = ep.status;
+    }
+    if (ep.scopeStatus !== undefined && ep.scopeStatus !== 'unknown') {
+      existing.scopeStatus = ep.scopeStatus;
     }
     mem.endpoints.splice(existingIdx, 1);
     mem.endpoints.push(existing);
@@ -152,6 +164,9 @@ export async function recordEndpoint(ep: ReconEndpoint): Promise<void> {
 }
 
 export async function recordBucket(bucket: ReconBucket): Promise<void> {
+  if (bucket.scopeStatus === 'out-of-scope') {
+    return;
+  }
   const mem = await getReconMemory();
   const existingIdx = mem.buckets.findIndex(
     b => b.bucket === bucket.bucket && b.provider === bucket.provider && b.origin === bucket.origin
@@ -159,6 +174,9 @@ export async function recordBucket(bucket: ReconBucket): Promise<void> {
   const existing = existingIdx !== -1 ? mem.buckets[existingIdx] : undefined;
 
   if (existing !== undefined) {
+    if (bucket.scopeStatus !== undefined && bucket.scopeStatus !== 'unknown') {
+      existing.scopeStatus = bucket.scopeStatus;
+    }
     mem.buckets.splice(existingIdx, 1);
     mem.buckets.push(existing);
   } else {

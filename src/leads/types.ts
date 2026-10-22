@@ -63,6 +63,7 @@ export interface ReconParam {
   category?: 'redirect' | 'ssrf' | 'file' | 'idor' | 'debug' | 'callback' | 'general';
   origin: string;
   contexts: string[];
+  scopeStatus?: 'in-scope' | 'out-of-scope' | 'unknown';
 }
 
 export interface ReconEndpoint {
@@ -71,12 +72,14 @@ export interface ReconEndpoint {
   method?: string;
   tags: string[];
   status?: number;
+  scopeStatus?: 'in-scope' | 'out-of-scope' | 'unknown';
 }
 
 export interface ReconBucket {
   bucket: string;
   provider: 'aws' | 'gcp' | 'azure' | 'digitalocean';
   origin: string;
+  scopeStatus?: 'in-scope' | 'out-of-scope' | 'unknown';
 }
 
 export interface ReconMemory {

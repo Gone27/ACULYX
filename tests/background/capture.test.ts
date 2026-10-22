@@ -4,6 +4,8 @@ import {
   clearInFlightCaptures,
   captureMap,
   inFlightRequests,
+  registerParamHarvester,
+  incognitoTabIds,
 } from '../../src/background/capture';
 import { CapturePolicy } from '../../src/background/capture-policy';
 import type { Hop, ApiHop, SettingsV2 } from '../../src/shared/types';
@@ -720,6 +722,84 @@ describe('redirect response capture', () => {
       expect(current.revision).toBe(2);
 
       getSettingsSpy.mockRestore();
+    });
+
+    it('S1 parameter harvester is NOT invoked when capture is disabled (mode: off)', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 10,
+        mode: 'off',
+        broadGrantActive: false,
+        grantedOrigins: new Set(),
+      });
+
+      const harvested: Array<{ url: string; params: string[]; tabId: number }> = [];
+      registerParamHarvester((url, params, tabId) => harvested.push({ url, params, tabId }));
+      registerCaptureListeners(() => undefined);
+
+      listeners['onBeforeSendHeaders']?.({
+        type: 'main_frame',
+        tabId: 5,
+        requestId: 'req-harvest-off',
+        url: 'https://example.com/search?q=test&redirect=https://evil.com',
+        timeStamp: 700,
+      });
+
+      expect(harvested).toHaveLength(0);
+    });
+
+    it('S1 parameter harvester is NOT invoked for incognito tabs', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 11,
+        mode: 'all-sites',
+        broadGrantActive: true,
+        grantedOrigins: new Set(),
+      });
+
+      incognitoTabIds.add(99);
+
+      const harvested: Array<{ url: string; params: string[]; tabId: number }> = [];
+      registerParamHarvester((url, params, tabId) => harvested.push({ url, params, tabId }));
+      registerCaptureListeners(() => undefined);
+
+      listeners['onBeforeSendHeaders']?.({
+        type: 'main_frame',
+        tabId: 99,
+        requestId: 'req-harvest-incog',
+        url: 'https://example.com/account?secret_token=12345',
+        timeStamp: 701,
+      });
+
+      expect(harvested).toHaveLength(0);
+      incognitoTabIds.delete(99);
+    });
+
+    it('S1 parameter harvester extracts parameters after capture policy passes for regular tabs', () => {
+      CapturePolicy.setSnapshotForTesting({
+        ready: true,
+        revision: 12,
+        mode: 'all-sites',
+        broadGrantActive: true,
+        grantedOrigins: new Set(),
+      });
+
+      const harvested: Array<{ url: string; params: string[]; tabId: number }> = [];
+      registerParamHarvester((url, params, tabId) => harvested.push({ url, params, tabId }));
+      registerCaptureListeners(() => undefined);
+
+      listeners['onBeforeSendHeaders']?.({
+        type: 'main_frame',
+        tabId: 10,
+        requestId: 'req-harvest-allowed',
+        url: 'https://example.com/api?target=admin&debug=true',
+        timeStamp: 702,
+      });
+
+      expect(harvested).toHaveLength(1);
+      expect(harvested[0]?.tabId).toBe(10);
+      expect(harvested[0]?.params).toContain('target');
+      expect(harvested[0]?.params).toContain('debug');
     });
   });
 });

@@ -696,6 +696,50 @@ describe('Phase 1 Matrix: Privacy Canaries & Secret Containment', () => {
     }
   });
 
+  it('guarantees zero canary leakage in finding title, impact, evidence, recommendation, reference, sourceUrl, and subdomainTrust vectors across JSON, Markdown, and SARIF', () => {
+    const CANARY_FREE_TEXT = 'TABSTATE_CANARY_Z93';
+    const state: TabState = {
+      ...createCanaryTabState(),
+      origin: `https://example.com/test?token=${CANARY_FREE_TEXT}`,
+      findings: [
+        {
+          ruleId: 'TEST-001',
+          title: `Sensitive Finding Title containing ${CANARY_FREE_TEXT}`,
+          severity: 'high',
+          category: 'header',
+          impact: `Leak of ${CANARY_FREE_TEXT} allows unauthorized account takeover`,
+          evidence: `Set-Cookie: session=${CANARY_FREE_TEXT}; Path=/`,
+          recommendation: `Revoke ${CANARY_FREE_TEXT} and enforce strict policy`,
+          reference: `https://example.com/advisory/${CANARY_FREE_TEXT}`,
+          sourceUrl: `https://example.com/api/v1/auth?key=${CANARY_FREE_TEXT}`,
+          limitations: [`Third-party script exposed ${CANARY_FREE_TEXT}`],
+        },
+      ],
+      subdomainTrust: {
+        hasEscalationPath: true,
+        vectors: [
+          {
+            id: 'ST-001',
+            label: `Subdomain leak ${CANARY_FREE_TEXT}`,
+            detail: `Trust vector detail leaking ${CANARY_FREE_TEXT}`,
+            risk: 'high',
+            present: true,
+          },
+        ],
+      },
+    };
+
+    const jsonReport = exportJsonReport(state);
+    const markdownReport = exportMarkdownReport(state);
+    const sarifReport = exportSarifReport(state);
+    const sarifObj = JSON.stringify(generateSarif(state));
+
+    expect(jsonReport, 'JSON leaked TABSTATE_CANARY_Z93').not.toContain(CANARY_FREE_TEXT);
+    expect(markdownReport, 'Markdown leaked TABSTATE_CANARY_Z93').not.toContain(CANARY_FREE_TEXT);
+    expect(sarifReport, 'SARIF string leaked TABSTATE_CANARY_Z93').not.toContain(CANARY_FREE_TEXT);
+    expect(sarifObj, 'SARIF object leaked TABSTATE_CANARY_Z93').not.toContain(CANARY_FREE_TEXT);
+  });
+
   it('isolates incognito sessions: never writes records to LocalStorage sinks', async () => {
     const localStore: Record<string, unknown> = {};
     const localSetSpy = vi.fn((items: Record<string, unknown>) => {

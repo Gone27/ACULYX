@@ -222,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const state = drawerTriageSelect.value as ResearcherReviewState;
       const notes = drawerTriageNotes.value;
       const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
-      void TriageStore.setAnnotation(findingKey, state, notes).catch(() => undefined);
+      void TriageStore.setAnnotation(findingKey, state, notes, { isIncognito: currentState?.isIncognito === true }).catch(() => undefined);
     }
   });
 
@@ -231,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const state = drawerTriageSelect.value as ResearcherReviewState;
       const notes = drawerTriageNotes.value;
       const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
-      void TriageStore.setAnnotation(findingKey, state, notes).catch(() => undefined);
+      void TriageStore.setAnnotation(findingKey, state, notes, { isIncognito: currentState?.isIncognito === true }).catch(() => undefined);
     }
   });
 
@@ -818,7 +818,7 @@ function openFindingDetails(finding: Finding): void {
   }
 
   const findingKey = `${finding.ruleId}:${currentOrigin}`;
-  void TriageStore.getAnnotation(findingKey).then((ann) => {
+  void TriageStore.getAnnotation(findingKey, { isIncognito: currentState?.isIncognito === true }).then((ann) => {
     if (activeDrawerFinding?.ruleId === finding.ruleId) {
       drawerTriageSelect.value = ann?.state ?? 'unreviewed';
       drawerTriageNotes.value = ann?.notes ?? '';

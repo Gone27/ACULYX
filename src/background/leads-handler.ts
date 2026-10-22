@@ -25,6 +25,7 @@ import { rankLeads } from '../leads/ranking/ranking';
 import { executeHunterProbe } from '../leads/hunter/hunter';
 import { maskSecret, maskLocation } from '../leads/sieve/mask';
 import { ScopeEngine } from '../shared/scope/engine';
+import { originFromUrl } from '../rules/utils';
 import type {
   Lead,
   HunterProbeRequest,
@@ -109,6 +110,7 @@ export async function handleParamHarvest(
       category,
       origin,
       contexts: ['query'],
+      scopeStatus,
     });
   }
 
@@ -180,11 +182,13 @@ export async function handleDomLeadsCollected(
     for (const f of data.forms) {
       if (typeof f.action === 'string' && f.action.length > 0) {
         const maskedAct = maskLocation(f.action);
+        const formActionScope = resolveScopeStatus(f.action, settings);
         await recordEndpoint({
           path: maskedAct.length > 0 ? maskedAct : f.action,
           origin,
           method: f.method,
           tags: ['form'],
+          scopeStatus: formActionScope,
         });
       }
       for (const inputName of f.inputNames) {
@@ -194,6 +198,7 @@ export async function handleDomLeadsCollected(
           category: cat,
           origin,
           contexts: ['form-input'],
+          scopeStatus,
         });
       }
     }
@@ -203,6 +208,10 @@ export async function handleDomLeadsCollected(
   if (data.scripts !== undefined && data.scripts.length > 0) {
     for (const script of data.scripts) {
       const scriptUrl = typeof script.src === 'string' && script.src.length > 0 ? script.src : url;
+      // Independent scope classification for scripts (prevents external CDNs/scripts inheriting top-level in-scope)
+      const scriptScope = typeof script.src === 'string' && script.src.length > 0
+        ? resolveScopeStatus(script.src, settings)
+        : scopeStatus;
 
       if (typeof script.src === 'string' && script.src.length > 0) {
         try {
@@ -210,7 +219,7 @@ export async function handleDomLeadsCollected(
           if (sHost !== hostname) {
             await recordHost({
               hostname: sHost,
-              scopeStatus: resolveScopeStatus(script.src, settings),
+              scopeStatus: scriptScope,
               discoveredVia: 'script-src',
               firstSeen: Date.now(),
               lastSeen: Date.now(),
@@ -222,29 +231,30 @@ export async function handleDomLeadsCollected(
       }
 
       if (typeof script.inlineContent === 'string' && script.inlineContent.length > 0) {
-        // F1: Secrets
-        const secretLeads = detectSecrets(script.inlineContent, scriptUrl, scopeStatus);
+        // F1: Secrets evaluated with script's own scope
+        const secretLeads = detectSecrets(script.inlineContent, scriptUrl, scriptScope);
         for (const lead of secretLeads) {
           globalLeadStore.addLead(lead, tabId);
         }
 
-        // F2: Endpoints
-        const endpointLeads = detectEndpoints(script.inlineContent, scriptUrl, scopeStatus);
+        // F2: Endpoints evaluated with script's own scope
+        const endpointLeads = detectEndpoints(script.inlineContent, scriptUrl, scriptScope);
         for (const lead of endpointLeads) {
           globalLeadStore.addLead(lead, tabId);
           if (lead.evidence.extractedNames !== undefined) {
             for (const ep of lead.evidence.extractedNames) {
               await recordEndpoint({
                 path: ep,
-                origin,
+                origin: originFromUrl(scriptUrl) ?? origin,
                 tags: ['script-harvested'],
+                scopeStatus: scriptScope,
               });
             }
           }
         }
 
-        // F3: Source Maps
-        const sourceMapLeads = detectSourceMaps(script.inlineContent, {}, scriptUrl, scopeStatus);
+        // F3: Source Maps evaluated with script's own scope
+        const sourceMapLeads = detectSourceMaps(script.inlineContent, {}, scriptUrl, scriptScope);
         for (const lead of sourceMapLeads) {
           globalLeadStore.addLead(lead, tabId);
         }
@@ -268,9 +278,9 @@ export async function handleDomLeadsCollected(
             context: `Found sourceMappingURL in script tag`,
           },
           tags: ['sourcemap', 'source-code', 'recon'],
-          scopeStatus,
+          scopeStatus: scriptScope,
           timestamp: Date.now(),
-          origin,
+          origin: originFromUrl(scriptUrl) ?? origin,
           url: maskedScriptUrl.length > 0 ? maskedScriptUrl : scriptUrl,
           sourceSensor: 'S2',
         };
@@ -282,13 +292,18 @@ export async function handleDomLeadsCollected(
   // 4. Analyze Iframes (IFR-001)
   if (data.iframes !== undefined && data.iframes.length > 0) {
     for (const iframe of data.iframes) {
+      // Independent scope classification for embedded iframe origins
+      const iframeScope = typeof iframe.src === 'string' && iframe.src.length > 0
+        ? resolveScopeStatus(iframe.src, settings)
+        : scopeStatus;
+
       if (typeof iframe.src === 'string' && iframe.src.length > 0) {
         try {
           const ifHost = new URL(iframe.src).hostname;
           if (ifHost !== hostname) {
             await recordHost({
               hostname: ifHost,
-              scopeStatus: resolveScopeStatus(iframe.src, settings),
+              scopeStatus: iframeScope,
               discoveredVia: 'iframe-src',
               firstSeen: Date.now(),
               lastSeen: Date.now(),
@@ -320,7 +335,7 @@ export async function handleDomLeadsCollected(
             context: `sandbox="${typeof iframe.sandbox === 'string' ? iframe.sandbox : 'none'}", allow="${typeof iframe.allow === 'string' ? iframe.allow : 'none'}"`,
           },
           tags: ['iframe', 'sandbox', 'cross-origin'],
-          scopeStatus,
+          scopeStatus: iframeScope,
           timestamp: Date.now(),
           origin,
           url: maskedUrl.length > 0 ? maskedUrl : url,
@@ -350,6 +365,7 @@ export async function handleDomLeadsCollected(
             bucket: bucketName,
             provider: prov,
             origin,
+            scopeStatus,
           });
         }
       }

@@ -1,5 +1,6 @@
-import type { TabState, Finding, CoverageInfo, CookieRecord } from './types';
+import type { TabState, Finding, CoverageInfo, CookieRecord, ApiEndpointState } from './types';
 import { sanitizeUrlForStorage, sanitizeCspPolicyForStorage } from '../rules/utils';
+import { redactAllSecrets } from './reporting/report-builder';
 
 export interface SarifLog {
   $schema: string;
@@ -37,13 +38,43 @@ export interface SarifLog {
 }
 
 /**
+ * Recursively sanitizes finding text, evidence, URLs, and metadata before export sinks.
+ * Ensures canary tokens and raw secret strings never leak into JSON, Markdown, or SARIF.
+ */
+export function sanitizeFindingForExport(finding: Finding): Finding {
+  const sanitized: Finding = {
+    ...finding,
+    title: redactAllSecrets(finding.title ?? ''),
+    evidence: redactAllSecrets(finding.evidence ?? ''),
+    recommendation: redactAllSecrets(finding.recommendation ?? ''),
+    reference:
+      typeof finding.reference === 'string'
+        ? sanitizeUrlForStorage(redactAllSecrets(finding.reference))
+        : '',
+  };
+
+  if (typeof finding.impact === 'string' && finding.impact.length > 0) {
+    sanitized.impact = redactAllSecrets(finding.impact);
+  }
+  if (typeof finding.sourceUrl === 'string' && finding.sourceUrl.length > 0) {
+    sanitized.sourceUrl = sanitizeUrlForStorage(finding.sourceUrl);
+  }
+  if (Array.isArray(finding.limitations)) {
+    sanitized.limitations = finding.limitations.map((lim) => redactAllSecrets(lim));
+  }
+
+  return sanitized;
+}
+
+/**
  * Creates a sanitized deep clone of TabState ensuring all URLs, serviceWorkerUrl,
- * metaCspPolicies, and coverage ledger entries are sanitized without sensitive query params,
+ * metaCspPolicies, findings, origin, and coverage ledger entries are sanitized without sensitive query params,
  * credentials, or opaque tokens.
  */
 export function sanitizeStateForExport(state: TabState): TabState {
   const cloned: TabState = {
     ...state,
+    origin: redactAllSecrets(state.origin ?? ''),
     url: sanitizeUrlForStorage(state.url),
     cookies: Array.isArray(state.cookies)
       ? state.cookies.map((c) => {
@@ -52,26 +83,53 @@ export function sanitizeStateForExport(state: TabState): TabState {
           return copy;
         })
       : [],
-    findings: Array.isArray(state.findings) ? [...state.findings] : [],
+    findings: Array.isArray(state.findings) ? state.findings.map(sanitizeFindingForExport) : [],
     hops: Array.isArray(state.hops)
       ? state.hops.map((h) => ({
           ...h,
           url: sanitizeUrlForStorage(h.url),
         }))
       : [],
+    subdomainTrust: {
+      ...state.subdomainTrust,
+      vectors: Array.isArray(state.subdomainTrust?.vectors)
+        ? state.subdomainTrust.vectors.map((v) => ({
+            ...v,
+            detail: redactAllSecrets(v.detail ?? ''),
+            label: redactAllSecrets(v.label ?? ''),
+          }))
+        : [],
+    },
   };
+
+  if (state.apiEndpoints instanceof Map) {
+    const sanitizedApi = new Map<string, ApiEndpointState>();
+    for (const [key, val] of state.apiEndpoints.entries()) {
+      sanitizedApi.set(sanitizeUrlForStorage(key), {
+        ...val,
+        normalizedPath: sanitizeUrlForStorage(val.normalizedPath),
+        lastHop: {
+          ...val.lastHop,
+          url: sanitizeUrlForStorage(val.lastHop.url),
+          normalizedPath: sanitizeUrlForStorage(val.lastHop.normalizedPath),
+        },
+        findings: Array.isArray(val.findings) ? val.findings.map(sanitizeFindingForExport) : [],
+      });
+    }
+    cloned.apiEndpoints = sanitizedApi;
+  }
 
   const cov: CoverageInfo = {
     ...state.coverage,
     serviceWorkerUrl:
-      typeof state.coverage.serviceWorkerUrl === 'string' && state.coverage.serviceWorkerUrl.length > 0
+      typeof state.coverage?.serviceWorkerUrl === 'string' && state.coverage.serviceWorkerUrl.length > 0
         ? sanitizeUrlForStorage(state.coverage.serviceWorkerUrl)
         : null,
-    metaCspPolicies: Array.isArray(state.coverage.metaCspPolicies)
+    metaCspPolicies: Array.isArray(state.coverage?.metaCspPolicies)
       ? state.coverage.metaCspPolicies.map((p) => sanitizeCspPolicyForStorage(p))
       : [],
   };
-  if (Array.isArray(state.coverage.ledger)) {
+  if (Array.isArray(state.coverage?.ledger)) {
     cov.ledger = state.coverage.ledger.map((entry) => ({
       ...entry,
       url: sanitizeUrlForStorage(entry.url),

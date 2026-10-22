@@ -200,41 +200,81 @@ function sanitizeExportString(raw: string): string {
 }
 
 function sanitizeReportLead(lead: Lead): Lead {
-  const rawPreview = lead.evidence.preview;
-  const rawLoc = lead.evidence.location;
-  const rawUrl = lead.url;
-  const rawTitle = lead.title;
+  const id = sanitizeExportString(typeof lead.id === 'string' ? lead.id : '');
+  const ruleId = sanitizeExportString(typeof lead.ruleId === 'string' ? lead.ruleId : '');
+  const title = sanitizeExportString(typeof lead.title === 'string' ? lead.title : '');
+  const origin = sanitizeExportString(typeof lead.origin === 'string' ? lead.origin : '');
+  const url = maskLocation(typeof lead.url === 'string' && lead.url.length > 0 ? lead.url : '');
+
+  const rawPreview = lead.evidence?.preview;
+  const rawLoc = lead.evidence?.location;
   const preview = maskSecret(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '');
   const location = maskLocation(typeof rawLoc === 'string' && rawLoc.length > 0 ? rawLoc : '');
-  const url = maskLocation(typeof rawUrl === 'string' && rawUrl.length > 0 ? rawUrl : '');
-  // Sanitize title: caller-supplied; may contain canary or secret fragments
-  const title = sanitizeExportString(typeof rawTitle === 'string' && rawTitle.length > 0 ? rawTitle : '');
 
   // Sanitize context (free-text; may contain parameter values or canary tokens)
-  const rawContext = lead.evidence.context;
+  const rawContext = lead.evidence?.context;
   const sanitizedContext: string | undefined =
     typeof rawContext === 'string' && rawContext.length > 0
       ? sanitizeExportString(rawContext)
       : undefined;
 
   // Sanitize extractedNames (each name is a potential token)
-  const rawNames = lead.evidence.extractedNames;
+  const rawNames = lead.evidence?.extractedNames;
   const sanitizedNames: string[] | undefined =
-    rawNames !== undefined && rawNames.length > 0
-      ? rawNames.map(n => sanitizeExportString(n))
+    Array.isArray(rawNames) && rawNames.length > 0
+      ? rawNames.map((n) => sanitizeExportString(n))
+      : undefined;
+
+  // Sanitize tags, chainIds, needs, doesNotProve, remediation
+  const tags = Array.isArray(lead.tags)
+    ? lead.tags.map((t) => sanitizeExportString(t))
+    : [];
+
+  const chainIds = Array.isArray(lead.chainIds)
+    ? lead.chainIds.map((c) => sanitizeExportString(c))
+    : undefined;
+
+  const needs = Array.isArray(lead.needs)
+    ? lead.needs.map((n) => sanitizeExportString(n))
+    : [];
+
+  const doesNotProve = Array.isArray(lead.doesNotProve)
+    ? lead.doesNotProve.map((d) => sanitizeExportString(d))
+    : [];
+
+  const remediation =
+    typeof lead.remediation === 'string' && lead.remediation.length > 0
+      ? sanitizeExportString(lead.remediation)
       : undefined;
 
   return {
-    ...lead,
+    id,
+    ruleId,
+    family: lead.family,
+    tier: lead.tier,
+    potential: lead.potential,
+    confidence: lead.confidence,
     title,
-    url,
+    needs,
+    doesNotProve,
     evidence: {
-      ...lead.evidence,
       preview,
       location,
       ...(sanitizedContext !== undefined ? { context: sanitizedContext } : {}),
       ...(sanitizedNames !== undefined ? { extractedNames: sanitizedNames } : {}),
     },
+    tags,
+    scopeStatus: lead.scopeStatus,
+    timestamp: lead.timestamp,
+    origin,
+    url,
+    sourceSensor: lead.sourceSensor,
+    ...(chainIds !== undefined ? { chainIds } : {}),
+    ...(lead.priority !== undefined ? { priority: lead.priority } : {}),
+    ...(lead.novelty !== undefined ? { novelty: lead.novelty } : {}),
+    ...(lead.pinned !== undefined ? { pinned: lead.pinned } : {}),
+    ...(lead.triageState !== undefined ? { triageState: lead.triageState } : {}),
+    ...(remediation !== undefined ? { remediation } : {}),
   };
 }
 
