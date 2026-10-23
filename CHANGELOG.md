@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.3] - 2026-10-23
 
 ### Security & Accuracy
+- **Bug Bounty Tool Hardening & Noise Reduction**:
+  - **Lead ID Collision Resistance**: Replaced monotonic module-level `leadCounter` across all F1–F8 detectors with collision-free `crypto.randomUUID()` identifiers that survive service worker idle/sleep cycles.
+  - **Secrets Detector (F1) Noise Reduction & Entropy Validation**:
+    - Implemented standalone non-production marker detection in `isPlaceholder` (`test`, `demo`, `fake`, `mock`, `staging`).
+    - Separated Discord bot token detection with per-segment HMAC entropy checking (`>= 4.0`), eliminating false positives on arbitrary base64 strings.
+    - Increased hard-coded Bearer token length threshold to 32+ characters and enforced Shannon entropy `>= 3.5`.
+    - Replaced inner alternating capture group in `SEC-003` generic secret regex with non-backtracking character class `[^"'\`\r\n]{8,}` to eliminate ReDoS risk on large JavaScript bundles.
+  - **Endpoint Detector (F2) Parameterized Template Literal Discovery**:
+    - Added support for backtick template literal paths in network clients (`fetch`, `axios`, etc.), normalizing variable expressions `${...}` into `{param}` REST placeholders.
+  - **Parameter Harvesting (F5) Fragment Routing & Context-Aware IDOR**:
+    - Added URL hash fragment query parameter extraction (`#redirect_uri=...`), capturing client-side SPA and OAuth flow parameters.
+    - Implemented URL path context awareness for IDOR candidates: suppresses false-positive IDOR flags on public content paths (`/blog`, `/docs`, `/product`) while boosting confidence and potential on authenticated resource paths (`/account`, `/admin`, `/billing`).
+  - **Header Leaks (F6) Target Infrastructure Whitelist**:
+    - Restricted `INF-001` internal RFC1918/hostname disclosure scanning to genuine backend disclosure headers (`x-backend-server`, `x-real-ip`, etc.), avoiding false positives from client-originating `x-forwarded-for` headers.
+  - **Response Body Detector (F7) Stack Trace Precision & GraphQL Introspection**:
+    - Required 2+ sequential stack frames for Java error signatures, eliminating false positives from single-line text comments.
+    - Added `GQL-001` detection for production GraphQL introspection enabled in response bodies.
+  - **Recon Detector (F8) Cloud Storage Coverage**:
+    - Added patterns for Cloudflare R2, Alibaba Cloud OSS, Oracle Cloud Object Storage, and Backblaze B2 buckets.
+  - **Cookie Security (COOK-004) SameSite Missing Severity Elevation**:
+    - Elevated `COOK-004` finding for sensitive session cookies to `severity: 'medium'` and `outcome: 'fail'` when `SameSite` is absent, providing direct visibility into CSRF posture on legacy clients.
+  - **Lead Priority Triage Suppression**:
+    - Set calculated priority to `0` for leads triaged as `false_positive`.
+  - **Comprehensive Test Suite Expansion**:
+    - Added `tests/leads/bounty-hardening.test.ts` (12 tests) and `tests/rules/review-fixes.test.ts` (26 tests), expanding test coverage to **748 unit tests across 52 test suites** alongside 9 Playwright E2E browser tests.
 - **Secrets Detector (F1) Pattern Fixes & Vendor Expansions**:
   - Corrected malformed OpenAI API key regex quantifier (`{20,}T3BlbkFJ`).
   - Added detection for GitHub fine-grained personal access tokens (`github_pat_`), Hugging Face access tokens (`hf_`), Discord bot tokens, Twilio Account SID & Auth Token credentials, and hard-coded Bearer tokens with Shannon entropy validation.
@@ -26,8 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Preserved session-identifier cookies bearing CSRF markers (e.g. `xsrf_session`).
   - Fixed camelCase boundary word splitting to preserve underscores.
   - Added detection for standalone session token identifiers (`SSID`, `refreshToken`, `.AspNetCore.Cookies`, `.ASPXAUTH`, `userid`).
-- **Comprehensive Review Regression Test Suite**:
-  - Added `tests/rules/review-fixes.test.ts` with 26 targeted regression tests, bringing total test coverage to 736 unit tests across 51 test suites.
 
 ## [2.0.2] - 2026-10-23
 

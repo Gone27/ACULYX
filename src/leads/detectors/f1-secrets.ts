@@ -48,6 +48,12 @@ export function isPlaceholder(val: string): boolean {
     return true;
   }
 
+  // If the value itself contains an obvious non-production marker word (standalone),
+  // classify as placeholder to reduce noise on dev/staging configs.
+  if (/(?:^|[-_.])(?:test|demo|fake|mock|dummy|staging|placeholder|sample)(?:[-_.]|$)/i.test(trimmed)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -68,10 +74,11 @@ function parseJwtHeader(token: string): Record<string, unknown> | null {
   }
 }
 
-let leadCounter = 0;
 function nextLeadId(prefix: string): string {
-  leadCounter++;
-  return `LD-${prefix}-${Date.now().toString(36)}-${leadCounter}`;
+  const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `LD-${prefix}-${uid}`;
 }
 
 export function detectSecrets(
@@ -890,18 +897,50 @@ export function detectSecrets(
     }
   }
 
-  // 3b. Additional vendor formats (review additions)
+  // 3b. Discord bot token — needs per-segment entropy validation
+  // Format: <snowflake_user_id>.<timestamp_b64>.<hmac>
+  // The HMAC segment (3rd) must have high entropy; snowflake IDs are 17-19 digits encoded as base64
+  const discordBotRe = /\b([MNO][A-Za-z0-9_-]{23,25})\.([A-Za-z0-9_-]{6})\.([A-Za-z0-9_-]{27,40})\b/g;
+  for (const m of code.matchAll(discordBotRe)) {
+    const full = m[0] ?? '';
+    const hmacSeg = m[3] ?? '';
+    if (full.length === 0 || isPlaceholder(full)) continue;
+    // Require high entropy in the HMAC segment (should be truly random)
+    if (calculateEntropy(hmacSeg) < 4.0) continue;
+    leads.push({
+      id: nextLeadId('SEC-DISCORD'),
+      ruleId: 'SEC-001',
+      family: 'F1',
+      tier: 'observed',
+      potential: 'high',
+      confidence: 0.85,
+      title: 'Discord Bot Token Exposure',
+      needs: ['verify the credential is live and its scope'],
+      doesNotProve: ['that the credential is currently valid'],
+      evidence: { preview: maskSecret(full), location: maskLocation(url), context: 'Discord Bot Token' },
+      tags: ['discord', 'secret'],
+      scopeStatus,
+      timestamp: Date.now(),
+      origin,
+      url,
+      sourceSensor: 'S2',
+      remediation: 'Reset the bot token in the Discord developer portal.',
+    });
+  }
+
+  // 3c. Additional vendor formats (review additions)
   const simple: Array<{ id: string; title: string; re: RegExp; potential: Lead['potential']; tags: string[]; remediation: string; group?: number }> = [
     { id: 'SEC-GH-FINE', title: 'GitHub Fine-Grained Personal Access Token Exposure', re: /\bgithub_pat_[A-Za-z0-9_]{50,}\b/g, potential: 'critical', tags: ['github', 'secret'], remediation: 'Revoke the token in GitHub settings and rotate it.' },
     { id: 'SEC-HF', title: 'Hugging Face Access Token Exposure', re: /\bhf_[A-Za-z0-9]{30,}\b/g, potential: 'high', tags: ['huggingface', 'secret'], remediation: 'Revoke the token in Hugging Face settings and rotate it.' },
-    { id: 'SEC-DISCORD', title: 'Discord Bot Token Exposure', re: /\b[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}\b/g, potential: 'high', tags: ['discord', 'secret'], remediation: 'Reset the bot token in the Discord developer portal.' },
     { id: 'SEC-TWILIO-AUTH', title: 'Twilio Auth Token Exposure (context match)', re: /\b(?:twilio[\w.-]{0,20}|auth_?token)["']?\s*[:=,]\s*["']([0-9a-f]{32})["']/gi, potential: 'high', tags: ['twilio', 'secret'], remediation: 'Rotate the Twilio Auth Token and move it server-side.', group: 1 },
-    { id: 'SEC-BEARER', title: 'Hard-coded Bearer Credential in Source', re: /\bAuthorization["']?\s*[:=]\s*["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/gi, potential: 'high', tags: ['bearer', 'auth', 'secret'], remediation: 'Remove the static credential from client code and issue per-user tokens.', group: 1 },
+    { id: 'SEC-BEARER', title: 'Hard-coded Bearer Credential in Source', re: /\bAuthorization["']?\s*[:=]\s*["'`]Bearer\s+([A-Za-z0-9._~+/=-]{32,})["'`]/gi, potential: 'high', tags: ['bearer', 'auth', 'secret'], remediation: 'Remove the static credential from client code and issue per-user tokens.', group: 1 },
   ];
   for (const rule of simple) {
     for (const m of code.matchAll(rule.re)) {
       const match = rule.group !== undefined ? (m[rule.group] ?? '') : m[0];
       if (match.length === 0 || isPlaceholder(match)) continue;
+      // For bearer tokens, require higher entropy
+      if (rule.id === 'SEC-BEARER' && calculateEntropy(match) < 3.5) continue;
       leads.push({
         id: nextLeadId(rule.id),
         ruleId: 'SEC-001',
@@ -925,7 +964,7 @@ export function detectSecrets(
   }
 
   // 4. SEC-003: GENERIC CONTEXT SECRETS (Quoted JSON keys, assignments, template literals)
-  const genericAssignRegex = /(?:["']?)((?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret)\w*)(?:["']?)\s*[:=]\s*["'`]((?:[^"'`\r\n\s\\]|\\.){8,})["'`]/gi;
+  const genericAssignRegex = /(?:["']?)((?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret)\w*)(?:["']?)\s*[:=]\s*["'`]([^"'`\r\n]{8,})["'`]/gi;
   let assignMatch: RegExpExecArray | null;
   while ((assignMatch = genericAssignRegex.exec(code)) !== null) {
     const keyName = assignMatch[1];

@@ -30,6 +30,7 @@ export function calculateLeadPriority(
   inChain: boolean = false,
   isNew: boolean = false
 ): number {
+  if (lead.triageState === 'false_positive') return 0;
   const potentialWeight = POTENTIAL_WEIGHTS[lead.potential] ?? 5;
   const confidenceFactor = CONFIDENCE_FACTORS[lead.tier] ?? 0.5;
   const scopeFactor = SCOPE_FACTORS[lead.scopeStatus] ?? 0.5;

@@ -18,10 +18,11 @@ const SEMANTIC_TAGS: Record<string, string> = {
   graphql: 'graphql',
 };
 
-let leadCounter = 0;
 function nextLeadId(prefix: string): string {
-  leadCounter++;
-  return `LD-${prefix}-${Date.now().toString(36)}-${leadCounter}`;
+  const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `LD-${prefix}-${uid}`;
 }
 
 export function detectEndpoints(
@@ -47,13 +48,17 @@ export function detectEndpoints(
     /(?:fetch|axios(?:\.[a-z]+)?|\$\.ajax|\.open|\.sendBeacon)\s*\(\s*["'`](\/[a-zA-Z0-9_\-./]+)["'`]/g,
     /["'`](\/(?:api|rest|v[0-9]|graphql|admin|internal)\/[a-zA-Z0-9_\-./]*)["'`]/g,
     /new\s+(?:WebSocket|EventSource)\s*\(\s*["'`](\/[a-zA-Z0-9_\-./]+)["'`]/g,
+    /(?:fetch|axios(?:\.[a-z]+)?|\$\.ajax|\.open|\.sendBeacon)\s*\(\s*`(\/[a-zA-Z0-9_\-./]*(?:\${[^`\r\n]+}[a-zA-Z0-9_\-./]*)+)`/g,
+    /`(\/(?:api|rest|v[0-9]|graphql|admin|internal)\/[a-zA-Z0-9_\-./]*(?:\${[^`\r\n]+}[a-zA-Z0-9_\-./]*)+)`/g,
   ];
 
   for (const regex of fetchPatterns) {
     let match: RegExpExecArray | null;
     while ((match = regex.exec(code)) !== null) {
-      const path = match[1];
-      if (path !== undefined && path.length > 2 && !discoveredPaths.has(path)) {
+      const rawPath = match[1];
+      if (rawPath === undefined) continue;
+      const path = rawPath.replace(/\${[^}]+}/g, '{param}');
+      if (path.length > 2 && !discoveredPaths.has(path)) {
         discoveredPaths.add(path);
 
         const tags: string[] = ['endpoint', 'discovered-url'];

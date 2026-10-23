@@ -23,10 +23,11 @@ const CSRF_INPUT_NAMES = /^(csrf|_csrf|csrf_token|xsrf|xsrf_token|authenticity_t
 
 const PRIVILEGED_INPUT_NAMES = /^(role|isadmin|is_admin|admin|privilege|permissions|access_level|group)$/i;
 
-let leadCounter = 0;
 function nextLeadId(prefix: string): string {
-  leadCounter++;
-  return `LD-${prefix}-${Date.now().toString(36)}-${leadCounter}`;
+  const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `LD-${prefix}-${uid}`;
 }
 
 export function detectAuthLeads(

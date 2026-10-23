@@ -16,11 +16,18 @@ const CSP_BYPASS_DOMAINS = [
   'unpkg.com',
 ];
 
-let leadCounter = 0;
 function nextLeadId(prefix: string): string {
-  leadCounter++;
-  return `LD-${prefix}-${Date.now().toString(36)}-${leadCounter}`;
+  const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `LD-${prefix}-${uid}`;
 }
+
+const INFRA_DISCLOSURE_HEADERS = new Set([
+  'x-backend-server', 'x-real-ip', 'x-forwarded-server', 'x-upstream',
+  'server', 'location', 'link', 'x-envoy-upstream-service-time',
+  'x-debug-token', 'x-powered-by', 'x-application-context',
+]);
 
 export function detectHeaderLeads(
   headers: Record<string, string>,
@@ -226,6 +233,7 @@ export function detectHeaderLeads(
 
   // 4. INF-001: Internal RFC1918 / Private Hostname Disclosure
   for (const [headerName, headerVal] of Object.entries(lowerHeaders)) {
+    if (!INFRA_DISCLOSURE_HEADERS.has(headerName)) continue;
     const rfcMatch = headerVal.match(RFC1918_REGEX);
     const internalHostMatch = headerVal.match(INTERNAL_HOST_REGEX);
 
@@ -237,7 +245,7 @@ export function detectHeaderLeads(
         family: 'F6',
         tier: 'observed',
         potential: 'low',
-        confidence: 0.95,
+        confidence: 0.7,
         title: `Internal Network Address Disclosed in Header: ${headerName}`,
         needs: ['correlate internal IP with cloud SSRF leads'],
         doesNotProve: ['direct routability to internal IP'],

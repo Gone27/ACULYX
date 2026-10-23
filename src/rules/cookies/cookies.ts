@@ -103,21 +103,36 @@ function checkSameSiteNone(cookie: CookieRecord): Finding | null {
   };
 }
 
-function checkSameSiteMissing(cookie: CookieRecord): Finding | null {
+function checkSameSiteMissing(
+  cookie: CookieRecord,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): Finding | null {
   if (cookie.sameSite !== '') return null;
+  const { isSensitive } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
+  const effectiveSeverity: Finding['severity'] = isSensitive ? 'medium' : 'info';
+  const effectiveOutcome: Finding['outcome'] = isSensitive ? 'fail' : 'pass';
   return {
     ruleId: 'COOK-004',
     category: 'cookie',
-    severity: 'info',
-    confidence: 'deterministic',
+    severity: effectiveSeverity,
+    confidence: isSensitive ? 'heuristic' : 'deterministic',
     provenance: 'cookie-metadata',
-    outcome: 'pass',
-    title: `Cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute (defaults to Lax in modern browsers)`,
-    impact: 'Modern browsers automatically enforce SameSite=Lax for this cookie, though older clients without Lax-by-default support may still attach it to cross-site requests.',
+    outcome: effectiveOutcome,
+    title: isSensitive
+      ? `Sensitive cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute — CSRF exposure risk on older browsers`
+      : `Cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute (defaults to Lax in modern browsers)`,
+    impact: isSensitive
+      ? 'Without an explicit SameSite attribute, this sensitive session cookie relies on browser Lax-by-default. Older clients (pre-Chrome 80, iOS 12 Safari) will send it with all cross-site requests, enabling CSRF attacks.'
+      : 'Modern browsers automatically enforce SameSite=Lax for this cookie, though older clients without Lax-by-default support may still attach it to cross-site requests.',
     evidence: sanitizeEvidence(cookie.name),
-    recommendation: 'Modern browsers (Chrome 80+, Firefox, Safari) enforce SameSite=Lax by default. Explicitly setting SameSite=Lax or Strict is recommended for defense-in-depth on legacy clients.',
+    recommendation: isSensitive
+      ? 'Add SameSite=Strict or SameSite=Lax to this sensitive cookie. Prefer Strict for authentication cookies.'
+      : 'Modern browsers (Chrome 80+, Firefox, Safari) enforce SameSite=Lax by default. Explicitly setting SameSite=Lax or Strict is recommended for defense-in-depth on legacy clients.',
     reference: REF_SAMESITE,
-    limitations: ['Informational observation; modern browsers enforce Lax by default.'],
+    limitations: isSensitive
+      ? ['Passive metadata inspection; sensitivity inferred from cookie name pattern.']
+      : ['Informational observation; modern browsers enforce Lax by default.'],
   };
 }
 
@@ -267,7 +282,7 @@ export function checkCookies(
     const secure    = checkSecure(cookie, isHttps, alwaysSensitive, alwaysIgnore);
     const httpOnly  = checkHttpOnly(cookie, alwaysSensitive, alwaysIgnore);
     const sameNone  = checkSameSiteNone(cookie);
-    const sameMiss  = checkSameSiteMissing(cookie);
+    const sameMiss  = checkSameSiteMissing(cookie, alwaysSensitive, alwaysIgnore);
     const host      = checkHostPrefix(cookie);
     const secPfx    = checkSecurePrefix(cookie);
     const httpPfx   = checkHttpPrefix(cookie);

@@ -49,10 +49,11 @@ export function classifyParamName(paramName: string): ParamCategory {
   return 'general';
 }
 
-let leadCounter = 0;
 function nextLeadId(prefix: string): string {
-  leadCounter++;
-  return `LD-${prefix}-${Date.now().toString(36)}-${leadCounter}`;
+  const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `LD-${prefix}-${uid}`;
 }
 
 export function detectParamLeads(
@@ -69,6 +70,24 @@ export function detectParamLeads(
 
   const origin = parsed.origin;
   const paramNames = Array.from(parsed.searchParams.keys());
+
+  // Also parse parameters from the URL fragment (hash), common in SPAs and OAuth flows
+  const hashParams = (() => {
+    const hash = parsed.hash.slice(1); // remove leading '#'
+    if (!hash.includes('=')) return new URLSearchParams();
+    // Handle both #key=val and #/path?key=val formats
+    const qIndex = hash.indexOf('?');
+    const queryPart = qIndex >= 0 ? hash.slice(qIndex + 1) : hash;
+    try { return new URLSearchParams(queryPart); } catch { return new URLSearchParams(); }
+  })();
+  for (const key of hashParams.keys()) {
+    if (!paramNames.includes(key)) paramNames.push(key);
+  }
+
+  const pathLower = parsed.pathname.toLowerCase();
+  // Public/content paths reduce IDOR signal; account/admin paths increase it
+  const isPublicContext = /\/(blog|article|post|news|product|item|category|tag|page|doc|faq|help|about|contact|search|explore|discover)(?:\/|$)/.test(pathLower);
+  const isPrivateContext = /\/(account|profile|user|admin|settings|dashboard|orders|billing|payment|manage|internal|api\/v[0-9])(?:\/|$)/.test(pathLower);
 
   for (const name of paramNames) {
     const category = classifyParamName(name);
@@ -137,6 +156,37 @@ export function detectParamLeads(
           extractedNames: [name],
         },
         tags: ['debug-param', 'debug', 'param-lead'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S1',
+      });
+    } else if (category === 'idor') {
+      // Adjust signal strength based on URL path context
+      const idorPotential: Lead['potential'] = isPrivateContext ? 'high' : (isPublicContext ? 'info' : 'medium');
+      const idorConfidence = isPrivateContext ? 0.75 : (isPublicContext ? 0.3 : 0.55);
+      if (isPublicContext && idorConfidence < 0.4) {
+        // Skip entirely for clearly public content pages to avoid extreme noise
+        continue;
+      }
+      leads.push({
+        id: nextLeadId('PAR-IDOR'),
+        ruleId: 'PAR-002',
+        family: 'F5',
+        tier: 'whisper',
+        potential: idorPotential,
+        confidence: idorConfidence,
+        title: `IDOR Candidate Parameter: ${name}`,
+        needs: ['verify whether parameter value controls access to another user\'s resource'],
+        doesNotProve: ['insecure direct object reference without access control validation'],
+        evidence: {
+          preview: maskSecret(name),
+          location: maskLocation(url),
+          extractedNames: [name],
+          context: `Parameter '${name}' belongs to IDOR class; path context: ${isPrivateContext ? 'private' : (isPublicContext ? 'public' : 'neutral')}`,
+        },
+        tags: ['idor-param', 'idor', 'param-lead'],
         scopeStatus,
         timestamp: Date.now(),
         origin,

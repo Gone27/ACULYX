@@ -3,10 +3,11 @@ import { maskSecret, maskLocation } from '../sieve/mask';
 
 const SENSITIVE_JSON_KEYS = /^(password|password_hash|passwd|hash|secret|token|ssn|social_security|dob|date_of_birth|role|isadmin|is_admin|internal_.*|private_key)$/i;
 
-let leadCounter = 0;
 function nextLeadId(prefix: string): string {
-  leadCounter++;
-  return `LD-${prefix}-${Date.now().toString(36)}-${leadCounter}`;
+  const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `LD-${prefix}-${uid}`;
 }
 
 export function detectBodyLeads(
@@ -29,7 +30,7 @@ export function detectBodyLeads(
   // 1. ERR-001: Stack Traces & Debug Pages
   const errorSignatures = [
     { name: 'Python Traceback / Werkzeug', regex: /Traceback \(most recent call last\):|Werkzeug Debugger/i },
-    { name: 'Java Stack Trace', regex: /\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)/ },
+    { name: 'Java Stack Trace', regex: /\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)[\s\S]{0,200}?\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)/ },
     { name: 'Laravel Error', regex: /Illuminate\\|Whoops! There was an error\./i },
     { name: 'Spring Whitelabel Error', regex: /Whitelabel Error Page/i },
     { name: 'ASP.NET YSOD', regex: /Server Error in ['\/].*Application|Yellow Screen of Death/i },
@@ -146,6 +147,37 @@ export function detectBodyLeads(
       origin,
       url: maskLocation(url),
       sourceSensor: 'S1',
+    });
+  }
+
+  // 3. GQL-001: GraphQL Introspection Enabled
+  if (
+    (contentType.toLowerCase().includes('application/json') || body.trim().startsWith('{')) &&
+    body.includes('__schema') &&
+    body.includes('queryType')
+  ) {
+    leads.push({
+      id: nextLeadId('GQL-INTROSPECT'),
+      ruleId: 'GQL-001',
+      family: 'F7',
+      tier: 'strong',
+      potential: 'medium',
+      confidence: 0.9,
+      title: 'GraphQL Introspection Enabled in Production',
+      needs: ['confirm schema maps sensitive types/mutations not intended for clients'],
+      doesNotProve: ['exploitable query or mutation accessible without authorization'],
+      evidence: {
+        preview: maskSecret('__schema response detected'),
+        location: maskLocation(url),
+        context: 'GraphQL introspection response body contains __schema and queryType',
+      },
+      tags: ['graphql', 'introspection', 'recon'],
+      scopeStatus,
+      timestamp: Date.now(),
+      origin,
+      url,
+      sourceSensor: 'S1',
+      remediation: 'Disable GraphQL introspection in production environments. Use query allowlisting or persisted queries instead.',
     });
   }
 
