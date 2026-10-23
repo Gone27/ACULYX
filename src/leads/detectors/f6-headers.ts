@@ -61,7 +61,15 @@ export function detectHeaderLeads(
 
   if (typeof acao === 'string' && acao.length > 0) {
     const isCredentialsTrue = acac?.trim().toLowerCase() === 'true';
-    const reflectsOrigin = requestOrigin !== null && requestOrigin.length > 0 && acao.trim() === requestOrigin;
+    const isSameOrigin = (() => {
+      if (requestOrigin === null || requestOrigin.length === 0) return false;
+      try {
+        return new URL(requestOrigin).origin.toLowerCase() === origin.toLowerCase();
+      } catch {
+        return requestOrigin.toLowerCase() === origin.toLowerCase();
+      }
+    })();
+    const reflectsOrigin = !isSameOrigin && requestOrigin !== null && requestOrigin.length > 0 && acao.trim() === requestOrigin;
     const isNullOrigin = acao.trim() === 'null';
     const isHttpAllowed = acao.startsWith('http://');
 
@@ -118,7 +126,8 @@ export function detectHeaderLeads(
     }
 
     // COR-002: Methods and exposed auth headers
-    if (typeof acam === 'string' && acam.length > 0 && isCredentialsTrue && /(PUT|DELETE|PATCH)/i.test(acam)) {
+    const permitsCrossOrigin = reflectsOrigin || isNullOrigin || isHttpAllowed || acao === '*';
+    if (permitsCrossOrigin && typeof acam === 'string' && acam.length > 0 && isCredentialsTrue && /(PUT|DELETE|PATCH)/i.test(acam)) {
       leads.push({
         id: nextLeadId('COR-METHODS'),
         ruleId: 'COR-002',
@@ -142,7 +151,7 @@ export function detectHeaderLeads(
       });
     }
 
-    if (typeof aceh === 'string' && aceh.length > 0 && /(authorization|cookie|set-cookie|x-auth-token)/i.test(aceh)) {
+    if (permitsCrossOrigin && typeof aceh === 'string' && aceh.length > 0 && /(authorization|cookie|set-cookie|x-auth-token)/i.test(aceh)) {
       leads.push({
         id: nextLeadId('COR-EXPOSE'),
         ruleId: 'COR-002',

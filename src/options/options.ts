@@ -208,6 +208,8 @@ function activateSection(sectionId: string): void {
   // Refresh home view data when navigating to it
   if (target === 'home') {
     void refreshHomeView();
+  } else if (target === 'leads') {
+    void refreshReconCounts();
   }
 }
 

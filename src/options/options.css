@@ -787,15 +787,20 @@ body {
 
 /* ── Home section ────────────────────────────────────────────────── */
 .home-cards-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin-bottom: 20px;
-  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .home-cards-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .home-card {
-  flex: 1;
-  min-width: 130px;
+  min-width: 0;
   background: var(--sc-bg-card, var(--bg-card));
   border: 1px solid var(--sc-border, var(--border));
   border-radius: var(--sc-radius-lg);
@@ -847,9 +852,15 @@ body {
 
 .home-nav-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin-bottom: 24px;
+}
+
+@media (max-width: 640px) {
+  .home-nav-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .home-nav-card {

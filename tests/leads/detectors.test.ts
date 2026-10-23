@@ -317,4 +317,79 @@ describe('Sensor S3: Main-World Events (Untrusted Tagging & Bounds)', () => {
     expect(postLead?.tags).toContain('page-reported');
     expect(postLead?.tier).toBe('weak');
   });
+
+  it('detects prefixed generic secrets like access_token and refresh_token while ignoring URLs and paths', () => {
+    const code = `
+      const config = {
+        "access_token": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4",
+        "refresh_token": "x9y8z7w6v5u4t3s2r1q0p9o8n7m6",
+        "token_endpoint": "https://auth.example.com/oauth/v2/token",
+        "auth_url": "/api/v1/auth/callback",
+        "password_hint": "this is a plain english sentence with spaces"
+      };
+    `;
+    const leads = detectSecrets(code, 'https://example.com/bundle.js', 'in-scope');
+    const secretLeads = leads.filter(l => l.ruleId === 'SEC-003');
+    expect(secretLeads.some(l => l.title.includes('access_token'))).toBe(true);
+    expect(secretLeads.some(l => l.title.includes('refresh_token'))).toBe(true);
+    // Should NOT flag URLs, paths, or sentences
+    expect(secretLeads.some(l => l.title.includes('token_endpoint'))).toBe(false);
+    expect(secretLeads.some(l => l.title.includes('auth_url'))).toBe(false);
+    expect(secretLeads.some(l => l.title.includes('password_hint'))).toBe(false);
+  });
+
+  it('does NOT flag same-origin ACAO echo as CORS exploit, but flags cross-origin reflection', () => {
+    // Same-origin echo: page is https://example.com, requestOrigin is https://example.com
+    const sameOriginHeaders = {
+      'access-control-allow-origin': 'https://example.com',
+      'access-control-allow-credentials': 'true',
+    };
+    const sameLeads = detectHeaderLeads(sameOriginHeaders, 'https://example.com/api', 'https://example.com', 'in-scope');
+    expect(sameLeads.filter(l => l.ruleId === 'COR-001')).toHaveLength(0);
+
+    // Cross-origin reflection: page is https://api.example.com, requestOrigin is https://attacker.com
+    const crossOriginHeaders = {
+      'access-control-allow-origin': 'https://attacker.com',
+      'access-control-allow-credentials': 'true',
+    };
+    const crossLeads = detectHeaderLeads(crossOriginHeaders, 'https://api.example.com/data', 'https://attacker.com', 'in-scope');
+    const corLead = crossLeads.find(l => l.ruleId === 'COR-001');
+    expect(corLead).toBeDefined();
+    expect(corLead?.potential).toBe('high');
+  });
+
+  it('detects insecure password submission when form action submits to cleartext HTTP', () => {
+    const context = {
+      url: 'https://example.com/login',
+      forms: [
+        {
+          action: 'http://auth.example.com/api/login',
+          method: 'POST',
+          inputs: [{ name: 'password', type: 'password' }],
+        },
+      ],
+    };
+    const leads = detectAuthLeads(context, 'in-scope');
+    const cleartextLead = leads.find(l => l.ruleId === 'AUTH-003' && l.tags.includes('cleartext-credentials'));
+    expect(cleartextLead).toBeDefined();
+    expect(cleartextLead?.title).toContain('Cleartext HTTP');
+  });
+
+  it('detects wildcard postMessage only when targetOrigin argument is wildcard', () => {
+    // False positive test: postMessage used with same-origin, but '*' appears elsewhere in file
+    const safeCode = `
+      window.postMessage({ type: 'ready' }, window.location.origin);
+      const star = '*';
+      const multiply = 5 * 10;
+    `;
+    const safeLeads = detectReconLeads(safeCode, 'https://example.com/app.js', 'in-scope');
+    expect(safeLeads.filter(l => l.tags.includes('wildcard-origin'))).toHaveLength(0);
+
+    // True positive test: postMessage with '*' as target origin
+    const vulnerableCode = `
+      window.postMessage({ token: userToken }, '*');
+    `;
+    const vulnLeads = detectReconLeads(vulnerableCode, 'https://example.com/app.js', 'in-scope');
+    expect(vulnLeads.some(l => l.tags.includes('wildcard-origin'))).toBe(true);
+  });
 });

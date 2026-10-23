@@ -183,8 +183,12 @@ export function detectAuthLeads(
 
     // 3. AUTH-003: Insecure Form Inputs / Password over HTTP / Hidden Privilege fields
     const inputs = form.inputs !== undefined ? form.inputs : [];
+    const isFormActionHttp = typeof form.action === 'string' && form.action.startsWith('http://');
+    const isPageHttp = url.startsWith('http://');
+    const isFormCleartext = isFormActionHttp || isPageHttp;
+
     for (const input of inputs) {
-      if (input.type === 'password' && url.startsWith('http://')) {
+      if (input.type === 'password' && isFormCleartext) {
         leads.push({
           id: nextLeadId('AUTH-CLEARTEXT'),
           ruleId: 'AUTH-003',
@@ -192,12 +196,15 @@ export function detectAuthLeads(
           tier: 'observed',
           potential: 'high',
           confidence: 1.0,
-          title: 'Password Input Submitted Over Unencrypted HTTP',
-          needs: ['verify form action protocol'],
+          title: isFormActionHttp
+            ? 'Password Form Submits to Insecure Cleartext HTTP Action'
+            : 'Password Input Submitted Over Unencrypted HTTP',
+          needs: ['verify form action protocol and network transport'],
           doesNotProve: ['network eavesdropping active'],
           evidence: {
             preview: maskSecret(typeof input.name === 'string' && input.name.length > 0 ? input.name : 'password'),
             location: maskLocation(url),
+            context: isFormActionHttp ? `Form action target: ${form.action}` : 'Page loaded over cleartext HTTP',
           },
           tags: ['cleartext-credentials', 'http-insecure'],
           scopeStatus,

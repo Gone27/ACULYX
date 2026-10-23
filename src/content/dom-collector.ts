@@ -314,9 +314,15 @@ const ALLOWED_SINKS = new Set([
 ]);
 
 let domCollectorInstalledInClosure = false;
+let triggerCollectionFn: (() => void) | null = null;
 
 export function initDomCollector(): void {
-  if (domCollectorInstalledInClosure) return;
+  if (domCollectorInstalledInClosure) {
+    if (triggerCollectionFn !== null) {
+      triggerCollectionFn();
+    }
+    return;
+  }
   domCollectorInstalledInClosure = true;
 
   const eventCountsByType = new Map<string, number>();
@@ -411,6 +417,17 @@ export function initDomCollector(): void {
     } catch {
       // Ignore collection errors
     }
+  }
+
+  triggerCollectionFn = performCollection;
+
+  // Support on-demand rescanning from extension popup or background
+  if (typeof chrome !== 'undefined' && typeof chrome.runtime?.onMessage?.addListener === 'function') {
+    chrome.runtime.onMessage.addListener((msg: { type?: string }) => {
+      if (msg?.type === 'RESCAN_DOM_LEADS') {
+        performCollection();
+      }
+    });
   }
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {

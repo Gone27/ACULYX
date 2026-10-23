@@ -383,6 +383,14 @@ export async function handleDomLeadsCollected(
         }
       }
 
+      // Also evaluate parameter leads from discovered links
+      if (link.href.includes('?')) {
+        const linkParamLeads = detectParamLeads(link.href, linkScope);
+        for (const pl of linkParamLeads) {
+          globalLeadStore.addLead(pl, tabId);
+        }
+      }
+
       try {
         const u = new URL(link.href);
         if (typeof u.hostname === 'string' && u.hostname.length > 0 && u.hostname !== hostname) {
@@ -426,6 +434,11 @@ export async function handleDomLeadsCollected(
       for (const s of secretLeads) {
         s.title = `[HTML Comment] ${s.title}`;
         globalLeadStore.addLead(s, tabId);
+      }
+      const epLeads = detectEndpoints(comment, url, scopeStatus);
+      for (const ep of epLeads) {
+        ep.title = `[HTML Comment] ${ep.title}`;
+        globalLeadStore.addLead(ep, tabId);
       }
     }
   }

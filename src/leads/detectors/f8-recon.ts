@@ -120,7 +120,8 @@ export function detectReconLeads(
     }
   }
 
-  if (content.includes('postMessage(') && content.includes("'*'")) {
+  const postMsgMatch = content.match(/\bpostMessage\s*\([^,]{0,200},\s*["'`]\*["'`]/);
+  if (postMsgMatch !== null) {
     leads.push({
       id: nextLeadId('IFR-POSTMSG'),
       ruleId: 'IFR-001',
@@ -132,7 +133,7 @@ export function detectReconLeads(
       needs: ['inspect message payload and recipient listener'],
       doesNotProve: ['data leakage without malicious recipient window'],
       evidence: {
-        preview: maskSecret("postMessage(..., '*')"),
+        preview: maskSecret(postMsgMatch[0].slice(0, 80)),
         location: maskLocation(url),
       },
       tags: ['postmessage', 'wildcard-origin'],

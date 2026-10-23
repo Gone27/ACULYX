@@ -1845,12 +1845,12 @@ async function refreshLeads(): Promise<void> {
 const FAMILIES: Array<{ id: string; name: string }> = [
   { id: 'F1', name: 'Secrets' },
   { id: 'F2', name: 'Endpoints' },
-  { id: 'F3', name: 'Params' },
+  { id: 'F3', name: 'Source Maps' },
   { id: 'F4', name: 'Auth' },
-  { id: 'F5', name: 'Takeover' },
-  { id: 'F6', name: 'DOM Sinks' },
-  { id: 'F7', name: 'CORS/Misc' },
-  { id: 'F8', name: 'Hydration' },
+  { id: 'F5', name: 'Params' },
+  { id: 'F6', name: 'CORS/Headers' },
+  { id: 'F7', name: 'Response Body' },
+  { id: 'F8', name: 'Cloud/Recon' },
 ];
 
 function renderRadarBase(): void {

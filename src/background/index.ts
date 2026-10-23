@@ -1981,6 +1981,9 @@ chrome.runtime.onMessage.addListener(
       const targetUrl = message.url;
       if (typeof targetTabId === 'number' && targetTabId >= 0 && typeof targetUrl === 'string' && targetUrl.length > 0) {
         injectLeadsCollectors(targetTabId, targetUrl);
+        if (typeof chrome.tabs?.sendMessage === 'function') {
+          void chrome.tabs.sendMessage(targetTabId, { type: 'RESCAN_DOM_LEADS' }).catch(() => undefined);
+        }
       }
       sendResponse({ success: true });
       return false;

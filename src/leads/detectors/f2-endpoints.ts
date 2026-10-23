@@ -72,6 +72,16 @@ export function detectEndpoints(
           }
         }
 
+        if (
+          lowerPath.includes('/api/') ||
+          lowerPath.includes('/rest/') ||
+          lowerPath.startsWith('/api') ||
+          tags.includes('api-v1') ||
+          tags.includes('api-v2')
+        ) {
+          tags.push('api-endpoint');
+        }
+
         const isSensitive = tags.includes('admin') || tags.includes('internal') || tags.includes('debug');
 
         leads.push({

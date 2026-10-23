@@ -964,15 +964,50 @@ export function detectSecrets(
   }
 
   // 4. SEC-003: GENERIC CONTEXT SECRETS (Quoted JSON keys, assignments, template literals)
-  const genericAssignRegex = /(?:["']?)((?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret)\w*)(?:["']?)\s*[:=]\s*["'`]([^"'`\r\n]{8,})["'`]/gi;
+  const genericAssignRegex = /(?:["']?)((?:[a-zA-Z0-9_$-]+[-_])?(?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret|signing[-_]?key|encryption[-_]?key)[a-zA-Z0-9_$-]*)(?:["']?)\s*[:=]\s*["'`]([^"'`\r\n]{8,})["'`]/gi;
   let assignMatch: RegExpExecArray | null;
   while ((assignMatch = genericAssignRegex.exec(code)) !== null) {
     const keyName = assignMatch[1];
     const val = assignMatch[2];
     if (val === undefined || val.length === 0 || isPlaceholder(val)) continue;
     if (val.length < 8) continue;
-    const entropy = calculateEntropy(val);
-    if ((val.length >= 16 && entropy > 2.8) || (val.length >= 8 && entropy > 3.0)) {
+
+    // Guard against URLs, paths, endpoints, and configuration parameters
+    const keyLower = (keyName ?? '').toLowerCase();
+    if (
+      keyLower.endsWith('_url') ||
+      keyLower.endsWith('_uri') ||
+      keyLower.endsWith('_endpoint') ||
+      keyLower.endsWith('_path') ||
+      keyLower.endsWith('_type') ||
+      keyLower.endsWith('_name') ||
+      keyLower.endsWith('_format') ||
+      keyLower.endsWith('_param') ||
+      keyLower.endsWith('_header') ||
+      keyLower.endsWith('_prefix') ||
+      keyLower.endsWith('_suffix')
+    ) {
+      continue;
+    }
+    const valTrim = val.trim();
+    if (
+      valTrim.startsWith('http://') ||
+      valTrim.startsWith('https://') ||
+      valTrim.startsWith('//') ||
+      valTrim.startsWith('/') ||
+      valTrim.startsWith('./') ||
+      valTrim.startsWith('../') ||
+      valTrim.startsWith('data:')
+    ) {
+      continue;
+    }
+    // High-entropy secret tokens do not contain spaces or tabs
+    if (valTrim.includes(' ') || valTrim.includes('\t')) {
+      continue;
+    }
+
+    const entropy = calculateEntropy(valTrim);
+    if ((valTrim.length >= 16 && entropy > 2.8) || (valTrim.length >= 8 && entropy > 3.0)) {
       leads.push({
         id: nextLeadId('SEC-GEN'),
         ruleId: 'SEC-003',
@@ -984,7 +1019,7 @@ export function detectSecrets(
         needs: ['manual confirmation of secret purpose'],
         doesNotProve: ['production credential status'],
         evidence: {
-          preview: maskSecret(val),
+          preview: maskSecret(valTrim),
           location: maskLocation(url),
           context: `Key: ${keyName ?? 'secret'}, high entropy (${entropy.toFixed(2)}) assignment`,
         },
