@@ -935,7 +935,7 @@ function clearStatus(): void {
 function wireTriageManagement(): void {
   const refreshTriageCount = async (): Promise<void> => {
     try {
-      const annotations = await TriageStore.getAnnotations();
+      const annotations = await TriageStore.getAnnotations(undefined, { isIncognito: false });
       const count = Object.keys(annotations).length;
       triageCountBadge.textContent = `${count} triaged finding${count === 1 ? '' : 's'}`;
     } catch {
@@ -944,9 +944,11 @@ function wireTriageManagement(): void {
   };
 
   btnClearTriage.addEventListener('click', () => {
-    const confirmed = window.confirm('Reset all researcher triage annotations and notes? This cannot be undone.');
+    const confirmed = window.confirm(
+      'Reset all persistent researcher triage annotations and notes? This will not affect private window sessions and cannot be undone.'
+    );
     if (confirmed) {
-      void TriageStore.clearAll().then(() => refreshTriageCount());
+      void TriageStore.clearAll({ isIncognito: false }).then(() => refreshTriageCount());
     }
   });
 

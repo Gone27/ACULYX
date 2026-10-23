@@ -180,15 +180,20 @@ export async function handleDomLeadsCollected(
     }
 
     for (const f of data.forms) {
+      const formUrl = typeof f.action === 'string' && f.action.length > 0 ? f.action : url;
+      const formOrigin = originFromUrl(formUrl) ?? origin;
+      const formScope = typeof f.action === 'string' && f.action.length > 0
+        ? resolveScopeStatus(f.action, settings)
+        : scopeStatus;
+
       if (typeof f.action === 'string' && f.action.length > 0) {
         const maskedAct = maskLocation(f.action);
-        const formActionScope = resolveScopeStatus(f.action, settings);
         await recordEndpoint({
           path: maskedAct.length > 0 ? maskedAct : f.action,
-          origin,
+          origin: formOrigin,
           method: f.method,
           tags: ['form'],
-          scopeStatus: formActionScope,
+          scopeStatus: formScope,
         });
       }
       for (const inputName of f.inputNames) {
@@ -196,9 +201,9 @@ export async function handleDomLeadsCollected(
         await recordParam({
           name: inputName,
           category: cat,
-          origin,
+          origin: formOrigin,
           contexts: ['form-input'],
-          scopeStatus,
+          scopeStatus: formScope,
         });
       }
     }
@@ -348,36 +353,42 @@ export async function handleDomLeadsCollected(
 
   // 5. Analyze Links & Content for Cloud Buckets & Recon
   if (data.links !== undefined && data.links.length > 0) {
-    const combinedHrefs = data.links.map((l) => l.href).join('\n');
-    const reconLeads = detectReconLeads(combinedHrefs, url, scopeStatus);
-    for (const lead of reconLeads) {
-      globalLeadStore.addLead(lead, tabId);
-      if (lead.ruleId === 'CLD-001' && lead.evidence.extractedNames !== undefined) {
-        for (const bucketName of lead.evidence.extractedNames) {
-          const prov = lead.tags.includes('aws')
-            ? 'aws'
-            : lead.tags.includes('gcp')
-            ? 'gcp'
-            : lead.tags.includes('azure')
-            ? 'azure'
-            : 'digitalocean';
-          await recordBucket({
-            bucket: bucketName,
-            provider: prov,
-            origin,
-            scopeStatus,
-          });
+    for (const link of data.links) {
+      if (typeof link.href !== 'string' || link.href.trim().length === 0) continue;
+      const linkScope = resolveScopeStatus(link.href, settings);
+      const reconLeads = detectReconLeads(
+        link.href,
+        link.href,
+        linkScope,
+        (targetUrl: string) => resolveScopeStatus(targetUrl, settings)
+      );
+      for (const lead of reconLeads) {
+        globalLeadStore.addLead(lead, tabId);
+        if (lead.ruleId === 'CLD-001' && lead.evidence.extractedNames !== undefined) {
+          for (const bucketName of lead.evidence.extractedNames) {
+            const prov = lead.tags.includes('aws')
+              ? 'aws'
+              : lead.tags.includes('gcp')
+              ? 'gcp'
+              : lead.tags.includes('azure')
+              ? 'azure'
+              : 'digitalocean';
+            await recordBucket({
+              bucket: bucketName,
+              provider: prov,
+              origin: lead.origin,
+              scopeStatus: lead.scopeStatus,
+            });
+          }
         }
       }
-    }
 
-    for (const link of data.links) {
       try {
         const u = new URL(link.href);
         if (typeof u.hostname === 'string' && u.hostname.length > 0 && u.hostname !== hostname) {
           await recordHost({
             hostname: u.hostname,
-            scopeStatus: resolveScopeStatus(link.href, settings),
+            scopeStatus: linkScope,
             discoveredVia: 'dom-link',
             firstSeen: Date.now(),
             lastSeen: Date.now(),
@@ -442,6 +453,7 @@ export async function handleDomLeadsCollected(
         category: cat,
         origin,
         contexts: ['storage-key'],
+        scopeStatus,
       });
     }
   }

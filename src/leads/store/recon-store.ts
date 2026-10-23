@@ -106,14 +106,17 @@ export async function recordParam(param: ReconParam): Promise<void> {
     if (typeof param.category === 'string' && param.category.length > 0 && (existing.category === undefined || existing.category === 'general')) {
       existing.category = param.category;
     }
-    if (param.scopeStatus !== undefined && param.scopeStatus !== 'unknown') {
-      existing.scopeStatus = param.scopeStatus;
+    if (param.scopeStatus !== undefined) {
+      if (existing.scopeStatus === undefined || existing.scopeStatus === 'unknown') {
+        existing.scopeStatus = param.scopeStatus;
+      }
     }
     mem.params.splice(existingIdx, 1);
     mem.params.push(existing);
   } else {
     mem.params.push({
       ...param,
+      scopeStatus: param.scopeStatus ?? 'unknown',
       contexts: [...(param.contexts !== undefined ? param.contexts : [])],
     });
     if (mem.params.length > LIMITS.maxParams) {

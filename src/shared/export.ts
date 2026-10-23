@@ -66,6 +66,28 @@ export function sanitizeFindingForExport(finding: Finding): Finding {
   return sanitized;
 }
 
+interface ExtensibleState {
+  notes?: unknown;
+}
+
+interface ExtensibleHop {
+  notes?: unknown;
+}
+
+interface ExtensibleVector {
+  extra?: unknown;
+  notes?: unknown;
+}
+
+interface ExtensibleLedgerEntry {
+  action?: unknown;
+}
+
+interface ExtensibleBreakdown {
+  notes?: unknown;
+  description?: unknown;
+}
+
 /**
  * Creates a sanitized deep clone of TabState ensuring all URLs, serviceWorkerUrl,
  * metaCspPolicies, findings, origin, and coverage ledger entries are sanitized without sensitive query params,
@@ -85,22 +107,85 @@ export function sanitizeStateForExport(state: TabState): TabState {
       : [],
     findings: Array.isArray(state.findings) ? state.findings.map(sanitizeFindingForExport) : [],
     hops: Array.isArray(state.hops)
-      ? state.hops.map((h) => ({
-          ...h,
-          url: sanitizeUrlForStorage(h.url),
-        }))
+      ? state.hops.map((h) => {
+          const sanitizedHeaders: Record<string, string> = {};
+          if (typeof h.headers === 'object' && h.headers !== null) {
+            for (const [k, v] of Object.entries(h.headers)) {
+              sanitizedHeaders[redactAllSecrets(k)] = redactAllSecrets(typeof v === 'string' ? v : String(v));
+            }
+          }
+          const sanitizedRawHeaders = Array.isArray(h.rawHeaders)
+            ? h.rawHeaders.map((rh) => ({
+                name: redactAllSecrets(rh.name ?? ''),
+                value: redactAllSecrets(rh.value ?? ''),
+              }))
+            : [];
+          const hopExt = h as ExtensibleHop;
+          const hopNotes = typeof hopExt.notes === 'string' ? redactAllSecrets(hopExt.notes) : undefined;
+          return {
+            ...h,
+            url: sanitizeUrlForStorage(h.url),
+            headers: sanitizedHeaders,
+            rawHeaders: sanitizedRawHeaders,
+            ...(hopNotes !== undefined ? { notes: hopNotes } : {}),
+          };
+        })
+      : [],
+    scoreBreakdown: Array.isArray(state.scoreBreakdown)
+      ? state.scoreBreakdown.map((sb) => {
+          const item: Record<string, unknown> = {
+            ruleId: sb.ruleId,
+            title: redactAllSecrets(sb.title ?? ''),
+            severity: sb.severity,
+            weight: sb.weight,
+            penalty: sb.penalty,
+          };
+          const sbExt = sb as ExtensibleBreakdown;
+          if (typeof sbExt.notes === 'string') {
+            item.notes = redactAllSecrets(sbExt.notes);
+          }
+          if (typeof sbExt.description === 'string') {
+            item.description = redactAllSecrets(sbExt.description);
+          }
+          return item as unknown as import('./types').ScoreBreakdown;
+        })
       : [],
     subdomainTrust: {
       ...state.subdomainTrust,
       vectors: Array.isArray(state.subdomainTrust?.vectors)
-        ? state.subdomainTrust.vectors.map((v) => ({
-            ...v,
-            detail: redactAllSecrets(v.detail ?? ''),
-            label: redactAllSecrets(v.label ?? ''),
-          }))
+        ? state.subdomainTrust.vectors.map((v) => {
+            const sanitizedVector: Record<string, unknown> = {
+              id: redactAllSecrets(v.id ?? ''),
+              label: redactAllSecrets(v.label ?? ''),
+              detail: redactAllSecrets(v.detail ?? ''),
+              risk: v.risk,
+              present: v.present,
+            };
+            const vExt = v as ExtensibleVector;
+            if (typeof vExt.extra === 'string') {
+              sanitizedVector.extra = redactAllSecrets(vExt.extra);
+            } else if (typeof vExt.extra === 'object' && vExt.extra !== null) {
+              sanitizedVector.extra = redactAllSecrets(JSON.stringify(vExt.extra));
+            }
+            if (typeof vExt.notes === 'string') {
+              sanitizedVector.notes = redactAllSecrets(vExt.notes);
+            }
+            return sanitizedVector as unknown as import('./types').SubdomainTrustVector;
+          })
         : [],
     },
   };
+
+  const stateExt = state as ExtensibleState;
+  if (typeof stateExt.notes === 'string') {
+    (cloned as unknown as Record<string, unknown>).notes = redactAllSecrets(stateExt.notes);
+  }
+  if (typeof state.scopeReason === 'string') {
+    cloned.scopeReason = redactAllSecrets(state.scopeReason);
+  }
+  if (Array.isArray(state.captureFindings)) {
+    cloned.captureFindings = state.captureFindings.map(sanitizeFindingForExport);
+  }
 
   if (state.apiEndpoints instanceof Map) {
     const sanitizedApi = new Map<string, ApiEndpointState>();
@@ -128,12 +213,25 @@ export function sanitizeStateForExport(state: TabState): TabState {
     metaCspPolicies: Array.isArray(state.coverage?.metaCspPolicies)
       ? state.coverage.metaCspPolicies.map((p) => sanitizeCspPolicyForStorage(p))
       : [],
+    blindSpots: Array.isArray(state.coverage?.blindSpots)
+      ? state.coverage.blindSpots.map((spot) => redactAllSecrets(spot))
+      : [],
   };
   if (Array.isArray(state.coverage?.ledger)) {
-    cov.ledger = state.coverage.ledger.map((entry) => ({
-      ...entry,
-      url: sanitizeUrlForStorage(entry.url),
-    }));
+    cov.ledger = state.coverage.ledger.map((entry) => {
+      const sanitizedEntry: Record<string, unknown> = {
+        ...entry,
+        url: sanitizeUrlForStorage(entry.url),
+      };
+      if (typeof entry.notes === 'string') {
+        sanitizedEntry.notes = redactAllSecrets(entry.notes);
+      }
+      const entryExt = entry as ExtensibleLedgerEntry;
+      if (typeof entryExt.action === 'string') {
+        sanitizedEntry.action = redactAllSecrets(entryExt.action);
+      }
+      return sanitizedEntry as unknown as import('./types').CoverageLedgerEntry;
+    });
   }
   cloned.coverage = cov;
 

@@ -375,5 +375,71 @@ describe('Production Canary Leak Prevention Integration Tests', () => {
         expect(sarif.includes(secret), `SARIF leak of ${name}`).toBe(false);
       }
     });
+
+    it('guarantees zero canaries leak across hop.headers, rawHeaders, notes, vector extras, coverage ledger/blindspots, and score breakdown', () => {
+      const CANARY_NESTED_SECRET = 'secret_canary_token_nested_z93';
+      const state = createCleanTabState();
+
+      // Add canaries to nested structures
+      const hop = state.hops[0];
+      if (hop === undefined) {
+        throw new Error('Expected at least one hop');
+      }
+      hop.headers['x-custom-secret'] = `custom-value-${CANARY_NESTED_SECRET}`;
+      hop.rawHeaders.push({
+        name: 'X-Raw-Secret',
+        value: `raw-value-${CANARY_NESTED_SECRET}`,
+      });
+      (hop as unknown as Record<string, unknown>).notes = `Hop notes containing ${CANARY_NESTED_SECRET}`;
+
+      state.subdomainTrust.vectors = [
+        {
+          id: 'VEC-001',
+          label: 'Test Vector',
+          detail: 'Vector detail',
+          risk: 'medium',
+          present: true,
+          extra: `Vector extra with ${CANARY_NESTED_SECRET}`,
+          notes: `Vector notes with ${CANARY_NESTED_SECRET}`,
+        } as unknown as import('../../src/shared/types').SubdomainTrustVector,
+      ];
+
+      state.coverage.ledger = [
+        {
+          type: 'navigation',
+          url: 'https://example.com/app',
+          source: 'network',
+          timestamp: Date.now(),
+          notes: `Ledger entry notes with ${CANARY_NESTED_SECRET}`,
+          action: `Ledger action with ${CANARY_NESTED_SECRET}`,
+        } as unknown as import('../../src/shared/types').CoverageLedgerEntry,
+      ];
+
+      state.coverage.blindSpots = [
+        `Coverage blind spot with ${CANARY_NESTED_SECRET}`,
+      ];
+
+      state.scoreBreakdown = [
+        {
+          ruleId: 'SEC-001',
+          title: 'Breakdown Title',
+          severity: 'medium',
+          weight: 10,
+          penalty: 5,
+          notes: `Breakdown notes with ${CANARY_NESTED_SECRET}`,
+          description: `Breakdown description with ${CANARY_NESTED_SECRET}`,
+        } as unknown as import('../../src/shared/types').ScoreBreakdown,
+      ];
+
+      (state as unknown as Record<string, unknown>).notes = `Top-level state notes with ${CANARY_NESTED_SECRET}`;
+
+      const json = exportJsonReport(state);
+      const md = exportMarkdownReport(state);
+      const sarif = exportSarifReport(state);
+
+      expect(json.includes(CANARY_NESTED_SECRET), 'JSON report leaked nested canary').toBe(false);
+      expect(md.includes(CANARY_NESTED_SECRET), 'Markdown report leaked nested canary').toBe(false);
+      expect(sarif.includes(CANARY_NESTED_SECRET), 'SARIF report leaked nested canary').toBe(false);
+    });
   });
 });

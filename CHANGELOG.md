@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-10-23
+
+### Security & Hardening
+- **Cloud Bucket (CLD-001) Scope & Origin Isolation**:
+  - Evaluated links independently with `resolveScopeStatus(bucketUrl, settings)` instead of inheriting the parent page's scope status.
+  - Derived origin directly from bucket URL (`new URL(bucketUrl).origin`), ensuring third-party buckets (e.g. AWS S3, GCP Storage) linking from an in-scope target are never mislabeled as in-scope assets.
+- **Nested TabState Export Boundary Hardening**:
+  - Hardened `sanitizeStateForExport()` in `src/shared/export.ts` to recursively sanitize nested hop headers, raw headers, hop notes, subdomain trust vector extras/notes, coverage ledger notes/actions, coverage blind spots, score breakdown notes/descriptions, and top-level notes.
+  - Verified 0 canary leakage across JSON, Markdown, and SARIF exports.
+- **LeadStore Allowlisted Builder & Strict Enum Validation**:
+  - Replaced `{ ...lead }` spreads in `LeadStore.sanitizeLeadEvidence` (`src/leads/store/lead-store.ts`) with explicit allowlisted builders.
+  - Sanitized and length-capped `id`, `ruleId`, `origin`, `chainIds`, `title`, `url`, `preview`, `location`, `context`, `extractedNames`, `tags`, `needs`, `doesNotProve`, and `remediation`.
+  - Validated enum fields (`family`, `tier`, `potential`, `sourceSensor`, `scopeStatus`, `triageState`) against strict sets with safe fallbacks.
+- **Lead Report Enum Sanitization**:
+  - Enforced enum validation in `sanitizeReportLead` (`src/leads/export/export.ts`) before emitting Markdown, JSON, or SARIF reports.
+- **Resource-Level Scope Classification Completeness**:
+  - In `src/background/leads-handler.ts`, passed resource-specific `origin` and `scopeStatus` for storage keys, form inputs, and action endpoints to `recordParam()`.
+  - Preserved `scopeStatus: param.scopeStatus ?? 'unknown'` in `ReconStore` (`src/leads/store/recon-store.ts`), dropping out-of-scope entries immediately and maintaining existing in-scope classifications.
+- **DevTools Route Tab Validation & Payload Capping**:
+  - In `src/background/index.ts`, verified `DEVTOOLS_LEADS_COLLECTED` sender tab context via `await chrome.tabs.get(targetTabId)`, rejecting non-existent or incognito tabs.
+  - Capped DevTools leads array to 50 items and applied strict string length caps and redactions to all lead fields.
+- **Options Triage Private Context Awareness**:
+  - Scoped triage management actions in `src/options/options.ts` to persistent-only context via `{ isIncognito: false }`, preserving in-memory private session annotations when persistent annotations are cleared.
+
 ## [2.0.1] - 2026-10-22
 
 ### Security & Hardening

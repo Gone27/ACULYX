@@ -55,6 +55,7 @@ import { PortRegistry, portSend, type DomLeadsCollectedMessage, type MainWorldLe
 import { BroadcastCoalescer, WriteBatcher } from '../shared/coalescer';
 import { TriageStore } from '../shared/reporting/triage-store';
 import { maskSecret, maskLocation } from '../leads/sieve/mask';
+import { redactAllSecrets } from '../shared/reporting/report-builder';
 import {
   reconcilePermissionsOnRemoved,
   reconcilePermissionsOnStartup,
@@ -1807,69 +1808,109 @@ chrome.runtime.onMessage.addListener(
         sendResponse(emptyDenialLeadsState(message.tabId));
         return false;
       }
-      // 4. Incognito isolation
-      if (message.tabId !== undefined && incognitoTabIds.has(message.tabId)) {
+      // 4. Tab ID validation
+      if (typeof message.tabId !== 'number' || message.tabId < 0) {
         sendResponse(emptyDenialLeadsState(message.tabId));
         return false;
       }
-      const validLeads: import('../leads/types').Lead[] = [];
-      const validPotentials = new Set(['critical', 'high', 'medium', 'low', 'info']);
-      const validTiers = new Set(['observed', 'strong', 'weak', 'whisper']);
-      for (const raw of (message.leads as unknown[])) {
-        if (typeof raw !== 'object' || raw === null) continue;
-        const l = raw as Record<string, unknown>;
-        if (
-          typeof l.id !== 'string' ||
-          typeof l.ruleId !== 'string' ||
-          typeof l.title !== 'string' ||
-          typeof l.potential !== 'string' ||
-          !validPotentials.has(l.potential) ||
-          typeof l.tier !== 'string' ||
-          !validTiers.has(l.tier) ||
-          typeof l.evidence !== 'object' ||
-          l.evidence === null
-        ) {
-          continue;
-        }
-        const rawEv = l.evidence as Record<string, unknown>;
-        const leadUrl = typeof l.url === 'string' && l.url.length > 0 ? l.url : (typeof l.origin === 'string' ? l.origin : '');
-        const recomputedScope = resolveScopeStatus(leadUrl, currentSettings);
-        if (recomputedScope === 'out-of-scope') {
-          continue;
-        }
-        validLeads.push({
-          id: l.id,
-          ruleId: l.ruleId,
-          family: typeof l.family === 'string' ? (l.family as import('../leads/types').LeadFamily) : 'F7',
-          tier: l.tier as import('../leads/types').EvidenceTier,
-          potential: l.potential as import('../leads/types').LeadPotential,
-          confidence: typeof l.confidence === 'number' && l.confidence >= 0 && l.confidence <= 1 ? l.confidence : 0.8,
-          title: l.title,
-          needs: Array.isArray(l.needs) ? l.needs.filter((x): x is string => typeof x === 'string') : [],
-          doesNotProve: Array.isArray(l.doesNotProve) ? l.doesNotProve.filter((x): x is string => typeof x === 'string') : [],
-          evidence: {
-            preview: maskSecret(typeof rawEv.preview === 'string' ? rawEv.preview : ''),
-            location: maskLocation(typeof rawEv.location === 'string' ? rawEv.location : leadUrl),
-            ...(typeof rawEv.context === 'string' ? { context: rawEv.context } : {}),
-            ...(Array.isArray(rawEv.extractedNames) ? { extractedNames: rawEv.extractedNames.filter((x): x is string => typeof x === 'string') } : {}),
-          },
-          tags: Array.isArray(l.tags) ? l.tags.filter((x): x is string => typeof x === 'string') : [],
-          scopeStatus: recomputedScope,
-          timestamp: typeof l.timestamp === 'number' ? l.timestamp : Date.now(),
-          origin: typeof l.origin === 'string' ? l.origin : (originFromUrl(leadUrl) ?? ''),
-          url: leadUrl,
-          sourceSensor: 'S4',
-          ...(Array.isArray(l.chainIds) ? { chainIds: l.chainIds.filter((x): x is string => typeof x === 'string') } : {}),
-          ...(typeof l.remediation === 'string' ? { remediation: l.remediation } : {}),
-        });
+      const targetTabId: number = message.tabId;
+      // 5. Incognito fast-path check
+      if (incognitoTabIds.has(targetTabId)) {
+        sendResponse(emptyDenialLeadsState(targetTabId));
+        return false;
       }
-      const leadState = handleDevToolsLeads(validLeads, message.tabId);
-      if (message.tabId !== undefined) {
-        portRegistry.broadcast(message.tabId, leadState);
-      }
-      portRegistry.broadcastAll(leadState);
-      sendResponse(leadState);
-      return false;
+
+      void (async () => {
+        try {
+          if (typeof chrome !== 'undefined' && chrome.tabs !== undefined && typeof chrome.tabs.get === 'function') {
+            try {
+              const tab = (await chrome.tabs.get(targetTabId)) as chrome.tabs.Tab | undefined;
+              if (!tab || tab.incognito === true) {
+                if (tab?.incognito === true) incognitoTabIds.add(targetTabId);
+                sendResponse(emptyDenialLeadsState(targetTabId));
+                return;
+              }
+            } catch {
+              // Tab not found or inaccessible
+              sendResponse(emptyDenialLeadsState(targetTabId));
+              return;
+            }
+          }
+
+          const rawLeads = (message.leads as unknown[]).slice(0, 50);
+          const validLeads: import('../leads/types').Lead[] = [];
+          const validPotentials = new Set(['critical', 'high', 'medium', 'low', 'info']);
+          const validTiers = new Set(['observed', 'strong', 'weak', 'whisper']);
+          for (const raw of rawLeads) {
+            if (typeof raw !== 'object' || raw === null) continue;
+            const l = raw as Record<string, unknown>;
+            if (
+              typeof l.id !== 'string' ||
+              typeof l.ruleId !== 'string' ||
+              typeof l.title !== 'string' ||
+              typeof l.potential !== 'string' ||
+              !validPotentials.has(l.potential) ||
+              typeof l.tier !== 'string' ||
+              !validTiers.has(l.tier) ||
+              typeof l.evidence !== 'object' ||
+              l.evidence === null
+            ) {
+              continue;
+            }
+            const rawEv = l.evidence as Record<string, unknown>;
+            const rawLeadUrl = typeof l.url === 'string' && l.url.length > 0 ? l.url : (typeof l.origin === 'string' ? l.origin : '');
+            const leadUrl = redactAllSecrets(rawLeadUrl.slice(0, 2048));
+            const recomputedScope = resolveScopeStatus(leadUrl, currentSettings);
+            if (recomputedScope === 'out-of-scope') {
+              continue;
+            }
+            const sanitizedId = redactAllSecrets(l.id.slice(0, 128));
+            const sanitizedRuleId = redactAllSecrets(l.ruleId.slice(0, 64));
+            const sanitizedTitle = redactAllSecrets(l.title.slice(0, 256));
+            const sanitizedPreview = maskSecret(typeof rawEv.preview === 'string' ? rawEv.preview.slice(0, 512) : '');
+            const sanitizedLocation = maskLocation(typeof rawEv.location === 'string' ? rawEv.location.slice(0, 2048) : leadUrl);
+            const sanitizedContext = typeof rawEv.context === 'string' ? redactAllSecrets(rawEv.context.slice(0, 1024)) : undefined;
+            const sanitizedNames = Array.isArray(rawEv.extractedNames)
+              ? rawEv.extractedNames.filter((x): x is string => typeof x === 'string').slice(0, 20).map((x) => redactAllSecrets(x.slice(0, 128)))
+              : undefined;
+
+            validLeads.push({
+              id: sanitizedId,
+              ruleId: sanitizedRuleId,
+              family: typeof l.family === 'string' ? (l.family as import('../leads/types').LeadFamily) : 'F7',
+              tier: l.tier as import('../leads/types').EvidenceTier,
+              potential: l.potential as import('../leads/types').LeadPotential,
+              confidence: typeof l.confidence === 'number' && l.confidence >= 0 && l.confidence <= 1 ? l.confidence : 0.8,
+              title: sanitizedTitle,
+              needs: Array.isArray(l.needs) ? l.needs.filter((x): x is string => typeof x === 'string').slice(0, 10).map((x) => redactAllSecrets(x.slice(0, 256))) : [],
+              doesNotProve: Array.isArray(l.doesNotProve) ? l.doesNotProve.filter((x): x is string => typeof x === 'string').slice(0, 10).map((x) => redactAllSecrets(x.slice(0, 256))) : [],
+              evidence: {
+                preview: sanitizedPreview,
+                location: sanitizedLocation,
+                ...(sanitizedContext !== undefined ? { context: sanitizedContext } : {}),
+                ...(sanitizedNames !== undefined ? { extractedNames: sanitizedNames } : {}),
+              },
+              tags: Array.isArray(l.tags) ? l.tags.filter((x): x is string => typeof x === 'string').slice(0, 20).map((x) => redactAllSecrets(x.slice(0, 64))) : [],
+              scopeStatus: recomputedScope,
+              timestamp: typeof l.timestamp === 'number' ? l.timestamp : Date.now(),
+              origin: typeof l.origin === 'string' ? redactAllSecrets(l.origin.slice(0, 512)) : (originFromUrl(leadUrl) ?? ''),
+              url: leadUrl,
+              sourceSensor: 'S4',
+              ...(Array.isArray(l.chainIds) ? { chainIds: l.chainIds.filter((x): x is string => typeof x === 'string').slice(0, 10).map((x) => redactAllSecrets(x.slice(0, 64))) } : {}),
+              ...(typeof l.remediation === 'string' ? { remediation: redactAllSecrets(l.remediation.slice(0, 1024)) } : {}),
+            });
+          }
+          const leadState = handleDevToolsLeads(validLeads, targetTabId);
+          if (targetTabId !== undefined) {
+            portRegistry.broadcast(targetTabId, leadState);
+          }
+          portRegistry.broadcastAll(leadState);
+          sendResponse(leadState);
+        } catch {
+          sendResponse(emptyDenialLeadsState(targetTabId));
+        }
+      })();
+      return true;
     }
 
     if (message.type === 'GET_LEADS_STATE') {

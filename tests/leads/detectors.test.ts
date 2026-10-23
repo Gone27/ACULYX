@@ -256,6 +256,24 @@ describe('Detector F8: Third-Party & Recon Feed', () => {
     const cldLead = leads.find(l => l.ruleId === 'CLD-001');
     expect(cldLead).toBeDefined();
   });
+
+  it('isolates bucket origin and determines bucket scope independently from page scope', () => {
+    const pageUrl = 'https://target.com/index.html';
+    const content = '<a href="https://privatebucket.s3.amazonaws.com/data.json">Data</a>';
+    const mockScopeResolver = (targetUrl: string) => {
+      if (targetUrl.includes('target.com')) return 'in-scope';
+      return 'out-of-scope';
+    };
+
+    const leads = detectReconLeads(content, pageUrl, 'in-scope', mockScopeResolver);
+    const bucketLead = leads.find((l) => l.ruleId === 'CLD-001');
+
+    expect(bucketLead).toBeDefined();
+    expect(bucketLead?.origin).toBe('https://privatebucket.s3.amazonaws.com');
+    expect(bucketLead?.url).toBe('https://privatebucket.s3.amazonaws.com');
+    expect(bucketLead?.scopeStatus).toBe('out-of-scope');
+    expect(bucketLead?.origin).not.toBe('https://target.com');
+  });
 });
 
 describe('Sensor S3: Main-World Events (Untrusted Tagging & Bounds)', () => {

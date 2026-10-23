@@ -1,6 +1,13 @@
-import type { Lead } from '../types';
+import type { Lead, LeadFamily, EvidenceTier, LeadPotential, LeadSensor } from '../types';
 import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
+
+const VALID_FAMILIES = new Set<LeadFamily>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
+const VALID_TIERS = new Set<EvidenceTier>(['observed', 'strong', 'weak', 'whisper']);
+const VALID_POTENTIALS = new Set<LeadPotential>(['critical', 'high', 'medium', 'low', 'info']);
+const VALID_SENSORS = new Set<LeadSensor>(['S1', 'S2', 'S3', 'S4', 'S5']);
+const VALID_SCOPES = new Set<Lead['scopeStatus']>(['in-scope', 'out-of-scope', 'unknown']);
+const VALID_TRIAGE_STATES = new Set<NonNullable<Lead['triageState']>>(['open', 'triaged', 'false_positive', 'resolved']);
 
 const MAX_LEADS_PER_ORIGIN = 200;
 const SESSION_STORAGE_KEY = 'aculyx_session_leads_v2';
@@ -118,8 +125,12 @@ export class LeadStore {
    * Enforces pre-storage invariant: all free-text fields and arrays are sanitized and capped before persistence.
    */
   private sanitizeLeadEvidence(lead: Lead): Lead {
-    const rawPreview = lead.evidence.preview;
-    const rawLoc = lead.evidence.location;
+    const id = redactAllSecrets(String(lead.id || '').slice(0, 100));
+    const ruleId = redactAllSecrets(String(lead.ruleId || '').slice(0, 50));
+    const origin = redactAllSecrets(String(lead.origin || '').slice(0, 200));
+
+    const rawPreview = lead.evidence?.preview;
+    const rawLoc = lead.evidence?.location;
     const rawUrl = lead.url;
     const preview = maskSecret(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '');
     const location = maskLocation(typeof rawLoc === 'string' && rawLoc.length > 0 ? rawLoc : '');
@@ -136,19 +147,23 @@ export class LeadStore {
 
     const rawNames = lead.evidence?.extractedNames;
     const extractedNames = Array.isArray(rawNames)
-      ? rawNames.slice(0, 50).map((n) => redactAllSecrets(n.slice(0, 150)))
+      ? rawNames.slice(0, 50).map((n) => redactAllSecrets(String(n).slice(0, 150)))
       : undefined;
 
     const tags = Array.isArray(lead.tags)
-      ? lead.tags.slice(0, 20).map((t) => redactAllSecrets(t.slice(0, 50)))
+      ? lead.tags.slice(0, 20).map((t) => redactAllSecrets(String(t).slice(0, 50)))
       : [];
 
+    const chainIds = Array.isArray(lead.chainIds)
+      ? lead.chainIds.slice(0, 20).map((c) => redactAllSecrets(String(c).slice(0, 50)))
+      : undefined;
+
     const needs = Array.isArray(lead.needs)
-      ? lead.needs.slice(0, 20).map((n) => redactAllSecrets(n.slice(0, 300)))
+      ? lead.needs.slice(0, 20).map((n) => redactAllSecrets(String(n).slice(0, 300)))
       : [];
 
     const doesNotProve = Array.isArray(lead.doesNotProve)
-      ? lead.doesNotProve.slice(0, 20).map((d) => redactAllSecrets(d.slice(0, 300)))
+      ? lead.doesNotProve.slice(0, 20).map((d) => redactAllSecrets(String(d).slice(0, 300)))
       : [];
 
     const remediation =
@@ -156,10 +171,31 @@ export class LeadStore {
         ? redactAllSecrets(lead.remediation.slice(0, 1000))
         : undefined;
 
+    const family = VALID_FAMILIES.has(lead.family) ? lead.family : 'F8';
+    const tier = VALID_TIERS.has(lead.tier) ? lead.tier : 'whisper';
+    const potential = VALID_POTENTIALS.has(lead.potential) ? lead.potential : 'info';
+    const sourceSensor = VALID_SENSORS.has(lead.sourceSensor) ? lead.sourceSensor : 'S2';
+    const scopeStatus = VALID_SCOPES.has(lead.scopeStatus) ? lead.scopeStatus : 'unknown';
+    const confidence = typeof lead.confidence === 'number' && Number.isFinite(lead.confidence)
+      ? Math.min(1.0, Math.max(0.0, lead.confidence))
+      : 0.8;
+    const timestamp = typeof lead.timestamp === 'number' && Number.isFinite(lead.timestamp)
+      ? lead.timestamp
+      : Date.now();
+    const triageState = lead.triageState && VALID_TRIAGE_STATES.has(lead.triageState)
+      ? lead.triageState
+      : undefined;
+
     return {
-      ...lead,
+      id,
+      ruleId,
+      family,
+      tier,
+      potential,
+      confidence,
       title,
-      url,
+      needs,
+      doesNotProve,
       evidence: {
         preview,
         location,
@@ -167,8 +203,16 @@ export class LeadStore {
         ...(extractedNames !== undefined ? { extractedNames } : {}),
       },
       tags,
-      needs,
-      doesNotProve,
+      scopeStatus,
+      timestamp,
+      origin,
+      url,
+      sourceSensor,
+      ...(chainIds !== undefined ? { chainIds } : {}),
+      ...(typeof lead.priority === 'number' && Number.isFinite(lead.priority) ? { priority: lead.priority } : {}),
+      ...(typeof lead.novelty === 'boolean' ? { novelty: lead.novelty } : {}),
+      ...(typeof lead.pinned === 'boolean' ? { pinned: lead.pinned } : {}),
+      ...(triageState !== undefined ? { triageState } : {}),
       ...(remediation !== undefined ? { remediation } : {}),
     };
   }

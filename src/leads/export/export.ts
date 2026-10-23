@@ -3,6 +3,13 @@ import type { ScopeProfile, ScopeRule } from '../../shared/scope/contracts';
 import { maskSecret, maskLocation } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
 
+const VALID_FAMILIES = new Set<string>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
+const VALID_TIERS = new Set<string>(['observed', 'strong', 'weak', 'whisper']);
+const VALID_POTENTIALS = new Set<string>(['critical', 'high', 'medium', 'low', 'info']);
+const VALID_SENSORS = new Set<string>(['S1', 'S2', 'S3', 'S4', 'S5']);
+const VALID_SCOPES = new Set<string>(['in-scope', 'out-of-scope', 'unknown']);
+const VALID_TRIAGE_STATES = new Set<string>(['open', 'triaged', 'false_positive', 'resolved']);
+
 export interface ExtendedScopeRule extends ScopeRule {
   effect: 'in-scope' | 'out-of-scope';
 }
@@ -247,13 +254,28 @@ function sanitizeReportLead(lead: Lead): Lead {
       ? sanitizeExportString(lead.remediation)
       : undefined;
 
+  const family = VALID_FAMILIES.has(lead.family) ? lead.family : 'F8';
+  const tier = VALID_TIERS.has(lead.tier) ? lead.tier : 'whisper';
+  const potential = VALID_POTENTIALS.has(lead.potential) ? lead.potential : 'info';
+  const sourceSensor = VALID_SENSORS.has(lead.sourceSensor) ? lead.sourceSensor : 'S2';
+  const scopeStatus = VALID_SCOPES.has(lead.scopeStatus) ? lead.scopeStatus : 'unknown';
+  const confidence = typeof lead.confidence === 'number' && Number.isFinite(lead.confidence)
+    ? Math.min(1.0, Math.max(0.0, lead.confidence))
+    : 0.8;
+  const timestamp = typeof lead.timestamp === 'number' && Number.isFinite(lead.timestamp)
+    ? lead.timestamp
+    : Date.now();
+  const triageState = lead.triageState !== undefined && VALID_TRIAGE_STATES.has(lead.triageState)
+    ? lead.triageState
+    : undefined;
+
   return {
     id,
     ruleId,
-    family: lead.family,
-    tier: lead.tier,
-    potential: lead.potential,
-    confidence: lead.confidence,
+    family,
+    tier,
+    potential,
+    confidence,
     title,
     needs,
     doesNotProve,
@@ -264,16 +286,16 @@ function sanitizeReportLead(lead: Lead): Lead {
       ...(sanitizedNames !== undefined ? { extractedNames: sanitizedNames } : {}),
     },
     tags,
-    scopeStatus: lead.scopeStatus,
-    timestamp: lead.timestamp,
+    scopeStatus,
+    timestamp,
     origin,
     url,
-    sourceSensor: lead.sourceSensor,
+    sourceSensor,
     ...(chainIds !== undefined ? { chainIds } : {}),
-    ...(lead.priority !== undefined ? { priority: lead.priority } : {}),
-    ...(lead.novelty !== undefined ? { novelty: lead.novelty } : {}),
-    ...(lead.pinned !== undefined ? { pinned: lead.pinned } : {}),
-    ...(lead.triageState !== undefined ? { triageState: lead.triageState } : {}),
+    ...(typeof lead.priority === 'number' && Number.isFinite(lead.priority) ? { priority: lead.priority } : {}),
+    ...(typeof lead.novelty === 'boolean' ? { novelty: lead.novelty } : {}),
+    ...(typeof lead.pinned === 'boolean' ? { pinned: lead.pinned } : {}),
+    ...(triageState !== undefined ? { triageState } : {}),
     ...(remediation !== undefined ? { remediation } : {}),
   };
 }

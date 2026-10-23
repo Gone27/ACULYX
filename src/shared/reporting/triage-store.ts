@@ -247,13 +247,15 @@ export class TriageStore {
   /**
    * Purges all persistent and in-memory triage annotations.
    */
-  static async clearAll(options?: { isIncognitoOnly?: boolean }): Promise<void> {
-    if (options?.isIncognitoOnly === true) {
+  static async clearAll(options?: { isIncognitoOnly?: boolean; isIncognito?: boolean }): Promise<void> {
+    if (options?.isIncognitoOnly === true || options?.isIncognito === true) {
       incognitoStore.clear();
       return;
     }
 
-    incognitoStore.clear();
+    if (options?.isIncognito === undefined) {
+      incognitoStore.clear();
+    }
     memoryStore.clear();
 
     if (hasLocalStorage()) {

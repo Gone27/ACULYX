@@ -10,7 +10,8 @@ function nextLeadId(prefix: string): string {
 export function detectReconLeads(
   content: string,
   url: string,
-  scopeStatus: Lead['scopeStatus'] = 'unknown'
+  scopeStatus: Lead['scopeStatus'] = 'unknown',
+  scopeResolver?: (targetUrl: string) => Lead['scopeStatus']
 ): Lead[] {
   const leads: Lead[] = [];
   if (!content || typeof content !== 'string') return leads;
@@ -41,6 +42,20 @@ export function detectReconLeads(
       const bucketName = match[1];
       if (bucketName !== undefined && bucketName.length > 0 && !seenBuckets.has(bucketName)) {
         seenBuckets.add(bucketName);
+        let bucketUrl = match[0];
+        if (bucketUrl.startsWith('s3://')) {
+          bucketUrl = `https://${bucketName}.s3.amazonaws.com`;
+        }
+        let bucketOrigin = origin;
+        try {
+          bucketOrigin = new URL(bucketUrl).origin;
+        } catch {
+          // fallback to page origin
+        }
+        const bucketScope = scopeResolver !== undefined
+          ? scopeResolver(bucketUrl)
+          : (bucketOrigin === origin ? scopeStatus : 'unknown');
+
         leads.push({
           id: nextLeadId('CLD-BUCKET'),
           ruleId: 'CLD-001',
@@ -53,15 +68,15 @@ export function detectReconLeads(
           doesNotProve: ['publicly readable or writable cloud bucket'],
           evidence: {
             preview: maskSecret(bucketName),
-            location: maskLocation(url),
+            location: maskLocation(bucketUrl),
             extractedNames: [bucketName],
             context: `${provider.toUpperCase()} Bucket Reference: ${match[0]}`,
           },
           tags: ['cloud-bucket', 'cloud', 'recon', provider],
-          scopeStatus,
+          scopeStatus: bucketScope,
           timestamp: Date.now(),
-          origin,
-          url,
+          origin: bucketOrigin,
+          url: bucketUrl,
           sourceSensor: 'S3',
           remediation: 'Ensure bucket permissions block public listing and unauthorized reads.',
         });
