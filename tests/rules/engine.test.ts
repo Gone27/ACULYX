@@ -208,12 +208,12 @@ describe('checkCsp — explicit cases', () => {
     expect(findings.map((f) => f.ruleId)).not.toContain('CSP-001');
   });
 
-  it('reports curated bypass-prone script hosts as informational heuristics', () => {
+  it('reports curated bypass-prone script hosts as medium severity findings', () => {
     const { findings } = checkCsp(makeHop({ headers: {
       'content-security-policy': "default-src 'self'; script-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
     } }));
     const bypass = findings.find((finding) => finding.ruleId === 'CSP-009');
-    expect(bypass?.severity).toBe('info');
+    expect(bypass?.severity).toBe('medium');
     expect(bypass?.evidence).toContain('www.google.com');
   });
 

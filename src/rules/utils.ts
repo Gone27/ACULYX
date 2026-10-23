@@ -210,10 +210,10 @@ export function originFromUrl(url: string): string | null {
 // ─── Sensitive Cookie Heuristics ──────────────────────────────────────────────
 
 const SENSITIVE_COOKIE_RE =
-  /(^|[-_])(session|sess|auth|token|jwt|sid|login|sso|connect\.sid|phpsessid|jsessionid|asp\.net_sessionid|credential|secret|password|access[-_]?token|id[-_]?token)([-_]|$)/i;
+  /(^|[-_.:])(session(?:id)?|sess(?:id)?|auth(?:token)?|token|jwt|sid|uid|login|logged[-_]?in|remember(?:[-_]?me)?|sso|connect\.sid|phpsessid|jsessionid|asp\.net_sessionid|rack\.session|express:sess|wordpress_logged_in.*|credential|secret|password|access[-_]?token|id[-_]?token)([-_.:]|$)/i;
 
 const NON_SENSITIVE_COOKIE_RE =
-  /(^|[-_])(ga|gid|gat|gcl|fbp|fbc|theme|dark|light|lang|locale|country|currency|timezone|tz|sidebar|banner|notice|consent|cookie_consent|optout|optimizely|amplitude|intercom|csrf|xsrf|csrftoken)([-_]|$)/i;
+  /(^|[-_.:])(ga|gid|gat|gcl|fbp|fbc|theme|dark|light|lang|locale|country|currency|timezone|tz|sidebar|banner|notice|consent|cookie_consent|optout|optimizely|amplitude|intercom|csrf|xsrf|csrftoken)([-_.:]|$)/i;
 
 /**
  * Returns true when a cookie's name indicates it is likely an authentication,
@@ -227,13 +227,29 @@ export function isSensitiveCookie(
   alwaysSensitive: string[] = [],
   alwaysIgnore: string[] = []
 ): { isSensitive: boolean; reason: 'override' | 'prefix' | 'regex' } {
-  // Cookie names are case-sensitive.
-  if (alwaysIgnore.includes(name)) return { isSensitive: false, reason: 'override' };
-  if (alwaysSensitive.includes(name)) return { isSensitive: true, reason: 'override' };
+  // Case-insensitive prefix checks per RFC 6265bis
+  const lowerName = name.toLowerCase();
 
-  if (name.startsWith('__Host-') || name.startsWith('__Secure-')) return { isSensitive: true, reason: 'prefix' };
+  if (alwaysIgnore.includes(name) || alwaysIgnore.includes(lowerName)) return { isSensitive: false, reason: 'override' };
+  if (alwaysSensitive.includes(name) || alwaysSensitive.includes(lowerName)) return { isSensitive: true, reason: 'override' };
+
+  if (lowerName.startsWith('__host-') || lowerName.startsWith('__secure-')) return { isSensitive: true, reason: 'prefix' };
   if (NON_SENSITIVE_COOKIE_RE.test(name)) return { isSensitive: false, reason: 'regex' };
-  return { isSensitive: SENSITIVE_COOKIE_RE.test(name), reason: 'regex' };
+
+  if (SENSITIVE_COOKIE_RE.test(name)) return { isSensitive: true, reason: 'regex' };
+
+  // Split camelCase tokens: e.g. "authToken" -> "auth token", "sessionToken" -> "session token"
+  const splitCamel = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  if (splitCamel !== name) {
+    if (SENSITIVE_COOKIE_RE.test(splitCamel)) return { isSensitive: true, reason: 'regex' };
+  }
+
+  // Common standalone session IDs without delimiters:
+  if (/^(?:sessionid|sessid|authtoken|sessiontoken|uid)$/i.test(lowerName)) {
+    return { isSensitive: true, reason: 'regex' };
+  }
+
+  return { isSensitive: false, reason: 'regex' };
 }
 
 // ─── Modern CSP Protection Checks ─────────────────────────────────────────────

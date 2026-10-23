@@ -57,3 +57,28 @@ Because ACULYX observes responses in the browser you are already using, it can a
 ## 5. Category & Search Keywords
 - **Category:** Developer Tools / Security
 - **Keywords:** security headers, cookie security, csp evaluator, hsts, subresource integrity, privacy, oauth, web security, owasp, penetration testing
+
+---
+
+## 6. Permission Privacy Justifications (Store Submissions)
+
+- **`cookies`**: Passively audits cookie security attributes (`HttpOnly`, `Secure`, `SameSite`, `__Host-`, `__Secure-` prefixes). Cookie values are strictly never accessed, logged, stored, or transmitted (`cookie.value` is ignored).
+- **`webRequest`**: Passively reads HTTP response headers to evaluate transport security (HSTS, CSP, X-Frame-Options, CORS, Cache-Control). Does not read request/response bodies or modify network traffic.
+- **`webNavigation`**: Detects document navigation completions, redirects, and SPA client-side navigations to recompute security grades for the active tab.
+- **`tabs`**: Queries current tab URL and ID to display per-tab grades, update toolbar action badges, and cleanly free resources when tabs close.
+- **`scripting`**: Injects client-side DOM inspection sensors (S2/S3) on user-monitored tabs to analyze DOM sinks and subresource integrity.
+- **`storage`**: Saves local user preferences, scope profiles, researcher triage notes, and bounded score history entirely on the user's device.
+- **`alarms`**: Triggers periodic local cache pruning and data retention cleanup without running background threads.
+- **`optional_permissions` (`<all_urls>`)**: Only requested upon explicit user consent per-site or when all-sites monitoring is deliberately activated.
+
+---
+
+## 7. Reviewer Notes (Chrome Web Store & Mozilla AMO)
+
+- **Use of `eval` in `main-world-hooks.ts`**:
+  ACULYX wraps `window.eval` in the page's MAIN execution world strictly as a passive taint-tracking sensor (Sensor 3). It observes calls made by the web page to detect unvalidated string execution. ACULYX **never** generates, compiles, or executes dynamic code via `eval()`. The original function is invoked with unmodified arguments, and only a sanitized event type is relayed to the extension.
+- **Gated Passive Reconnaissance**:
+  Query parameter harvesting (S1) is strictly gated by the user's capture policy and defined scope. Unmonitored, unknown, or out-of-scope hosts are completely ignored and never stored in memory or persistence.
+- **Zero-Telemetry Guarantee**:
+  All extension pages enforce `connect-src 'none'`. No remote servers, analytics, or third-party tracking scripts exist.
+

@@ -33,6 +33,14 @@
       "penalty": 5,
       "rationale": "Wildcard source allows script from any host"
     },
+    "CSP-004D": {
+      "penalty": 8,
+      "rationale": "data: scheme in script-src allows arbitrary script execution"
+    },
+    "CSP-NONCE-001": {
+      "penalty": 5,
+      "rationale": "Short or predictable CSP nonce allows bypass"
+    },
     "CSP-005": {
       "penalty": 5,
       "rationale": "frame-ancestors absent - clickjacking risk"
@@ -121,6 +129,14 @@
       "penalty": 10,
       "rationale": "__Http- and __Host-Http- prefixes require server-only cookie attributes"
     },
+    "COOK-008": {
+      "penalty": 3,
+      "rationale": "Sensitive session cookie has excessively long expiration (>1 year)"
+    },
+    "COOK-009": {
+      "penalty": 5,
+      "rationale": "Sensitive authentication cookie marked with SameSite=None risks CSRF"
+    },
     "DUP-001": {
       "penalty": 0,
       "rationale": "Informational - conflicting repeated security header values"
@@ -188,6 +204,10 @@
     "CORS-001": {
       "penalty": 6,
       "rationale": "Wildcard CORS policy lets arbitrary origins read the response"
+    },
+    "CORS-002": {
+      "penalty": 2,
+      "rationale": "Missing Vary: Origin on explicit ACAO header risks cross-origin cache poisoning"
     },
     "SRI-001": {
       "penalty": 5,

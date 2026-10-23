@@ -41,16 +41,24 @@ When you choose to monitor an origin, ACULYX temporarily processes network heade
 
 ---
 
-## 4. Permissions Usage
+## 4. Permissions Usage & Store Privacy Justifications
 ACULYX operates under a strict principle of least privilege:
-- `webRequest` & `webNavigation`: Used passively to inspect HTTP response headers for top-level navigation and in-page API (`xmlhttprequest`/`fetch`) requests within monitored origins.
-- `cookies`: Used to inspect security flags (`Secure`, `HttpOnly`, `SameSite`) on cookies. Values are never accessed.
-- `storage`: Used to persist user settings, scope profiles, triage notes, and local score history on your device.
-- `tabs`: Used to query tab URLs, tab identifiers, and update action badges (`A`, `B`, `C`, `?`) based on live grading of active tabs.
-- `alarms`: Used to trigger periodic background maintenance sweeps (such as audit history pruning and cache expiration) without persistent background processes.
-- `sidePanel`: Used in Chromium to host the interactive Attack Surface Graph directly alongside your browser session.
-- `scripting` / `optional_host_permissions`: ACULYX requests host permissions **per-site on demand** when you explicitly click "Monitor this site".
-- `activeTab`: Supports interactions with the currently selected tab.
+- **`webRequest`**: Passively reads HTTP response headers to evaluate transport security (HSTS, CSP, X-Frame-Options, CORS, Cache-Control). Does not read request/response bodies or modify network traffic.
+- **`webNavigation`**: Detects document navigation completions, redirects, and client-side SPA transitions to recompute security grades for the active tab.
+- **`cookies`**: Passively inspects cookie security attributes (`HttpOnly`, `Secure`, `SameSite`, `__Host-`, `__Secure-` prefixes). Cookie values are strictly never accessed, logged, stored, or transmitted (`cookie.value` is ignored).
+- **`storage`**: Used exclusively to persist user preferences, scope profiles, researcher triage notes, and bounded score history entirely on the local device.
+- **`tabs`**: Queries current tab URL and ID to display per-tab grades, update toolbar action badges, and cleanly free resources when tabs close.
+- **`scripting`**: Injects client-side DOM inspection sensors (S2 DOM collector and S3 Main-World hook scripts) into user-monitored tabs to analyze DOM sinks and subresource integrity.
+- **`alarms`**: Triggers periodic local cache pruning and data retention cleanup without running background threads.
+- **`sidePanel`**: Used in Chromium to host the interactive Attack Surface Graph directly alongside your browser session.
+- **`optional_permissions` (`<all_urls>`)**: Never requested upfront. Only requested upon explicit user consent per-site or when all-sites monitoring is deliberately activated.
+- **`activeTab`**: Supports interactions with the currently selected tab upon user gesture.
+
+---
+
+## 4.1. Special Sensor Invariants (S1 & S3)
+- **Policy-Gated Parameter Harvesting (S1)**: S1 parameter harvesting is strictly gated behind the active URL capture policy and defined bug-bounty scope. If monitoring is paused/off, an origin is not granted, or a host is out-of-scope or unknown, parameter harvesting is completely halted and no host/param data is recorded.
+- **Reviewer Note on `eval` in `main-world-hooks.ts` (S3)**: The extension wraps `window.eval` in the page's MAIN execution world strictly as a passive taint-tracking sensor. It observes calls made by the web page to detect unvalidated string execution. ACULYX **never** generates, compiles, or executes dynamic code via `eval()`. The original function is invoked with unmodified arguments, and only a sanitized event type is relayed to the extension.
 
 ---
 

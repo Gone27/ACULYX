@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
+import { isIP, isIPv4 } from 'node:net';
+import { lookup } from 'node:dns/promises';
 import packageInfo from '../package.json';
 import fixesData from '../fixes.json';
 import { runRules } from './rules/engine';
@@ -514,39 +516,119 @@ export function shouldFail(findings: Finding[], failOn: string): boolean {
   });
 }
 
+export function isPrivateOrReservedIp(rawIp: string): boolean {
+  let ip = rawIp.trim().replace(/^\[|\]$/g, '');
+  // Normalize IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1 or ::ffff:7f00:1
+  const lowerIp = ip.toLowerCase();
+  if (lowerIp.startsWith('::ffff:')) {
+    const rest = lowerIp.slice(7);
+    if (isIPv4(rest)) {
+      ip = rest;
+    } else {
+      const parts = rest.split(':');
+      const part0 = parts[0];
+      const part1 = parts[1];
+      if (parts.length === 2 && part0 !== undefined && part1 !== undefined) {
+        const p1 = parseInt(part0, 16);
+        const p2 = parseInt(part1, 16);
+        if (!Number.isNaN(p1) && !Number.isNaN(p2)) {
+          ip = `${(p1 >> 8) & 0xff}.${p1 & 0xff}.${(p2 >> 8) & 0xff}.${p2 & 0xff}`;
+        }
+      }
+    }
+  }
+
+  const ipVer = isIP(ip);
+  if (ipVer === 4) {
+    const parts = ip.split('.').map((p) => Number(p));
+    const [a, b] = parts;
+    if (a === undefined || b === undefined) return false;
+    if (a === 0) return true; // 0.0.0.0/8
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 127) return true; // 127.0.0.0/8
+    if (a === 169 && b === 254) return true; // 169.254.0.0/16 (Link-local)
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 (CGNAT RFC 6598)
+    if (a >= 224) return true; // 224.0.0.0/4 Multicast, reserved, broadcast
+    return false;
+  }
+
+  if (ipVer === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true; // Unspecified
+    if (lower === '::1') return true; // Loopback
+    // Unique local (fc00::/7 -> fc or fd)
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true;
+    // Link-local (fe80::/10)
+    if (/^fe[89ab]/i.test(lower)) return true;
+    // Multicast (ff00::/8)
+    if (lower.startsWith('ff')) return true;
+    return false;
+  }
+
+  return false;
+}
+
 export function isPrivateOrLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
   if (
     host === 'localhost' ||
     host.endsWith('.localhost') ||
-    host === '0.0.0.0' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
     host === 'metadata.google.internal' ||
-    host === 'instance-data'
+    host === 'instance-data' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.lan') ||
+    host.endsWith('.home.arpa') ||
+    host === 'localtest.me' ||
+    host.endsWith('.localtest.me') ||
+    host.endsWith('.nip.io') ||
+    host.endsWith('.sslip.io')
   ) {
     return true;
   }
 
-  // IPv4 ranges: 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 0.0.0.0/8
-  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (ipv4Match) {
-    const a = Number(ipv4Match[1]);
-    const b = Number(ipv4Match[2]);
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 0) return true;
+  // Check if it's an IP directly (or an unbracketed IPv6 literal like ::1, ::ffff:7f00:1)
+  if (isPrivateOrReservedIp(host)) {
+    return true;
   }
 
-  // IPv6 link-local / unique-local
-  if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
+  // Check if hostname contains :: (e.g. unbracketed IPv6)
+  if (host.includes(':') && isPrivateOrReservedIp(host)) {
     return true;
   }
 
   return false;
+}
+
+export async function validateHostForSsrf(hostname: string, allowPrivate: boolean): Promise<void> {
+  if (allowPrivate) return;
+  if (isPrivateOrLocalHost(hostname)) {
+    throw new Error(
+      `SSRF Protection: Access to private or local network target (${hostname}) is blocked. Pass --allow-private-ips to permit local development auditing.`
+    );
+  }
+
+  // Perform DNS resolution to prevent DNS rebinding attacks on domain names
+  const cleanHost = hostname.trim().replace(/^\[|\]$/g, '');
+  if (isIP(cleanHost) === 0) {
+    try {
+      const records = await lookup(cleanHost, { all: true });
+      for (const rec of records) {
+        if (isPrivateOrReservedIp(rec.address)) {
+          throw new Error(
+            `SSRF Protection: Target host "${cleanHost}" resolves to private or reserved IP address (${rec.address}). Request blocked.`
+          );
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('SSRF Protection:')) {
+        throw err;
+      }
+      // If DNS resolution fails, allow fetch to produce standard network error
+    }
+  }
 }
 
 export async function safeFetchTarget(
@@ -561,11 +643,7 @@ export async function safeFetchTarget(
   let redirectCount = 0;
 
   while (true) {
-    if (!allowPrivate && isPrivateOrLocalHost(currentUrl.hostname)) {
-      throw new Error(
-        `SSRF Protection: Access to private or local network target (${currentUrl.hostname}) is blocked. Pass --allow-private-ips to permit local development auditing.`
-      );
-    }
+    await validateHostForSsrf(currentUrl.hostname, allowPrivate);
 
     response = await fetch(currentUrl, {
       redirect: 'manual',

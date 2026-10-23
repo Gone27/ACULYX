@@ -16,27 +16,38 @@ export function calculateEntropy(str: string): number {
   return entropy;
 }
 
-const PLACEHOLDER_PATTERNS = [
-  /YOUR_/i,
-  /EXAMPLE/i,
-  /xxxx+/i,
-  /123456/i,
-  /test/i,
-  /dummy/i,
-  /SAMPLE/i,
-  /CHANGE_ME/i,
-  /<[^>]+>/,
-  /(.)\1{5,}/, // repeated char 6+ times
-];
-
 export function isPlaceholder(val: string): boolean {
-  if (val.startsWith('xox')) {
+  const trimmed = val.trim();
+  if (trimmed.length === 0) return true;
+  if (/<[^>]+>/.test(trimmed)) return true;
+  if (/^(.)\1{5,}$/.test(trimmed)) return true;
+
+  if (trimmed.startsWith('xox')) {
     // Slack tokens legitimately use numeric workspace and user IDs (e.g. xoxb-1234567890-...)
-    return /xox[baprs]-(?:xxxx|test|dummy|SAMPLE|YOUR_|CHANGE_ME)/i.test(val) || /(.)\1{6,}/.test(val);
+    return /xox[baprs]-(?:xxxx|dummy|SAMPLE|YOUR_|CHANGE_ME)/i.test(trimmed) || /^(.)\1{6,}$/.test(trimmed);
   }
-  for (const pattern of PLACEHOLDER_PATTERNS) {
-    if (pattern.test(val)) return true;
+
+  // Exact full-string placeholder tokens or obvious placeholder phrases
+  if (
+    /^(?:your[_-]?(?:api[_-]?)?(?:key|token|secret)|example[_-]?(?:key|token|secret)?|sample[_-]?(?:key|token|secret)?|dummy[_-]?(?:key|token|secret)?|change[_-]?me|placeholder|test|xxxx+|0000+|1234567890|12345678|123456)$/i.test(
+      trimmed
+    )
+  ) {
+    return true;
   }
+
+  // Token-level check: split into words. If ALL words are placeholder words, it's a placeholder.
+  // Real staging passwords (like 'test_pass_2024!' or 'admin_123456') are preserved!
+  const tokens = trimmed.toLowerCase().split(/[-_.\s/:]+/).filter(Boolean);
+  if (
+    tokens.length > 0 &&
+    tokens.every((t) =>
+      /^(?:your|api|key|token|secret|example|sample|dummy|changeme|placeholder|test|xxxx+|0000+|123456)$/.test(t)
+    )
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -111,7 +122,7 @@ export function detectSecrets(
     }
   }
 
-  const mapboxMatches = code.match(/\bpk\.[0-9a-zA-Z\-_]{30,}\b/g);
+  const mapboxMatches = code.match(/\bpk\.[0-9a-zA-Z\-_]{30,}(?=[^0-9a-zA-Z\-_]|$)/g);
   if (mapboxMatches) {
     for (const match of mapboxMatches) {
       if (isPlaceholder(match)) continue;
@@ -202,7 +213,7 @@ export function detectSecrets(
   }
 
   // GCP API Key
-  const gcpMatches = code.match(/\bAIza[0-9A-Za-z\-_]{35}\b/g);
+  const gcpMatches = code.match(/\bAIza[0-9A-Za-z\-_]{35}(?=[^0-9A-Za-z\-_]|$)/g);
   if (gcpMatches) {
     for (const match of gcpMatches) {
       if (isPlaceholder(match)) continue;
@@ -233,7 +244,7 @@ export function detectSecrets(
   }
 
   // Google OAuth Client Secret
-  const gocspxMatches = code.match(/\bGOCSPX-[0-9A-Za-z\-_]{28}\b/g);
+  const gocspxMatches = code.match(/\bGOCSPX-[0-9A-Za-z\-_]{24,35}(?=[^0-9A-Za-z\-_]|$)/g);
   if (gocspxMatches) {
     for (const match of gocspxMatches) {
       if (isPlaceholder(match)) continue;
@@ -407,7 +418,7 @@ export function detectSecrets(
   }
 
   // GitLab Personal Access Token
-  const gitlabMatches = code.match(/\bglpat-[0-9a-zA-Z\-_]{20,}\b/g);
+  const gitlabMatches = code.match(/\bglpat-[0-9a-zA-Z\-_]{20,}(?=[^0-9a-zA-Z\-_]|$)/g);
   if (gitlabMatches) {
     for (const match of gitlabMatches) {
       if (isPlaceholder(match)) continue;
@@ -436,7 +447,7 @@ export function detectSecrets(
   }
 
   // SendGrid API Key
-  const sendgridMatches = code.match(/\bSG\.[0-9A-Za-z\-_]{22}\.[0-9A-Za-z\-_]{43}\b/g);
+  const sendgridMatches = code.match(/\bSG\.[0-9A-Za-z\-_]{22}\.[0-9A-Za-z\-_]{43}(?=[^0-9A-Za-z\-_]|$)/g);
   if (sendgridMatches) {
     for (const match of sendgridMatches) {
       if (isPlaceholder(match)) continue;
@@ -455,6 +466,186 @@ export function detectSecrets(
           location: maskLocation(url),
         },
         tags: ['sendgrid', 'secret'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+      });
+    }
+  }
+
+  // OpenAI API Key
+  const openaiMatches = code.match(/\b(?:sk-(?:live-)?[a-zA-Z0-9]{20,T3BlbkFJ[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9_-]{40,}|sk-svcacct-[a-zA-Z0-9_-]{40,}|sk-[a-zA-Z0-9]{48})(?=[^a-zA-Z0-9_-]|$)/g);
+  if (openaiMatches) {
+    for (const match of openaiMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-OPENAI'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: 'critical',
+        confidence: 1.0,
+        title: 'OpenAI API Secret Key Exposure',
+        needs: ['verify OpenAI organization and billing scope'],
+        doesNotProve: ['active funded API credits'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+          context: 'OpenAI API key',
+        },
+        tags: ['openai', 'ai', 'secret'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+        remediation: 'Revoke and rotate the exposed OpenAI secret key in the OpenAI platform dashboard.',
+      });
+    }
+  }
+
+  // Anthropic API Key
+  const anthropicMatches = code.match(/\bsk-ant-(?:api03-)?[a-zA-Z0-9_-]{32,}(?=[^a-zA-Z0-9_-]|$)/g);
+  if (anthropicMatches) {
+    for (const match of anthropicMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-ANTHROPIC'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: 'critical',
+        confidence: 1.0,
+        title: 'Anthropic Claude API Key Exposure',
+        needs: ['verify Anthropic API credits and tier'],
+        doesNotProve: ['active console access'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+          context: 'Anthropic API key',
+        },
+        tags: ['anthropic', 'ai', 'secret'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+        remediation: 'Revoke and regenerate the exposed Anthropic API key via the Anthropic Console.',
+      });
+    }
+  }
+
+  // Discord Webhook URL
+  const discordWebhookMatches = code.match(/https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d{17,21}\/[A-Za-z0-9_-]{60,}/g);
+  if (discordWebhookMatches) {
+    for (const match of discordWebhookMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-DISCORD-WEBHOOK'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: 'high',
+        confidence: 1.0,
+        title: 'Discord Incoming Webhook URL Detected',
+        needs: ['verify target channel destination'],
+        doesNotProve: ['unauthorized messaging capability'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+        },
+        tags: ['discord', 'webhook', 'secret'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+      });
+    }
+  }
+
+  // Telegram Bot Token
+  const telegramMatches = code.match(/\b\d{8,11}:[A-Za-z0-9_-]{35}(?=[^A-Za-z0-9_-]|$)/g);
+  if (telegramMatches) {
+    for (const match of telegramMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-TELEGRAM'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: 'high',
+        confidence: 0.95,
+        title: 'Telegram Bot API Token Exposure',
+        needs: ['verify getMe response for bot username and permissions'],
+        doesNotProve: ['channel admin access'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+          context: 'Telegram bot token',
+        },
+        tags: ['telegram', 'bot', 'secret'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+        remediation: 'Revoke the bot token using BotFather on Telegram.',
+      });
+    }
+  }
+
+  // Mailgun API Key
+  const mailgunMatches = code.match(/\bkey-[0-9a-zA-Z]{32}\b/g);
+  if (mailgunMatches) {
+    for (const match of mailgunMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-MAILGUN'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: 'high',
+        confidence: 0.95,
+        title: 'Mailgun API Key Exposure',
+        needs: ['verify domain email sending permissions'],
+        doesNotProve: ['active domain reputation'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+        },
+        tags: ['mailgun', 'email', 'secret'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+      });
+    }
+  }
+
+  // DigitalOcean Personal Access Token
+  const doMatches = code.match(/\bdop_v1_[a-f0-9]{64}\b/g);
+  if (doMatches) {
+    for (const match of doMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-DIGITALOCEAN'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: 'critical',
+        confidence: 1.0,
+        title: 'DigitalOcean Personal Access Token Exposure',
+        needs: ['verify droplet/cluster management permissions'],
+        doesNotProve: ['account ownership'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+        },
+        tags: ['digitalocean', 'cloud', 'secret'],
         scopeStatus,
         timestamp: Date.now(),
         origin,
@@ -552,8 +743,8 @@ export function detectSecrets(
   }
 
   // 3. SEC-002: INFRASTRUCTURE SECRETS & KEYS
-  // PEM Private Key
-  const pemMatch = code.match(/-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/);
+  // PEM / PGP Private Key Material
+  const pemMatch = code.match(/-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----|-----BEGIN PGP PRIVATE KEY BLOCK-----/);
   if (pemMatch) {
     leads.push({
       id: nextLeadId('SEC-PEM'),
@@ -562,13 +753,13 @@ export function detectSecrets(
       tier: 'observed',
       potential: 'critical',
       confidence: 1.0,
-      title: 'PEM Private Key Material Block Detected',
+      title: 'Private Key Material Block Detected (PEM / PGP)',
       needs: ['identify matching public key or host binding'],
       doesNotProve: ['active server decryption capability'],
       evidence: {
         preview: maskSecret(pemMatch[0]),
         location: maskLocation(url),
-        context: 'PEM block header',
+        context: 'Private Key block header',
       },
       tags: ['private-key', 'crypto', 'secret'],
       scopeStatus,
@@ -579,8 +770,8 @@ export function detectSecrets(
     });
   }
 
-  // Database Connection URI
-  const dbMatches = code.match(/\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql):\/\/[^\s"'`<>]+/g);
+  // Database / Queue Connection URI (MongoDB, PostgreSQL, MySQL, Redis, AMQP)
+  const dbMatches = code.match(/\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis(?:s)?|amqp(?:s)?):\/\/[^\s"'`<>]+/g);
   if (dbMatches) {
     for (const match of dbMatches) {
       if (isPlaceholder(match)) continue;
@@ -591,15 +782,45 @@ export function detectSecrets(
         tier: 'strong',
         potential: 'high',
         confidence: 0.9,
-        title: 'Database Connection String with Credentials Detected',
-        needs: ['verify network reachability of database host'],
+        title: 'Database / Queue Connection String with Credentials Detected',
+        needs: ['verify network reachability of service host'],
         doesNotProve: ['public routability of database port'],
         evidence: {
           preview: maskSecret(match),
           location: maskLocation(url),
-          context: 'Database connection URI',
+          context: 'Connection URI with embedded credentials',
         },
         tags: ['database', 'secret', 'uri'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+      });
+    }
+  }
+
+  // Basic Auth Credentials in URL
+  const basicAuthMatches = code.match(/\bhttps?:\/\/[a-zA-Z0-9_.-]+:(?:(?!\/\/)[^@\s"'`<>]{6,})@[a-zA-Z0-9_.-]+\.[a-zA-Z]{2,}/g);
+  if (basicAuthMatches) {
+    for (const match of basicAuthMatches) {
+      if (isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId('SEC-BASICAUTH'),
+        ruleId: 'SEC-002',
+        family: 'F1',
+        tier: 'strong',
+        potential: 'high',
+        confidence: 0.9,
+        title: 'Embedded Basic Authentication Credentials in URL',
+        needs: ['verify endpoint responsiveness to embedded credentials'],
+        doesNotProve: ['privileged user access'],
+        evidence: {
+          preview: maskSecret(match),
+          location: maskLocation(url),
+          context: 'Embedded URL user:password authentication',
+        },
+        tags: ['basic-auth', 'credentials', 'secret'],
         scopeStatus,
         timestamp: Date.now(),
         origin,
@@ -638,30 +859,61 @@ export function detectSecrets(
     }
   }
 
-  // 4. SEC-003: GENERIC CONTEXT SECRETS (High Entropy assignments)
-  const genericAssignRegex = /(?:secret|token|password|apiKey|api_key)\s*[:=]\s*["']([A-Za-z0-9+/=_\-]{16,})["']/gi;
+  // AWS Secret Access Key assignment
+  const awsSecretRegex = /(?:aws_secret_access_key|aws_secret_key|secret_key|secretAccessKey)["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})["']?/gi;
+  let awsSecMatch: RegExpExecArray | null;
+  while ((awsSecMatch = awsSecretRegex.exec(code)) !== null) {
+    const val = awsSecMatch[1];
+    if (val !== undefined && val.length > 0 && !isPlaceholder(val)) {
+      leads.push({
+        id: nextLeadId('SEC-AWS-SECRET'),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'strong',
+        potential: 'critical',
+        confidence: 0.95,
+        title: 'AWS Secret Access Key Exposure',
+        needs: ['pair with AWS Access Key ID and test STS get-caller-identity'],
+        doesNotProve: ['active IAM permissions'],
+        evidence: {
+          preview: maskSecret(val),
+          location: maskLocation(url),
+          context: 'AWS Secret Key assignment',
+        },
+        tags: ['aws', 'secret', 'iam'],
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+      });
+    }
+  }
+
+  // 4. SEC-003: GENERIC CONTEXT SECRETS (Quoted JSON keys, assignments, template literals)
+  const genericAssignRegex = /(?:["']?)((?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret)\w*)(?:["']?)\s*[:=]\s*["'`]((?:[^"'`\r\n\s\\]|\\.){8,})["'`]/gi;
   let assignMatch: RegExpExecArray | null;
   while ((assignMatch = genericAssignRegex.exec(code)) !== null) {
-    const val = assignMatch[1];
+    const keyName = assignMatch[1];
+    const val = assignMatch[2];
     if (val === undefined || val.length === 0 || isPlaceholder(val)) continue;
-    // Discard standard library or common words
-    if (val.length < 16) continue;
+    if (val.length < 8) continue;
     const entropy = calculateEntropy(val);
-    if (entropy > 3.2) {
+    if ((val.length >= 16 && entropy > 2.8) || (val.length >= 8 && entropy > 3.0)) {
       leads.push({
         id: nextLeadId('SEC-GEN'),
         ruleId: 'SEC-003',
         family: 'F1',
         tier: 'weak',
         potential: 'high',
-        confidence: 0.6,
-        title: 'High-Entropy Secret Assignment Detected',
+        confidence: 0.65,
+        title: `High-Entropy Secret Assignment Detected (${keyName ?? 'key'})`,
         needs: ['manual confirmation of secret purpose'],
         doesNotProve: ['production credential status'],
         evidence: {
           preview: maskSecret(val),
           location: maskLocation(url),
-          context: `High entropy (${entropy.toFixed(2)}) assignment`,
+          context: `Key: ${keyName ?? 'secret'}, high entropy (${entropy.toFixed(2)}) assignment`,
         },
         tags: ['generic', 'secret', 'entropy'],
         scopeStatus,

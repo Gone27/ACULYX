@@ -84,6 +84,7 @@ export const inFlightRequests: Map<
 export function clearInFlightCaptures(): void {
   captureMap.clear();
   inFlightRequests.clear();
+  redirectCounts.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +159,46 @@ export function extractRawQueryParams(rawUrl: string): string[] {
  *   intermediate redirect responses.
  * @param onApiHopComplete - Optional callback invoked for each captured XHR/Fetch response.
  */
+export const redirectCounts = new Map<string, number>();
+
+interface WebRequestListenerEvent<TDetails> {
+  addListener: (
+    callback: (details: TDetails) => void,
+    filter: chrome.webRequest.RequestFilter,
+    opt?: string[],
+  ) => void;
+}
+
+function addListenerSafe<TDetails>(
+  event: WebRequestListenerEvent<TDetails>,
+  callback: (details: TDetails) => void,
+  filter: chrome.webRequest.RequestFilter,
+  optExtra: string[],
+): void {
+  try {
+    event.addListener(callback, filter, optExtra);
+  } catch {
+    const fallbackOpt = optExtra.filter((opt) => opt !== 'extraHeaders');
+    try {
+      if (fallbackOpt.length > 0) {
+        event.addListener(callback, filter, fallbackOpt);
+      } else {
+        event.addListener(callback, filter);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[Capture] Failed to register listener:', err);
+    }
+  }
+}
+
+/**
+ * Registers all WebRequest listeners needed to capture response hops.
+ *
+ * @param onHopComplete - Callback invoked for every captured response, including
+ *   intermediate redirect responses.
+ * @param onApiHopComplete - Optional callback invoked for each captured XHR/Fetch response.
+ */
 export function registerCaptureListeners(
   onHopComplete: (tabId: number, hop: Hop, isIncognito: boolean | undefined) => void,
   onApiHopComplete?: (apiHop: ApiHop, isIncognito: boolean | undefined) => void,
@@ -166,88 +207,78 @@ export function registerCaptureListeners(
   const filter: chrome.webRequest.RequestFilter = { urls: ['<all_urls>'] };
   const extraInfoSpec: string[] = ['responseHeaders', 'extraHeaders'];
 
-  try {
-    chrome.webRequest.onBeforeSendHeaders.addListener(
-      (details: chrome.webRequest.WebRequestHeadersDetails): void => {
-        if (details.tabId < 0) return;
+  addListenerSafe(
+    chrome.webRequest.onBeforeSendHeaders,
+    (details: chrome.webRequest.WebRequestHeadersDetails): void => {
+      if (details.tabId < 0) return;
 
-        const isIncog = incognitoTabIds.has(details.tabId);
-        const snapshot = CapturePolicy.getSnapshot();
-        const isAllowed = isCaptureActiveForUrl(details.url);
+      const isIncog = incognitoTabIds.has(details.tabId);
+      const snapshot = CapturePolicy.getSnapshot();
+      const isAllowed = isCaptureActiveForUrl(details.url);
 
-        if (!isAllowed) {
-          if (snapshot.ready && snapshot.mode === 'per-site' && details.type !== 'main_frame') {
-            if (onThirdPartyBlocked) {
-              onThirdPartyBlocked(details.tabId, details.url);
-            }
-          }
-          return;
-        }
-
-        // S1: Extract query parameter names AFTER capture policy check and ONLY for non-incognito tabs
-        if (!isIncog) {
-          const rawParamNames = extractRawQueryParams(details.url);
-          if (rawParamNames.length > 0 && paramHarvesterCallback) {
-            try {
-              paramHarvesterCallback(details.url, rawParamNames, details.tabId, isIncog);
-            } catch {
-              // Fail-safe
-            }
+      if (!isAllowed) {
+        if (snapshot.ready && snapshot.mode === 'per-site' && details.type !== 'main_frame') {
+          if (onThirdPartyBlocked) {
+            onThirdPartyBlocked(details.tabId, details.url);
           }
         }
+        return;
+      }
 
-        // ONLY track XHR/fetch requests
-        if (details.type !== 'xmlhttprequest') return;
-
-        const originHeader = details.requestHeaders?.find(
-          (h) => h.name.toLowerCase() === 'origin',
-        )?.value;
-        // Bound the map size to prevent memory leaks if responses never finish
-        if (inFlightRequests.size > 100) {
-          const oldestKey = inFlightRequests.keys().next().value;
-          if (oldestKey !== undefined) inFlightRequests.delete(oldestKey);
+      // S1: Extract query parameter names AFTER capture policy check and ONLY for non-incognito tabs
+      if (!isIncog) {
+        const rawParamNames = extractRawQueryParams(details.url);
+        if (rawParamNames.length > 0 && paramHarvesterCallback) {
+          try {
+            paramHarvesterCallback(details.url, rawParamNames, details.tabId, isIncog);
+          } catch {
+            // Fail-safe
+          }
         }
-        inFlightRequests.set(details.requestId, {
-          method: details.method,
-          origin: originHeader,
-          timestamp: details.timeStamp,
-          generation: getTabGeneration(details.tabId),
-        });
-      },
-      filter,
-      ['requestHeaders', 'extraHeaders'],
-    );
+      }
 
-    // Clean up in-flight request tracking on error or completion
-    chrome.webRequest.onErrorOccurred.addListener((details) => {
-      inFlightRequests.delete(details.requestId);
-      captureMap.delete(details.requestId);
-    }, filter);
-    chrome.webRequest.onCompleted.addListener((details) => {
-      inFlightRequests.delete(details.requestId);
-      captureMap.delete(details.requestId);
-    }, filter);
-  } catch {
-    // extraHeaders may be restricted in some environments; fall back gracefully
-  }
+      // ONLY track XHR/fetch requests
+      if (details.type !== 'xmlhttprequest') return;
+
+      const originHeader = details.requestHeaders?.find(
+        (h) => h.name.toLowerCase() === 'origin',
+      )?.value;
+      // Bound the map size to prevent memory leaks if responses never finish
+      if (inFlightRequests.size > 100) {
+        const oldestKey = inFlightRequests.keys().next().value;
+        if (oldestKey !== undefined) inFlightRequests.delete(oldestKey);
+      }
+      inFlightRequests.set(details.requestId, {
+        method: details.method,
+        origin: originHeader,
+        timestamp: details.timeStamp,
+        generation: getTabGeneration(details.tabId),
+      });
+    },
+    filter,
+    ['requestHeaders', 'extraHeaders'],
+  );
+
+  // Clean up in-flight request tracking on error or completion
+  chrome.webRequest.onErrorOccurred.addListener((details) => {
+    inFlightRequests.delete(details.requestId);
+    captureMap.delete(details.requestId);
+    redirectCounts.delete(details.requestId);
+  }, filter);
+  chrome.webRequest.onCompleted.addListener((details) => {
+    inFlightRequests.delete(details.requestId);
+    captureMap.delete(details.requestId);
+    redirectCounts.delete(details.requestId);
+  }, filter);
 
   // -------------------------------------------------------------------------
   // Stage 1 — onHeadersReceived
   // -------------------------------------------------------------------------
-  chrome.webRequest.onHeadersReceived.addListener(
+  addListenerSafe(
+    chrome.webRequest.onHeadersReceived,
     (details: chrome.webRequest.WebResponseHeadersDetails): void => {
-      // S1: Extract query parameter names before any redaction occurs
-      const rawParamNames = extractRawQueryParams(details.url);
-      if (rawParamNames.length > 0 && paramHarvesterCallback) {
-        try {
-          paramHarvesterCallback(details.url, rawParamNames, details.tabId);
-        } catch {
-          // Fail-safe
-        }
-      }
-
-      // Only track top-level navigation frames.
-      if (details.type !== 'main_frame' || details.tabId < 0) return;
+      // Only track top-level navigation and subframe frames.
+      if ((details.type !== 'main_frame' && details.type !== 'sub_frame') || details.tabId < 0) return;
       if (!isCaptureActiveForUrl(details.url)) return;
 
       const raw = details.responseHeaders ?? [];
@@ -263,7 +294,7 @@ export function registerCaptureListeners(
         fromCache: false, // not available at this stage
         wasRedirected: false,
         timestamp: details.timeStamp,
-        redirectCount: 0,
+        redirectCount: redirectCounts.get(details.requestId) ?? 0,
         isIncognito: isIncog,
         generation: getTabGeneration(details.tabId),
       };
@@ -277,7 +308,8 @@ export function registerCaptureListeners(
   // -------------------------------------------------------------------------
   // Stage 2 — onResponseStarted
   // -------------------------------------------------------------------------
-  chrome.webRequest.onResponseStarted.addListener(
+  addListenerSafe(
+    chrome.webRequest.onResponseStarted,
     (details: chrome.webRequest.WebResponseCacheDetails): void => {
       // Route XHR/Fetch responses to the API callback, if registered.
       if (details.type === 'xmlhttprequest' && details.tabId >= 0) {
@@ -324,16 +356,20 @@ export function registerCaptureListeners(
         return;
       }
 
-      if (details.type !== 'main_frame' || details.tabId < 0) return;
+      if ((details.type !== 'main_frame' && details.type !== 'sub_frame') || details.tabId < 0) return;
 
       if (!isCaptureActiveForUrl(details.url)) {
         captureMap.delete(details.requestId);
+        redirectCounts.delete(details.requestId);
         return;
       }
 
       const raw = details.responseHeaders ?? [];
       const normalised = normalizeHeaders(raw);
       const rawHeaders = toRawHeaders(raw);
+
+      const finalRedirectCount = redirectCounts.get(details.requestId) ?? 0;
+      redirectCounts.delete(details.requestId);
 
       // Retrieve (or lazily create) the partial capture started in stage 1.
       let partial = captureMap.get(details.requestId);
@@ -352,10 +388,12 @@ export function registerCaptureListeners(
           fromCache: details.fromCache ?? false,
           wasRedirected: false,
           timestamp: details.timeStamp,
-          redirectCount: 0,
+          redirectCount: finalRedirectCount,
           isIncognito: isIncog,
           generation: getTabGeneration(details.tabId),
         };
+      } else {
+        partial.redirectCount = finalRedirectCount;
       }
 
       const sanitizedUrl = sanitizeUrlForStorage(details.url);
@@ -392,6 +430,7 @@ export function registerCaptureListeners(
         timestamp: partial.timestamp,
         redirectCount: partial.redirectCount,
         generation: partial.generation ?? getTabGeneration(details.tabId),
+        ...(details.type === 'sub_frame' ? { isSubFrame: true } : {}),
       };
 
       // Clean up in-flight state.
@@ -417,15 +456,20 @@ export function registerCaptureListeners(
   // Redirects produce a response (3xx) before the final response, so we record
   // them in captureMap and mark the capture as having been redirected.
   // The correlate/rule engine can inspect the hop chain if desired.
-  chrome.webRequest.onBeforeRedirect.addListener(
+  addListenerSafe(
+    chrome.webRequest.onBeforeRedirect,
     (details: chrome.webRequest.WebRedirectionResponseDetails): void => {
-      if (details.type !== 'main_frame' || details.tabId < 0) return;
+      if ((details.type !== 'main_frame' && details.type !== 'sub_frame') || details.tabId < 0) return;
       if (!isCaptureActiveForUrl(details.url)) {
         captureMap.delete(details.requestId);
+        redirectCounts.delete(details.requestId);
         return;
       }
 
       const existing = captureMap.get(details.requestId);
+      const currentCount = (redirectCounts.get(details.requestId) ?? 0) + 1;
+      redirectCounts.set(details.requestId, currentCount);
+
       const raw = details.responseHeaders ?? existing?.rawHeadersReceived ?? [];
       const headers = normalizeHeaders(raw);
       const rawHeaders = toRawHeaders(raw);
@@ -438,13 +482,14 @@ export function registerCaptureListeners(
         rawHeaders,
         fromCache: false,
         isHstsUpgrade: detectHstsUpgrade(rawHeaders),
-        capturedAt: 'onResponseStarted',
+        capturedAt: 'onHeadersReceived',
         headersDiffer: beforeHeaders !== null && beforeHeaders !== undefined
           ? headersDiffer(beforeHeaders, headers)
           : false,
         timestamp: existing?.timestamp ?? details.timeStamp,
-        redirectCount: 0,
+        redirectCount: currentCount,
         generation: existing?.generation ?? getTabGeneration(details.tabId),
+        ...(details.type === 'sub_frame' ? { isSubFrame: true } : {}),
       };
 
       const isIncog = existing?.isIncognito ?? (incognitoTabIds.has(details.tabId) ? true : undefined);

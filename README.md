@@ -34,9 +34,9 @@ Because ACULYX evaluates traffic within the browser's own authenticated network 
   - **S3 (Deep Mode Sinks & Taint Analysis)**: MAIN-world hooking of DOM sinks (`innerHTML`, `document.write`, `eval`, `location.assign`), wildcard postMessage calls, and listener origin checks.
   - **S4 (DevTools Network Body Sensor)**: In-memory live network response inspection via Chrome DevTools (`src/devtools/panel.html`) for stack traces, credentials, and exposed endpoints.
   - **S5 (Worker & Cache Surface)**: Service worker registration and cache surface auditing.
-- **Lead Radar Detector Families (F1–F8)**: High-recall, zero-false-positive detector suite covering Secrets (F1), Endpoints (F2), Source Maps (F3), Auth/OAuth (F4), Params (F5), Headers (F6), Response Bodies (F7), and Cloud Reconnaissance (F8).
+- **Lead Radar Detector Families (F1–F8)**: High-precision, false-positive resilient detector suite covering Secrets (F1), Endpoints (F2), Source Maps (F3), Auth/OAuth (F4), Params (F5), Headers (F6), Response Bodies (F7), and Cloud Reconnaissance (F8).
 - **The Sieve Privacy & Masking Layer**: Ensures zero raw secrets, credentials, or sensitive query tokens leak into memory, storage, or exports, backed by 64-bit cryptographic entropy hashing and recursive field-aware sanitization across TabState, Lead Radar, and SARIF serializers.
-- **Fail-Closed Scope & Resource Isolation**: Multi-sensor pipelines and background handlers independently resolve scope for external scripts, iframes, forms, and network subresources. Out-of-scope targets are strictly excluded from persistent recon memory (`ReconStore`), while S1 parameter harvesting is gated behind active URL capture policies and incognito boundaries.
+- **Fail-Closed Scope & Resource Isolation**: Multi-sensor pipelines and background handlers independently resolve scope for external scripts, iframes, forms, and network subresources. Out-of-scope targets are strictly excluded from persistent recon memory (`ReconStore`), while S1 parameter harvesting is strictly policy-gated and in-scope gated behind active URL capture policies and incognito boundaries.
 - **Content Script Sender Verification & Zero-Leakage Denials**: Strict browser-level sender verification (`sender.tab.id`, `sender.tab.url`) binds content script state queries to the calling tab, returning empty denial responses on rejected routes to prevent cross-origin state leakage.
 - **MV3 Storage Session Persistence**: Seamless session recovery across background service worker idle/sleep cycles via `chrome.storage.session`.
 - **Hunter Active Verification Engine**: Controlled, user-confirmed active HTTP probes for out-of-band vulnerability verification. Available via the dedicated Hunter Edition (`npm run build:hunter`).
@@ -64,9 +64,23 @@ ACULYX is built on strict fail-closed privacy invariants:
 3. **100% Local Processing**: All evaluation, scoring, D3 graphing, and report generation execute locally on your device.
 4. **Isolated Incognito Handling**: Incognito and private browsing events never touch persistent storage (`localStorage`), history records, or the attack-surface graph.
 5. **No Telemetry**: Zero analytics, zero crash reporting, zero tracking pixels, zero remote script loading.
+6. **Policy-Gated Parameter Harvesting**: Query parameter harvesting (S1) is strictly gated behind the active URL capture policy and defined bug-bounty scope. If monitoring is paused/off, an origin is not granted, or a host is out-of-scope or unknown, parameter harvesting is completely halted.
 
 > [!NOTE]
 > The only command that contacts an external network endpoint is the standalone CLI when invoked with the explicit `--url` flag to fetch HTTP headers for terminal audit.
+
+### Permissions Usage & Store Justifications
+- **`cookies`**: Passively audits cookie security attributes (`HttpOnly`, `Secure`, `SameSite`, `__Host-`, `__Secure-` prefixes). Cookie values are strictly never accessed, logged, stored, or transmitted (`cookie.value` is ignored).
+- **`webRequest`**: Passively reads HTTP response headers to evaluate transport security (HSTS, CSP, X-Frame-Options, CORS, Cache-Control). Does not read request/response bodies or modify network traffic.
+- **`webNavigation`**: Detects document navigation completions, redirects, and client-side SPA transitions to recompute security grades for the active tab.
+- **`tabs`**: Queries current tab URL and ID to display per-tab grades, update toolbar action badges, and cleanly free resources when tabs close.
+- **`scripting`**: Injects client-side DOM inspection sensors (S2 DOM collector and S3 Main-World hook scripts) into user-monitored tabs to analyze DOM sinks and subresource integrity.
+- **`storage`**: Used exclusively to persist user preferences, scope profiles, researcher triage notes, and bounded score history entirely on the local device.
+- **`alarms`**: Triggers periodic local cache pruning and data retention cleanup without running background threads.
+- **`optional_permissions` (`<all_urls>`)**: Never requested upfront. Only requested upon explicit user consent per-site or when all-sites monitoring is deliberately activated.
+
+### Reviewer Notes (Web Store & Mozilla AMO)
+- **Use of `eval` in `main-world-hooks.ts`**: The extension wraps `window.eval` in the page's MAIN execution world strictly as a passive taint-tracking sensor (Sensor 3). It observes calls made by the web page to detect unvalidated string execution. ACULYX **never** generates, compiles, or executes dynamic code via `eval()`. The original function is invoked with unmodified arguments, and only a sanitized event type is relayed to the extension.
 
 ---
 
@@ -141,7 +155,7 @@ npm run typecheck
 # 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
 npm run lint -- --max-warnings=0
 
-# 3. Unit & Integration Tests (702 tests across 50 test suites)
+# 3. Unit & Integration Tests (708 tests across 50 test suites)
 npm test
 
 # 4. Playwright End-to-End Tests (9 browser tests across 2 suites; auto-builds dist/)

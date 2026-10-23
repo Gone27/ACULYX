@@ -22,6 +22,51 @@ export interface MainWorldLeadEventDetail {
   details?: string | undefined;
 }
 
+export function hasOriginValidation(fn: ((...args: unknown[]) => unknown) | { toString(): string }): boolean {
+  try {
+    let src = fn.toString();
+    // 1. Remove single-line comments
+    src = src.replace(/\/\/[^\r\n]*/g, '');
+    // 2. Remove multi-line comments
+    src = src.replace(/\/\*[\s\S]*?\*\//g, '');
+    // 3. Remove console.* calls so console.log(e.origin) doesn't count as validation
+    src = src.replace(/console\.(?:log|debug|info|warn|error)\s*\([^)]*\)/g, '');
+    // 4. Remove string literals so "some.origin" doesn't count as property access
+    src = src.replace(/(['"`])(?:(?!\1)[^\\]|\\.)*\1/g, '""');
+
+    // Check for parameter destructuring: ({ origin }) or ({ data, origin })
+    const hasDestructuredOrigin =
+      /\(\s*\{[^}]*\borigin\b[^}]*\}\s*\)/.test(src) || /\{[^}]*\borigin\b[^}]*\}\s*=>/.test(src);
+    // Check for property access: e.origin, evt.origin, event.origin, or destructuring within body
+    const hasOriginAccess =
+      hasDestructuredOrigin ||
+      /\b(?:const|let|var)\s*\{[^}]*\borigin\b[^}]*\}\s*=/.test(src) ||
+      /\.\s*origin\b/.test(src) ||
+      /\[\s*["']origin["']\s*\]/.test(src);
+
+    if (!hasOriginAccess) {
+      return false;
+    }
+
+    // Origin validation check: verify that origin is actually compared or tested
+    // e.g. origin === ..., origin !== ..., origin == ..., origin != ...
+    // or .includes(origin), .indexOf(origin), .startsWith, .endsWith, .test(origin)
+    // or set.has(origin), origin in set, switch (origin)
+    return (
+      /[!=]==?\s*(?:[^;\s,]+\.)?origin\b/.test(src) ||
+      /\borigin\s*[!=]==?/.test(src) ||
+      /\.(?:includes|indexOf|startsWith|endsWith|test)\s*\([^)]*\borigin\b/.test(src) ||
+      (/\b(?:includes|indexOf|startsWith|endsWith|test)\s*\([^)]*\)/.test(src) && /\borigin\b/.test(src)) ||
+      /\.has\s*\([^)]*\borigin\b/.test(src) ||
+      /\borigin\s+in\s+/.test(src) ||
+      /\bswitch\s*\([^)]*\borigin\b/.test(src) ||
+      /\bif\s*\([^)]*\borigin\b[^)]*[!=<>]/.test(src)
+    );
+  } catch {
+    return false;
+  }
+}
+
 let hooksInstalledInClosure = false;
 
 export function installMainWorldHooks(): void {
@@ -247,20 +292,14 @@ export function installMainWorldHooks(): void {
     };
 
     const origAddEventListener = window.addEventListener;
-    window.addEventListener = function (
-      this: unknown,
-      type: string,
-      listener: EventListenerOrEventListenerObject | null,
-      options?: boolean | AddEventListenerOptions
-    ) {
-      if (type === 'message' && typeof listener === 'function') {
-        const originalFn = listener as (evt: MessageEvent) => void;
-        const fnSource = originalFn.toString();
-        const hasOriginCheckInSource = /\.origin\b/.test(fnSource);
 
-        const wrapped = function (this: unknown, event: Event) {
+    // Single capture-phase listener on window to record recent postMessage data without wrapping page listeners
+    try {
+      origAddEventListener.call(
+        window,
+        'message',
+        (event: Event) => {
           const msgEvent = event as MessageEvent;
-          // Track postMessage data in recent list for source-to-sink correlation
           try {
             if (typeof msgEvent.data === 'string') {
               recentPostMessages.push(msgEvent.data);
@@ -273,21 +312,32 @@ export function installMainWorldHooks(): void {
           } catch {
             // Ignore serialization error
           }
+        },
+        true // capture phase
+      );
+    } catch {
+      // Ignore
+    }
 
-          if (!hasOriginCheckInSource) {
-            emitEvent({
-              eventType: 'postmessage_listener',
-              hasOriginCheck: false,
-              details: 'Message listener registered without origin validation check',
-            });
-          }
-
-          return (originalFn as any).call(this, msgEvent);
-        };
-
-        return (origAddEventListener as any).call(this, type, wrapped, options);
+    window.addEventListener = function (
+      this: unknown,
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions
+    ) {
+      if (type === 'message' && typeof listener === 'function') {
+        const hasCheck = hasOriginValidation(listener);
+        if (!hasCheck) {
+          emitEvent({
+            eventType: 'postmessage_listener',
+            hasOriginCheck: false,
+            details: 'Message listener registered without origin validation check',
+          });
+        }
       }
 
+      // INVARIANT: Do NOT wrap the listener. Pass original listener directly so
+      // removeEventListener works and multiple registrations do not duplicate execution.
       return (origAddEventListener as any).call(this, type, listener, options);
     };
   } catch {

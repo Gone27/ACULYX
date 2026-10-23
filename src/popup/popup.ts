@@ -494,19 +494,22 @@ function renderState(state: TabState): void {
   currentState = state; // store for export
   clearStateMessage();
 
-  if (state.hops.length === 0) {
+  if (state.hops.length === 0 || state.grade === '?') {
     setPopupState('capturing');
+    setBadgeState('scanning', '?', 'No security data captured yet');
+    gradeBadge.className = 'grade-badge grade-unknown';
+    scoreText.textContent = 'Score: No data';
+    qualityScoreText.textContent = 'Configuration quality: No data';
   } else {
     setPopupState('results');
+    // Grade badge & accessibility
+    setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
+    gradeBadge.className = 'grade-badge grade-' + (state.grade?.toLowerCase() ?? 'unknown');
+
+    // Score + origin
+    scoreText.textContent = `Score: ${state.score}/100`;
+    qualityScoreText.textContent = `Configuration quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? 'A'})`;
   }
-
-  // Grade badge & accessibility
-  setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
-  gradeBadge.className = 'grade-badge grade-' + (state.grade?.toLowerCase() ?? 'unknown');
-
-  // Score + origin
-  scoreText.textContent = `Score: ${state.score}/100`;
-  qualityScoreText.textContent = `Configuration quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? 'A'})`;
   originText.textContent = state.origin;
 
   // 3. Historical trend over time
@@ -1415,32 +1418,45 @@ function openGraphInTab(): void {
   void chrome.tabs.create({ url });
 }
 
+interface SidePanelApi {
+  open: (options: { tabId?: number; windowId?: number }) => Promise<void>;
+}
+
 function wireOpenGraphButton(): void {
   openGraphBtn.addEventListener('click', () => {
-    if (chrome.sidePanel !== undefined && typeof chrome.sidePanel.open === 'function') {
-      if (currentTabId !== null) {
-        chrome.sidePanel.open({ tabId: currentTabId }).catch(() => {
+    try {
+      const sp = (chrome as unknown as { sidePanel?: SidePanelApi }).sidePanel;
+      if (sp !== undefined && typeof sp.open === 'function') {
+        if (currentTabId !== null) {
+          sp.open({ tabId: currentTabId }).catch(() => {
+            chrome.windows.getCurrent((win) => {
+              if (win.id !== undefined && sp !== undefined) {
+                sp.open({ windowId: win.id }).catch(() => {
+                  openGraphInTab();
+                });
+              } else {
+                openGraphInTab();
+              }
+            });
+          });
+        } else {
           chrome.windows.getCurrent((win) => {
-            if (win.id !== undefined && chrome.sidePanel !== undefined) {
-              chrome.sidePanel.open({ windowId: win.id }).catch(() => openGraphInTab());
+            if (win.id !== undefined && sp !== undefined) {
+              sp.open({ windowId: win.id }).catch(() => {
+                openGraphInTab();
+              });
             } else {
               openGraphInTab();
             }
           });
-        });
-      } else {
-        chrome.windows.getCurrent((win) => {
-          if (win.id !== undefined && chrome.sidePanel !== undefined) {
-            chrome.sidePanel.open({ windowId: win.id }).catch(() => openGraphInTab());
-          } else {
-            openGraphInTab();
-          }
-        });
+        }
+        return;
       }
-    } else {
-      // Firefox MV3 fallback: open graph in a new tab
-      openGraphInTab();
+    } catch {
+      // Firefox fallback: open in tab
     }
+    // Firefox MV3 fallback: open graph in a new tab
+    openGraphInTab();
   });
 }
 

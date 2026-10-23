@@ -27,6 +27,7 @@ import { checkPolicyHardeningHeaders } from './headers/policy-hardening';
 import { checkCors } from './headers/cors';
 import { computeScore } from './scoring';
 import { checkDuplicateHeaders } from './utils';
+import { SCORE_VERSION } from '../shared/constants';
 
 export interface RuleInput {
   hops: Hop[];
@@ -59,29 +60,18 @@ export function runRules(input: RuleInput): RuleOutput {
   const { hops } = input;
   const emptySubdomainTrust: SubdomainTrustAnalysis = { hasEscalationPath: false, vectors: [] };
 
-  if (hops.length === 0) {
-    return {
-      findings: [],
-      score: 100,
-      grade: 'A',
-      qualityScore: 100,
-      qualityGrade: 'A',
-      breakdown: [],
-      scoreVersion: '',
-      subdomainTrust: emptySubdomainTrust,
-    };
-  }
+  const lastIndex = hops.length - 1;
+  const finalHop = lastIndex >= 0 ? hops[lastIndex] : undefined;
 
-  const finalHop = hops[hops.length - 1];
   if (finalHop === undefined) {
     return {
       findings: [],
-      score: 100,
-      grade: 'A',
-      qualityScore: 100,
-      qualityGrade: 'A',
+      score: 0,
+      grade: '?',
+      qualityScore: 0,
+      qualityGrade: '?',
       breakdown: [],
-      scoreVersion: '',
+      scoreVersion: SCORE_VERSION,
       subdomainTrust: emptySubdomainTrust,
     };
   }

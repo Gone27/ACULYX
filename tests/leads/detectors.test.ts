@@ -77,6 +77,62 @@ describe('Detector F1: Secrets', () => {
     const leads = detectSecrets(code, 'https://example.com/test.js', 'in-scope');
     expect(leads.filter(l => l.potential !== 'info')).toHaveLength(0);
   });
+
+  it('detects quoted JSON keys with template literals and special characters (quoted JSON gap fix)', () => {
+    const code = '{"password": "StagingSecretPassword2024!#.", "apiKey": "AIzaSyD-7abcdef1234567890abcdef12345678"}';
+    const leads = detectSecrets(code, 'https://example.com/config.json', 'in-scope');
+    const pwdLead = leads.find(l => l.ruleId === 'SEC-003');
+    expect(pwdLead).toBeDefined();
+    expect(pwdLead?.title).toContain('password');
+    const gcpLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('gcp'));
+    expect(gcpLead).toBeDefined();
+  });
+
+  it('detects OpenAI and Anthropic secret keys', () => {
+    const code = `
+      const openai = "sk-proj-1234567890abcdef1234567890abcdef1234567890abcdef";
+      const claude = "sk-ant-api03-1234567890abcdef1234567890abcdef123456";
+    `;
+    const leads = detectSecrets(code, 'https://example.com/ai.js', 'in-scope');
+    const oaiLead = leads.find(l => l.tags.includes('openai'));
+    expect(oaiLead).toBeDefined();
+    expect(oaiLead?.potential).toBe('critical');
+
+    const antLead = leads.find(l => l.tags.includes('anthropic'));
+    expect(antLead).toBeDefined();
+    expect(antLead?.potential).toBe('critical');
+  });
+
+  it('detects Telegram bot token and Discord incoming webhook', () => {
+    const code = `
+      const bot = "123456789:ABCdefGHIjklMNOpqrSTUvwxYZ123456789";
+      const hook = "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_-";
+    `;
+    const leads = detectSecrets(code, 'https://example.com/notify.js', 'in-scope');
+    const tgLead = leads.find(l => l.tags.includes('telegram'));
+    expect(tgLead).toBeDefined();
+    const dcLead = leads.find(l => l.tags.includes('discord'));
+    expect(dcLead).toBeDefined();
+  });
+
+  it('detects embedded basic authentication in URLs and Redis connection strings', () => {
+    const code = `
+      const url = "https://admin:SuperSecretPass123!@api.example.com/v1";
+      const redis = "redis://user:MyRedisSecretPassword@cache.internal.net:6379";
+    `;
+    const leads = detectSecrets(code, 'https://example.com/app.js', 'in-scope');
+    const basicLead = leads.find(l => l.tags.includes('basic-auth'));
+    expect(basicLead).toBeDefined();
+    const redisLead = leads.find(l => l.tags.includes('database'));
+    expect(redisLead).toBeDefined();
+  });
+
+  it('detects GOCSPX secrets even when ending in dash or underscore without trailing word boundary failure', () => {
+    const code = 'const clientSecret = "GOCSPX-1234567890abcdef1234567890ab-";';
+    const leads = detectSecrets(code, 'https://example.com/oauth.js', 'in-scope');
+    const gocspxLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('google'));
+    expect(gocspxLead).toBeDefined();
+  });
 });
 
 describe('Detector F2: Endpoints & Hidden Surface', () => {

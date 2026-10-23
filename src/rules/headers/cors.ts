@@ -21,6 +21,8 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
   const requestOrigin = (hop as ApiHop).requestOrigin;
   const fromCache = hop.fromCache === true;
 
+  const findings: Finding[] = [];
+
   // Case 1: Reflected Origin with credentials enabled
   // Known-safe configuration protection: Echoing the server's OWN same-origin origin is safe!
   // Only flag potential reflection if requestOrigin is cross-origin.
@@ -29,7 +31,7 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
     const isSameOrigin = hopOrigin !== null && hopOrigin.toLowerCase() === requestOrigin.toLowerCase();
 
     if (!isSameOrigin) {
-      return [{
+      findings.push({
         ruleId: 'CORS-001',
         category: 'cors',
         severity: 'medium',
@@ -44,13 +46,13 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
         limitations: fromCache
           ? ['Response served from browser cache; CORS reflection behavior may differ on live origin hit.']
           : ['Passive observation only; did not actively probe endpoint with forged Origin headers.'],
-      }];
+      });
     }
   }
 
   // Case 2: Origin "null" allowed
   if (lowerOrigin === 'null') {
-    return [{
+    findings.push({
       ruleId: 'CORS-001',
       category: 'cors',
       severity: credentials ? 'high' : 'medium',
@@ -66,12 +68,12 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
         'Passive observation of ACAO: null.',
         credentials ? 'Credentials allowed with null origin' : 'Ambient credentials disabled (ACAC not true)',
       ],
-    }];
+    });
   }
 
   // Case 3: Wildcard ACAO (informational observation without evidence of sensitivity)
   if (allowOrigin === '*') {
-    return [{
+    findings.push({
       ruleId: 'CORS-001',
       category: 'cors',
       severity: 'info',
@@ -87,8 +89,40 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
         'Passive observation: wildcard CORS is permissible for public endpoints, hazardous only for sensitive endpoints.',
         'Browsers reject credentialed requests (cookies/HTTP auth) when Access-Control-Allow-Origin is "*".',
       ],
-    }];
+    });
   }
 
-  return [];
+  // Case 4: Missing Vary: Origin when ACAO is dynamic or specific
+  // Only applies when allowOrigin is an explicit web origin (http/https), not wildcard or null,
+  // is not same-origin, and has not already been flagged as a direct CORS-001 vulnerability.
+  if (
+    allowOrigin !== '*' &&
+    lowerOrigin !== 'null' &&
+    (lowerOrigin.startsWith('http://') || lowerOrigin.startsWith('https://')) &&
+    !findings.some((f) => f.ruleId === 'CORS-001')
+  ) {
+    const hopOrigin = originFromUrl(hop.url);
+    const isSameOrigin = hopOrigin !== null && hopOrigin.toLowerCase() === lowerOrigin;
+    if (!isSameOrigin) {
+      const vary = hop.headers['vary']?.toLowerCase() ?? '';
+      if (!vary.includes('origin')) {
+        findings.push({
+          ruleId: 'CORS-002',
+          category: 'cors',
+          severity: 'low',
+          confidence: 'deterministic',
+          provenance: 'response-header',
+          outcome: fromCache ? 'partial-coverage' : 'fail',
+          title: 'CORS response specifies origin without "Vary: Origin"',
+          impact: 'Without Vary: Origin, intermediate caches or CDN proxies can cache responses generated for one origin and serve them to different origins, leading to cache poisoning or credentialed data exposure.',
+          evidence: sanitizeEvidence(`ACAO: ${allowOrigin}; Vary: ${vary || '(absent)'}`),
+          recommendation: 'Add "Vary: Origin" to the response headers whenever Access-Control-Allow-Origin is dynamically set based on the request Origin.',
+          reference: REF_CORS,
+          limitations: ['Passive header inspection.'],
+        });
+      }
+    }
+  }
+
+  return findings;
 }

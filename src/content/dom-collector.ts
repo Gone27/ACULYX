@@ -313,14 +313,16 @@ const ALLOWED_SINKS = new Set([
   'location.replace',
 ]);
 
-const MAX_MAIN_WORLD_EVENTS = 50; // Strict cap per page load
 let domCollectorInstalledInClosure = false;
 
 export function initDomCollector(): void {
   if (domCollectorInstalledInClosure) return;
   domCollectorInstalledInClosure = true;
 
-  let mainWorldEventCount = 0;
+  const eventCountsByType = new Map<string, number>();
+  const MAX_EVENTS_PER_TYPE = 25;
+  const MAX_TOTAL_MAIN_WORLD_EVENTS = 100;
+  let totalMainWorldEventCount = 0;
 
   interface RawMainWorldDetail {
     eventType?: unknown;
@@ -336,8 +338,8 @@ export function initDomCollector(): void {
   // Listen for S3 (Main World Hooks) CustomEvents and relay to background as untrusted with strict payload caps
   window.addEventListener('__ACULYX_MAIN_WORLD_EVENT__', (event: Event) => {
     try {
-      // 1. Strict event count cap
-      if (mainWorldEventCount >= MAX_MAIN_WORLD_EVENTS) return;
+      // 1. Strict event count cap (per-type and overall to prevent one event type blinding others)
+      if (totalMainWorldEventCount >= MAX_TOTAL_MAIN_WORLD_EVENTS) return;
 
       const customEvent = event as CustomEvent<unknown>;
       if (typeof customEvent.detail !== 'object' || customEvent.detail === null) return;
@@ -349,6 +351,9 @@ export function initDomCollector(): void {
       if (!['sink', 'postmessage_call', 'postmessage_listener', 'storage_write'].includes(eventType)) {
         return;
       }
+
+      const typeCount = eventCountsByType.get(eventType) ?? 0;
+      if (typeCount >= MAX_EVENTS_PER_TYPE) return;
 
       // 3. Validate sink payload
       if (eventType === 'sink') {
@@ -369,7 +374,8 @@ export function initDomCollector(): void {
         details: typeof detail.details === 'string' ? detail.details.slice(0, 256) : undefined,
       };
 
-      mainWorldEventCount++;
+      eventCountsByType.set(eventType, typeCount + 1);
+      totalMainWorldEventCount++;
 
       void chrome.runtime?.sendMessage?.({
         type: 'MAIN_WORLD_LEADS_EVENT',
@@ -381,6 +387,17 @@ export function initDomCollector(): void {
       // Ignore messaging errors
     }
   });
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleCollection(delayMs = 600): void {
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      performCollection();
+    }, delayMs);
+  }
 
   function performCollection(): void {
     try {
@@ -399,9 +416,54 @@ export function initDomCollector(): void {
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
     performCollection();
   } else {
-    window.addEventListener('DOMContentLoaded', performCollection, { once: true });
-    window.addEventListener('load', performCollection, { once: true });
+    window.addEventListener('DOMContentLoaded', () => performCollection(), { once: true });
+    window.addEventListener('load', () => performCollection(), { once: true });
   }
+
+  // MutationObserver for dynamic additions in SPAs (forms, scripts, iframes, meta tags)
+  if (typeof MutationObserver !== 'undefined') {
+    try {
+      const observer = new MutationObserver((mutations) => {
+        let shouldCollect = false;
+        for (const mut of mutations) {
+          if (mut.addedNodes.length > 0) {
+            for (const node of Array.from(mut.addedNodes)) {
+              if (node.nodeType === 1) { // Node.ELEMENT_NODE
+                const el = node as Element;
+                const tag = el.tagName;
+                if (
+                  tag === 'FORM' ||
+                  tag === 'SCRIPT' ||
+                  tag === 'IFRAME' ||
+                  tag === 'META' ||
+                  tag === 'A' ||
+                  (el.firstElementChild !== null && el.querySelector?.('form, script, iframe, meta') !== null)
+                ) {
+                  shouldCollect = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (shouldCollect) break;
+        }
+        if (shouldCollect) {
+          scheduleCollection(600);
+        }
+      });
+
+      const root = document.documentElement ?? document.body;
+      if (root !== null && root !== undefined) {
+        observer.observe(root, { childList: true, subtree: true });
+      }
+    } catch {
+      // MutationObserver initialization error swallowed
+    }
+  }
+
+  // SPA navigation events
+  window.addEventListener('popstate', () => scheduleCollection(300));
+  window.addEventListener('hashchange', () => scheduleCollection(300));
 }
 
 // Automatically initialize when running as content script

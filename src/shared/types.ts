@@ -4,7 +4,7 @@ export type { ScopeStatus, ScopeProfile, ScopeRule };
 // ─── Core enumerations ────────────────────────────────────────────────────────
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'pass';
-export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
+export type Grade = 'A' | 'B' | 'C' | 'D' | 'F' | '?';
 export type Category = 'header' | 'cookie' | 'transport' | 'cors';
 export type CapturePoint = 'onHeadersReceived' | 'onResponseStarted';
 export type MonitoringMode = 'per-site' | 'all-sites' | 'off';
@@ -67,6 +67,8 @@ export interface Hop {
   redirectCount?: number;
   /** Navigation generation counter for the owning tab. */
   generation?: number;
+  /** True when captured from a sub-frame (iframe). */
+  isSubFrame?: boolean;
 }
 
 // ─── Cookies ──────────────────────────────────────────────────────────────────

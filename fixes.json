@@ -47,6 +47,16 @@
       "snippet": "script-src 'self' https://static.example.com",
       "note": "Use only origins that the application actually requires."
     },
+    "CSP-004D": {
+      "summary": "Remove the data: scheme from script execution sources.",
+      "snippet": "Content-Security-Policy: default-src 'self'; script-src 'self'",
+      "note": "The data: URI scheme permits arbitrary inline script execution and completely defeats CSP script execution controls."
+    },
+    "CSP-NONCE-001": {
+      "summary": "Use cryptographically random nonces with at least 128 bits of entropy.",
+      "snippet": "script-src 'self' 'nonce-<16+-base64-random-chars>'",
+      "note": "Short or predictable nonces can be brute-forced or guessed by attackers."
+    },
     "CSP-005": {
       "summary": "Restrict which origins can frame this page.",
       "snippet": "frame-ancestors 'self'",
@@ -109,6 +119,11 @@
       "summary": "Replace the CORS wildcard with an explicit origin allowlist.",
       "snippet": "Access-Control-Allow-Origin: https://trusted.example.com",
       "note": "Validate the request Origin header server-side against a fixed allowlist; do not reflect arbitrary origins."
+    },
+    "CORS-002": {
+      "summary": "Add Vary: Origin header to responses with dynamic or explicit CORS origins.",
+      "snippet": "Vary: Origin",
+      "note": "Without Vary: Origin, intermediate caches may serve responses generated for one origin to another origin."
     },
     "PERMPOLICY-001": {
       "summary": "Restrict sensitive browser features to explicit origins.",
@@ -262,6 +277,16 @@
       "summary": "Fix the cookie attributes to match what its name prefix requires.",
       "snippet": "Set-Cookie: __Host-session=<value>; Path=/; Secure; HttpOnly\nSet-Cookie: __Secure-session=<value>; Secure",
       "note": "__Host- requires Secure, HttpOnly, Path=/, and no Domain attribute. __Secure- requires Secure. Browser will reject the cookie if requirements are not met."
+    },
+    "COOK-008": {
+      "summary": "Limit session cookie lifetime to reasonable operational windows.",
+      "snippet": "Set-Cookie: <name>=<value>; Max-Age=2592000; Path=/; Secure; HttpOnly",
+      "note": "Persistent session cookies lasting more than one year increase the window of vulnerability for stolen credentials."
+    },
+    "COOK-009": {
+      "summary": "Avoid SameSite=None on sensitive authentication and session cookies.",
+      "snippet": "Set-Cookie: <name>=<value>; SameSite=Lax; Path=/; Secure; HttpOnly",
+      "note": "SameSite=None attaches cookies to third-party cross-site requests, exposing authenticated endpoints to CSRF attacks."
     },
     "SRI-001": {
       "summary": "Add Subresource Integrity attributes to external scripts.",

@@ -122,7 +122,8 @@ function checkSameSiteMissing(cookie: CookieRecord): Finding | null {
 }
 
 function checkHostPrefix(cookie: CookieRecord): Finding | null {
-  if (!cookie.name.startsWith('__Host-')) return null;
+  const lowerName = cookie.name.toLowerCase();
+  if (!lowerName.startsWith('__host-')) return null;
   const violations: string[] = [];
   if (!cookie.secure) violations.push('Secure flag missing');
   if (cookie.path !== '/') violations.push(`Path is "${cookie.path}" (must be /)`);
@@ -147,7 +148,8 @@ function checkHostPrefix(cookie: CookieRecord): Finding | null {
 }
 
 function checkSecurePrefix(cookie: CookieRecord): Finding | null {
-  if (!cookie.name.startsWith('__Secure-')) return null;
+  const lowerName = cookie.name.toLowerCase();
+  if (!lowerName.startsWith('__secure-')) return null;
   if (cookie.secure) return null;
   return {
     ruleId: 'COOK-006',
@@ -166,8 +168,9 @@ function checkSecurePrefix(cookie: CookieRecord): Finding | null {
 }
 
 function checkHttpPrefix(cookie: CookieRecord): Finding | null {
-  const hostHttp = cookie.name.startsWith('__Host-Http-');
-  const http = hostHttp || cookie.name.startsWith('__Http-');
+  const lowerName = cookie.name.toLowerCase();
+  const hostHttp = lowerName.startsWith('__host-http-');
+  const http = hostHttp || lowerName.startsWith('__http-');
   if (!http) return null;
   const violations: string[] = [];
   if (!cookie.secure) violations.push('Secure flag missing');
@@ -195,6 +198,63 @@ function checkHttpPrefix(cookie: CookieRecord): Finding | null {
   };
 }
 
+function checkLongLivedSessionCookie(
+  cookie: CookieRecord,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): Finding | null {
+  const { isSensitive } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
+  if (!isSensitive) return null;
+  if (cookie.session || cookie.expiresAt === null) return null;
+
+  // Excessively long duration (> 1 year = 31536000s)
+  const maxSessionDurationMs = 365 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  if (cookie.expiresAt - now > maxSessionDurationMs) {
+    return {
+      ruleId: 'COOK-008',
+      category: 'cookie',
+      severity: 'low',
+      confidence: 'heuristic',
+      provenance: 'cookie-metadata',
+      outcome: 'fail',
+      title: `Sensitive session cookie "${sanitizeEvidence(cookie.name)}" has excessively long expiration`,
+      impact: 'Persistent authentication tokens valid for more than 1 year increase the window of opportunity for stolen session reuse and token harvesting.',
+      evidence: sanitizeEvidence(`Expiry: ${new Date(cookie.expiresAt).toISOString()}`),
+      recommendation: 'Configure reasonable session expirations (e.g. 1-30 days) with explicit idle timeouts and token rotation.',
+      reference: REF_COOKIES,
+      limitations: ['Passive metadata inspection; sensitivity inferred from cookie name.'],
+    };
+  }
+  return null;
+}
+
+function checkSameSiteNoneOnSensitive(
+  cookie: CookieRecord,
+  alwaysSensitive: string[] = [],
+  alwaysIgnore: string[] = []
+): Finding | null {
+  if (cookie.sameSite !== 'none') return null;
+  const { isSensitive } = isSensitiveCookie(cookie.name, alwaysSensitive, alwaysIgnore);
+  if (!isSensitive) return null;
+  if (!cookie.secure) return null; // Already caught with high severity by COOK-003
+
+  return {
+    ruleId: 'COOK-009',
+    category: 'cookie',
+    severity: 'medium',
+    confidence: 'heuristic',
+    provenance: 'cookie-metadata',
+    outcome: 'fail',
+    title: `Sensitive authentication cookie "${sanitizeEvidence(cookie.name)}" uses SameSite=None`,
+    impact: 'SameSite=None causes the browser to send this sensitive authentication cookie with every third-party cross-site request, exposing authenticated endpoints to Cross-Site Request Forgery (CSRF).',
+    evidence: sanitizeEvidence(`SameSite=None; Secure=${cookie.secure}`),
+    recommendation: 'Change SameSite to Strict or Lax for sensitive authentication and session cookies. Use Partitioned (CHIPS) if cross-site iframe embedding is legitimate.',
+    reference: REF_SAMESITE,
+    limitations: ['Passive metadata inspection.'],
+  };
+}
+
 export function checkCookies(
   cookies: CookieRecord[],
   isHttps: boolean,
@@ -204,21 +264,25 @@ export function checkCookies(
   const findings: Finding[] = [];
 
   for (const cookie of cookies) {
-    const secure   = checkSecure(cookie, isHttps, alwaysSensitive, alwaysIgnore);
-    const httpOnly = checkHttpOnly(cookie, alwaysSensitive, alwaysIgnore);
-    const sameNone = checkSameSiteNone(cookie);
-    const sameMiss = checkSameSiteMissing(cookie);
-    const host     = checkHostPrefix(cookie);
-    const secPfx   = checkSecurePrefix(cookie);
-    const httpPfx  = checkHttpPrefix(cookie);
+    const secure    = checkSecure(cookie, isHttps, alwaysSensitive, alwaysIgnore);
+    const httpOnly  = checkHttpOnly(cookie, alwaysSensitive, alwaysIgnore);
+    const sameNone  = checkSameSiteNone(cookie);
+    const sameMiss  = checkSameSiteMissing(cookie);
+    const host      = checkHostPrefix(cookie);
+    const secPfx    = checkSecurePrefix(cookie);
+    const httpPfx   = checkHttpPrefix(cookie);
+    const longLived = checkLongLivedSessionCookie(cookie, alwaysSensitive, alwaysIgnore);
+    const ssNoneSens = checkSameSiteNoneOnSensitive(cookie, alwaysSensitive, alwaysIgnore);
 
-    if (secure   !== null) findings.push(secure);
-    if (httpOnly !== null) findings.push(httpOnly);
-    if (sameNone !== null) findings.push(sameNone);
-    if (sameMiss !== null) findings.push(sameMiss);
-    if (host     !== null) findings.push(host);
-    if (secPfx   !== null) findings.push(secPfx);
-    if (httpPfx  !== null) findings.push(httpPfx);
+    if (secure    !== null) findings.push(secure);
+    if (httpOnly  !== null) findings.push(httpOnly);
+    if (sameNone  !== null) findings.push(sameNone);
+    if (sameMiss  !== null) findings.push(sameMiss);
+    if (host      !== null) findings.push(host);
+    if (secPfx    !== null) findings.push(secPfx);
+    if (httpPfx   !== null) findings.push(httpPfx);
+    if (longLived !== null) findings.push(longLived);
+    if (ssNoneSens !== null) findings.push(ssNoneSens);
   }
 
   return findings;

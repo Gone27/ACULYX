@@ -102,4 +102,22 @@ describe('checkCors', () => {
     expect(scoreResult.score).toBe(100);
     expect(scoreResult.grade).toBe('A');
   });
+
+  it('flags CORS-002 when explicit cross-origin is allowed without Vary: Origin', () => {
+    const apiHop = {
+      ...makeHop({
+        'access-control-allow-origin': 'https://trusted-partner.com',
+        'content-type': 'application/json',
+      }),
+      tabId: 1,
+      normalizedPath: 'https://example.com/api/data',
+      method: 'GET',
+      requestOrigin: 'https://other.com',
+    };
+    const findings = checkCors(apiHop);
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.ruleId).toBe('CORS-002');
+    expect(findings[0]?.severity).toBe('low');
+    expect(findings[0]?.title).toContain('Vary: Origin');
+  });
 });

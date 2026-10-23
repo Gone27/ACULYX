@@ -286,14 +286,26 @@ describe('ACULYX CLI report', () => {
       expect(isPrivateOrLocalHost('metadata.google.internal')).toBe(true);
       expect(isPrivateOrLocalHost('[::1]')).toBe(true);
       expect(isPrivateOrLocalHost('::1')).toBe(true);
+      expect(isPrivateOrLocalHost('[::ffff:7f00:1]')).toBe(true);
+      expect(isPrivateOrLocalHost('[::]')).toBe(true);
+      expect(isPrivateOrLocalHost('::')).toBe(true);
+      expect(isPrivateOrLocalHost('100.64.0.1')).toBe(true);
+      expect(isPrivateOrLocalHost('localtest.me')).toBe(true);
+      expect(isPrivateOrLocalHost('sub.localtest.me')).toBe(true);
+      expect(isPrivateOrLocalHost('127.0.0.1.nip.io')).toBe(true);
+      expect(isPrivateOrLocalHost('app.sslip.io')).toBe(true);
     });
 
-    it('identifies public internet hostnames and IPs as non-private', () => {
+    it('identifies public internet hostnames and IPs as non-private (including fc/fd domains)', () => {
       expect(isPrivateOrLocalHost('example.com')).toBe(false);
       expect(isPrivateOrLocalHost('google.com')).toBe(false);
       expect(isPrivateOrLocalHost('93.184.216.34')).toBe(false);
       expect(isPrivateOrLocalHost('1.1.1.1')).toBe(false);
       expect(isPrivateOrLocalHost('8.8.8.8')).toBe(false);
+      expect(isPrivateOrLocalHost('fcc.gov')).toBe(false);
+      expect(isPrivateOrLocalHost('fda.gov')).toBe(false);
+      expect(isPrivateOrLocalHost('fdic.gov')).toBe(false);
+      expect(isPrivateOrLocalHost('fc2.com')).toBe(false);
     });
   });
 });

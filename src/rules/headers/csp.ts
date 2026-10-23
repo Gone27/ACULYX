@@ -148,10 +148,10 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
       findings.push({
         ruleId: 'CSP-009',
         category: 'header',
-        severity: 'info',
+        severity: 'medium',
         confidence: 'heuristic',
         provenance: 'response-header',
-        outcome: 'pass',
+        outcome: fromCache ? 'partial-coverage' : 'fail',
         title: 'CSP script-src trusts host(s) with historically bypass-prone endpoints or libraries',
         impact:
           'Some allowlisted hosts expose JSONP endpoints or host libraries with script gadgets; actual exploitability depends on endpoint path and version.',
@@ -161,6 +161,50 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
         reference: 'https://csp-evaluator.withgoogle.com/',
         limitations: ['Passive heuristic analysis only; presence of domain does not verify an active JSONP or gadget endpoint.'],
       });
+    }
+
+    // Check for 'data:' scheme in script-src
+    const tokens = sourceTokens(effectiveScriptSrc);
+    if (tokens.includes('data:') || tokens.includes('data;')) {
+      findings.push({
+        ruleId: 'CSP-004D',
+        category: 'header',
+        severity: 'medium',
+        confidence: 'deterministic',
+        provenance: 'response-header',
+        outcome: fromCache ? 'partial-coverage' : 'fail',
+        title: "CSP script-src contains 'data:' scheme source",
+        impact: "The 'data:' scheme allows arbitrary script execution via data URIs, completely undermining CSP script execution controls.",
+        evidence: sanitizeEvidence(effectiveScriptSrc),
+        recommendation: "Remove 'data:' from script-src and default-src directives.",
+        reference: REFERENCE,
+        limitations: fromCache ? ['Response served from cache.'] : ['Passive policy inspection.'],
+      });
+    }
+
+    // Check for short or predictable nonces (< 16 chars)
+    const nonceMatches = effectiveScriptSrc.match(/'nonce-([A-Za-z0-9+/=_-]+)'/gi);
+    if (nonceMatches) {
+      for (const nm of nonceMatches) {
+        const nonceVal = nm.replace(/^'nonce-|'$/gi, '');
+        if (nonceVal.length < 16) {
+          findings.push({
+            ruleId: 'CSP-NONCE-001',
+            category: 'header',
+            severity: 'medium',
+            confidence: 'deterministic',
+            provenance: 'response-header',
+            outcome: fromCache ? 'partial-coverage' : 'fail',
+            title: 'CSP script-src nonce is too short / predictable',
+            impact: 'A nonce with insufficient entropy (< 128 bits / 16 chars) can be brute-forced or guessed by an attacker to execute unauthorized scripts.',
+            evidence: sanitizeEvidence(`nonce length: ${nonceVal.length}`),
+            recommendation: 'Generate cryptographically random nonces with at least 128 bits of entropy (e.g. 16+ base64 characters).',
+            reference: REFERENCE,
+            limitations: ['Passive header inspection.'],
+          });
+          break;
+        }
+      }
     }
 
     if (effectiveScriptSrc.includes("'unsafe-inline'")) {

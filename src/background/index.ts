@@ -248,10 +248,12 @@ export const settingsReady = SettingsService.whenReady().then(async (s) => {
   currentSettings = s;
   settingsTransitionPipeline.setLastAppliedSettings(s);
   await CapturePolicy.refreshSnapshot();
+  void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true);
   return s;
 });
 SettingsService.onSettingsChanged((s) => {
   currentSettings = s;
+  void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true);
 });
 
 // Session hydration barrier (MV3 recovery)
@@ -958,35 +960,75 @@ registerParamHarvester((url, paramNames, tabId, isIncognito) => {
   }
 });
 
-// S2 & S3: Navigation completion leads collector injection
+const S3_SCRIPT_ID = 'aculyx-s3-main-world';
+
+async function syncS3ScriptRegistration(enabled: boolean): Promise<void> {
+  const chromeWithScripting = chrome as unknown as { scripting?: typeof chrome.scripting };
+  if (typeof chromeWithScripting.scripting?.registerContentScripts !== 'function') return;
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [S3_SCRIPT_ID] });
+    if (existing.length > 0) {
+      await chrome.scripting.unregisterContentScripts({ ids: [S3_SCRIPT_ID] });
+    }
+    if (enabled && currentSettings.leadsEnabled === true) {
+      await chrome.scripting.registerContentScripts([
+        {
+          id: S3_SCRIPT_ID,
+          matches: ['http://*/*', 'https://*/*'],
+          js: ['content/main-world-hooks.js'],
+          runAt: 'document_start',
+          world: 'MAIN',
+          allFrames: true,
+        },
+      ]);
+    }
+  } catch {
+    // Graceful handling of dynamic content script registration
+  }
+}
+
+function injectLeadsCollectors(tabId: number, url: string): void {
+  if (tabId < 0) return;
+  if (currentSettings.leadsEnabled !== true) return;
+  if (isRestrictedUrl(url)) return;
+  if (typeof chrome.scripting === 'undefined') return;
+
+  void chrome.scripting
+    .executeScript({
+      target: { tabId, allFrames: true },
+      files: ['content/dom-collector.js'],
+    })
+    .catch((err: unknown) => {
+      sensorInjectionFailures.s2++;
+      // eslint-disable-next-line no-console
+      console.warn(`[ACULYX] S2 dom-collector injection failed for tab ${tabId} (total failures: ${sensorInjectionFailures.s2}):`, err);
+    });
+
+  if (currentSettings.deepModeEnabled === true) {
+    void chrome.scripting
+      .executeScript({
+        target: { tabId, allFrames: true },
+        world: 'MAIN',
+        files: ['content/main-world-hooks.js'],
+      })
+      .catch((err: unknown) => {
+        sensorInjectionFailures.s3++;
+        // eslint-disable-next-line no-console
+        console.warn(`[ACULYX] S3 main-world-hooks injection failed for tab ${tabId} (total failures: ${sensorInjectionFailures.s3}):`, err);
+      });
+  }
+}
+
+// S2 & S3: Navigation completion and history-state updates (SPAs) leads collector injection across all frames
 if (typeof chrome.webNavigation?.onCompleted?.addListener === 'function') {
   chrome.webNavigation.onCompleted.addListener((details): void => {
-    if (details.frameId !== 0 || details.tabId < 0) return;
-    if (currentSettings.leadsEnabled !== true) return;
-    if (isRestrictedUrl(details.url)) return;
+    injectLeadsCollectors(details.tabId, details.url);
+  });
+}
 
-    if (typeof chrome.scripting !== 'undefined') {
-      void chrome.scripting.executeScript({
-        target: { tabId: details.tabId, frameIds: [0] },
-        files: ['content/dom-collector.js'],
-      }).catch((err: unknown) => {
-        sensorInjectionFailures.s2++;
-        // eslint-disable-next-line no-console
-        console.warn(`[ACULYX] S2 dom-collector injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s2}):`, err);
-      });
-
-      if (currentSettings.deepModeEnabled === true) {
-        void chrome.scripting.executeScript({
-          target: { tabId: details.tabId, frameIds: [0] },
-          world: 'MAIN',
-          files: ['content/main-world-hooks.js'],
-        }).catch((err: unknown) => {
-          sensorInjectionFailures.s3++;
-          // eslint-disable-next-line no-console
-          console.warn(`[ACULYX] S3 main-world-hooks injection failed for tab ${details.tabId} (total failures: ${sensorInjectionFailures.s3}):`, err);
-        });
-      }
-    }
+if (typeof chrome.webNavigation?.onHistoryStateUpdated?.addListener === 'function') {
+  chrome.webNavigation.onHistoryStateUpdated.addListener((details): void => {
+    injectLeadsCollectors(details.tabId, details.url);
   });
 }
 
