@@ -254,7 +254,7 @@ export function migrateSettings(raw: unknown): SettingsV2 {
 
   const leadsEnabled: boolean = typeof obj.leadsEnabled === 'boolean'
     ? obj.leadsEnabled
-    : (DEFAULT_SETTINGS.leadsEnabled ?? false);
+    : (DEFAULT_SETTINGS.leadsEnabled ?? true);
 
   const deepModeEnabled: boolean = typeof obj.deepModeEnabled === 'boolean'
     ? obj.deepModeEnabled

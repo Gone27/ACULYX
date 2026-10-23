@@ -138,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
    Section router
    ================================================================ */
 
-const SECTION_IDS = ['home', 'monitoring', 'findings', 'cookies', 'history', 'scope', 'appearance', 'advanced', 'about'];
+const SECTION_IDS = ['home', 'monitoring', 'findings', 'cookies', 'history', 'scope', 'leads', 'appearance', 'advanced', 'about'];
 
 function navigateToSection(target: string): void {
   if (isDirty) {
@@ -240,6 +240,16 @@ async function refreshHomeView(): Promise<void> {
     'off': 'Off',
   };
   modeEl.textContent = modeLabels[settings.monitoringMode] ?? settings.monitoringMode;
+
+  const leadsEl = document.getElementById('home-leads-value');
+  if (leadsEl) {
+    leadsEl.textContent = settings.leadsEnabled === true ? 'Active' : 'Disabled';
+    if (settings.leadsEnabled === true) {
+      leadsEl.classList.add('home-card-value--accent');
+    } else {
+      leadsEl.classList.remove('home-card-value--accent');
+    }
+  }
 
   // Permissions coverage
   let permText = '—';

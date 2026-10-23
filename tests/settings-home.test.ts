@@ -176,7 +176,7 @@ describe('Home navigation cards & unsaved changes guard', () => {
     const html = fs.readFileSync(htmlPath, 'utf-8');
 
     expect(html).toContain('id="home-callout-action"');
-    const expectedCards = ['monitoring', 'findings', 'cookies', 'history', 'appearance', 'advanced'];
+    const expectedCards = ['monitoring', 'findings', 'cookies', 'history', 'scope', 'leads', 'appearance', 'advanced'];
     for (const card of expectedCards) {
       expect(html).toContain(`data-goto="${card}"`);
     }
@@ -257,4 +257,32 @@ describe('Home navigation cards & unsaved changes guard', () => {
     navigateToSection('monitoring');
     expect(navigatedTo).toBe('monitoring');
   });
+
+  it('verifies that options.ts SECTION_IDS includes leads and all sections exist in options.html', () => {
+    const tsPath = path.resolve(__dirname, '../src/options/options.ts');
+    const ts = fs.readFileSync(tsPath, 'utf-8');
+    const htmlPath = path.resolve(__dirname, '../src/options/options.html');
+    const html = fs.readFileSync(htmlPath, 'utf-8');
+
+    const sectionIdsMatch = ts.match(/const SECTION_IDS = \[([^\]]+)\]/);
+    expect(sectionIdsMatch).not.toBeNull();
+    const rawIds = sectionIdsMatch ? sectionIdsMatch[1] ?? '' : '';
+    const sectionIds = rawIds.split(',').map((s) => s.trim().replace(/['"]/g, ''));
+
+    expect(sectionIds).toContain('leads');
+    expect(sectionIds).toContain('scope');
+    expect(sectionIds).toContain('home');
+
+    // Every section in SECTION_IDS must exist in options.html as an id="section-{id}"
+    for (const id of sectionIds) {
+      expect(html).toContain(`id="section-${id}"`);
+    }
+
+    // Every nav item in options.html must be in SECTION_IDS
+    const navSectionMatches = html.matchAll(/data-section="([^"]+)"/g);
+    for (const match of navSectionMatches) {
+      expect(sectionIds).toContain(match[1]);
+    }
+  });
 });
+

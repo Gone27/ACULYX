@@ -657,10 +657,10 @@ export function getLeadsState(
 ): LeadStateUpdateMessage {
   let leads: Lead[] = [];
 
-  if (typeof origin === 'string' && origin.length > 0) {
-    leads = globalLeadStore.getLeadsForOrigin(origin);
-  } else if (tabId !== undefined && tabId >= 0) {
+  if (tabId !== undefined && tabId >= 0) {
     leads = globalLeadStore.getLeadsForTab(tabId, typeof origin === 'string' && origin.length > 0 ? origin : '');
+  } else if (typeof origin === 'string' && origin.length > 0) {
+    leads = globalLeadStore.getLeadsForOrigin(origin);
   } else {
     leads = globalLeadStore.getAllLeads();
   }

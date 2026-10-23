@@ -795,7 +795,7 @@ body {
 
 .home-card {
   flex: 1;
-  min-width: 160px;
+  min-width: 130px;
   background: var(--sc-bg-card, var(--bg-card));
   border: 1px solid var(--sc-border, var(--border));
   border-radius: var(--sc-radius-lg);

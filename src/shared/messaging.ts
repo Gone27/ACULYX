@@ -221,6 +221,18 @@ export interface DevToolsLeadsCollectedMessage {
   leads: import('../leads/types').Lead[];
 }
 
+export interface TriggerLeadsScanMessage {
+  type: 'TRIGGER_LEADS_SCAN';
+  tabId: number;
+  url: string;
+}
+
+export interface TriggerLeadsScanResponse {
+  type?: 'TRIGGER_LEADS_SCAN_RESPONSE';
+  success: boolean;
+  error?: string;
+}
+
 /** All messages that cross the service worker ↔ UI boundary. */
 export type ExtensionMessage =
   | TabStateUpdateMessage
@@ -250,7 +262,9 @@ export type ExtensionMessage =
   | ReconResetResponse
   | HunterRunProbeMessage
   | HunterRunProbeResponse
-  | DevToolsLeadsCollectedMessage;
+  | DevToolsLeadsCollectedMessage
+  | TriggerLeadsScanMessage
+  | TriggerLeadsScanResponse;
 
 // ─── Port registry ────────────────────────────────────────────────────────────
 

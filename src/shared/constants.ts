@@ -104,7 +104,7 @@ export const DEFAULT_SETTINGS: SettingsV2 = {
   theme: 'system',
   density: 'comfortable',
   reducedMotion: 'system',
-  leadsEnabled: false,
+  leadsEnabled: true,
   deepModeEnabled: false,
   hunterConfig: {
     enabled: false,

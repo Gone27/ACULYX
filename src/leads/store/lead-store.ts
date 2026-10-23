@@ -291,17 +291,29 @@ export class LeadStore {
 
   public getLeadsForTab(tabId: number, origin: string): Lead[] {
     const tabLeadIds = this.tabToLeads.get(tabId);
-    if (!tabLeadIds) {
-      return this.getLeadsForOrigin(origin);
-    }
-
+    const seen = new Set<string>();
     const result: Lead[] = [];
-    for (const id of tabLeadIds) {
-      const lead = this.leadById.get(id);
-      if (lead && lead.origin === origin) {
-        result.push(lead);
+
+    if (tabLeadIds !== undefined && tabLeadIds.size > 0) {
+      for (const id of tabLeadIds) {
+        const lead = this.leadById.get(id);
+        if (lead !== undefined) {
+          result.push(lead);
+          seen.add(lead.id);
+        }
       }
     }
+
+    if (origin.length > 0) {
+      const originList = this.originLeads.get(origin) ?? [];
+      for (const lead of originList) {
+        if (!seen.has(lead.id)) {
+          result.push(lead);
+          seen.add(lead.id);
+        }
+      }
+    }
+
     return result;
   }
 

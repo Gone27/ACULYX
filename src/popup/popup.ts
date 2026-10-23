@@ -110,6 +110,8 @@ let activeDrawerFinding: Finding | null = null;
 
 /** The tab ID currently being inspected by the popup. */
 let currentTabId: number | null = null;
+/** The active tab full URL. */
+let currentTabUrl: string = '';
 /** The normalised origin (scheme + host + port) of the active tab. */
 let currentOrigin: string = '';
 /** Last full TabState received — used by the export function. */
@@ -360,6 +362,7 @@ async function initPopup(): Promise<void> {
   }
 
   currentTabId = tab.id;
+  currentTabUrl = tab.url;
 
   const settings = await SettingsService.getSettings();
   currentSettings = settings;
@@ -437,6 +440,9 @@ async function initPopup(): Promise<void> {
   }
 
   openLivePort();
+  if (currentSettings?.leadsEnabled === true) {
+    void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl }).catch(() => undefined);
+  }
   void refreshLeads();
 }
 
@@ -1812,6 +1818,9 @@ function wireSegmentedControl(): void {
     leadsView.hidden = false;
     hygieneView.hidden = true;
     renderRadarBase();
+    if (currentSettings?.leadsEnabled === true && currentTabId !== null && currentTabUrl.length > 0) {
+      void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl }).catch(() => undefined);
+    }
     void refreshLeads();
   });
 }
@@ -1953,6 +1962,75 @@ function renderLeadsTab(leads: Lead[]): void {
   if (leads.length === 0) {
     leadsEmptyState.hidden = false;
     leadsCardList.hidden = true;
+    while (leadsEmptyState.firstChild) {
+      leadsEmptyState.removeChild(leadsEmptyState.firstChild);
+    }
+
+    const icon = document.createElement('span');
+    icon.className = 'empty-icon';
+    const title = document.createElement('p');
+    title.className = 'empty-title';
+    const desc = document.createElement('p');
+    desc.className = 'empty-desc';
+
+    if (currentSettings !== null && currentSettings.leadsEnabled === false) {
+      icon.textContent = '⚙️';
+      title.textContent = 'Lead Radar is Disabled';
+      desc.textContent = 'Passive vulnerability discovery and recon intelligence are turned off in Settings.';
+      const enableBtn = document.createElement('button');
+      enableBtn.type = 'button';
+      enableBtn.className = 'btn-primary btn-sm';
+      enableBtn.style.marginTop = '12px';
+      enableBtn.style.cursor = 'pointer';
+      enableBtn.textContent = 'Enable Lead Radar';
+      enableBtn.addEventListener('click', () => {
+        void (async () => {
+          enableBtn.disabled = true;
+          enableBtn.textContent = 'Enabling…';
+          if (currentSettings !== null) {
+            currentSettings.leadsEnabled = true;
+            await SettingsService.updateSettings(currentSettings);
+            await sendToBackground({ type: 'SETTINGS_CHANGED', settings: currentSettings });
+          }
+          if (currentTabId !== null && currentTabUrl.length > 0) {
+            void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl });
+          }
+          void refreshLeads();
+        })();
+      });
+      leadsEmptyState.appendChild(icon);
+      leadsEmptyState.appendChild(title);
+      leadsEmptyState.appendChild(desc);
+      leadsEmptyState.appendChild(enableBtn);
+    } else {
+      icon.textContent = '📡';
+      title.textContent = 'No leads detected on this origin';
+      desc.textContent = 'Monitoring passive traffic, scripts, DOM sinks, and endpoints in real-time…';
+      const scanBtn = document.createElement('button');
+      scanBtn.type = 'button';
+      scanBtn.className = 'btn-secondary btn-sm';
+      scanBtn.style.marginTop = '12px';
+      scanBtn.style.cursor = 'pointer';
+      scanBtn.textContent = '🔍 Scan DOM Now';
+      scanBtn.addEventListener('click', () => {
+        void (async () => {
+          scanBtn.disabled = true;
+          scanBtn.textContent = 'Scanning…';
+          if (currentTabId !== null && currentTabUrl.length > 0) {
+            await sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl });
+          }
+          setTimeout(() => {
+            void refreshLeads();
+            scanBtn.disabled = false;
+            scanBtn.textContent = '🔍 Scan DOM Now';
+          }, 600);
+        })();
+      });
+      leadsEmptyState.appendChild(icon);
+      leadsEmptyState.appendChild(title);
+      leadsEmptyState.appendChild(desc);
+      leadsEmptyState.appendChild(scanBtn);
+    }
     return;
   }
 

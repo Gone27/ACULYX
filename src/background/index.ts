@@ -30,6 +30,8 @@ import {
   handleHunterProbe,
   resolveScopeStatus,
 } from './leads-handler';
+import { detectHeaderLeads } from '../leads/detectors/f6-headers';
+import { detectParamLeads } from '../leads/detectors/f5-params';
 import { getReconMemory, clearReconMemory, globalLeadStore, clearHunterLedger } from '../leads';
 import { runRules, runApiRules } from '../rules/engine';
 import { ScopeEngine } from '../shared/scope/engine';
@@ -898,6 +900,23 @@ export async function onHopComplete(
       ]),
     );
     state.captureFindings = [...captureFindingMap.values()];
+
+    // 5b. Lead Radar detection for response headers and query parameters
+    if (currentSettings.leadsEnabled === true && state.isIncognito !== true && !incognitoTabIds.has(tabId)) {
+      const scopeStatus = resolveScopeStatus(hop.url, currentSettings);
+      const headerLeads = detectHeaderLeads(hop.headers, hop.url, state.origin, scopeStatus);
+      for (const lead of headerLeads) {
+        globalLeadStore.addLead(lead, tabId);
+      }
+      const paramLeads = detectParamLeads(hop.url, scopeStatus);
+      for (const lead of paramLeads) {
+        globalLeadStore.addLead(lead, tabId);
+      }
+      if (headerLeads.length > 0 || paramLeads.length > 0) {
+        const leadState = getLeadsState(tabId, state.origin);
+        portRegistry.broadcast(tabId, leadState);
+      }
+    }
 
     // 6. Recompute evaluation from the canonical tab state.
     recomputeTabState(tabId, state, actionEpoch);
@@ -1953,6 +1972,20 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
+    if (message.type === 'TRIGGER_LEADS_SCAN') {
+      if (!isExtensionInternalSender(_sender) || _sender.tab !== undefined) {
+        sendResponse({ success: false, error: 'Unauthorized sender' });
+        return false;
+      }
+      const targetTabId = message.tabId;
+      const targetUrl = message.url;
+      if (typeof targetTabId === 'number' && targetTabId >= 0 && typeof targetUrl === 'string' && targetUrl.length > 0) {
+        injectLeadsCollectors(targetTabId, targetUrl);
+      }
+      sendResponse({ success: true });
+      return false;
+    }
+
     if (message.type === 'RECON_GET') {
       if (!isExtensionInternalSender(_sender) || _sender.tab !== undefined) {
         sendResponse({ type: 'RECON_GET_RESPONSE', memory: { hosts: [], params: [], endpoints: [], buckets: [] } });
@@ -2106,6 +2139,18 @@ registerCaptureListeners(
         timestamp: apiHop.timestamp ?? Date.now(),
         notes: `${apiHop.method} ${apiHop.isThirdParty === true ? '(third-party)' : '(first-party)'}`,
       });
+
+      if (currentSettings.leadsEnabled === true && state.isIncognito !== true && !incognitoTabIds.has(tabId)) {
+        const scopeStatus = resolveScopeStatus(apiHop.url, currentSettings);
+        const headerLeads = detectHeaderLeads(apiHop.headers, apiHop.url, state.origin, scopeStatus);
+        for (const lead of headerLeads) {
+          globalLeadStore.addLead(lead, tabId);
+        }
+        if (headerLeads.length > 0) {
+          const leadState = getLeadsState(tabId, state.origin);
+          portRegistry.broadcast(tabId, leadState);
+        }
+      }
 
       state.updatedAt = Date.now();
       state.navigationGeneration = gen;
