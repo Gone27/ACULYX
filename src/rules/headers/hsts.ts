@@ -19,6 +19,30 @@ const HSTS_HEADER = 'strict-transport-security';
 const HSTS_MIN_MAX_AGE = 31_536_000; // 1 year in seconds
 const HSTS_PRELOAD_MAX_AGE = 31_536_000; // hstspreload.org minimum: 1 year (https://hstspreload.org/)
 
+interface HstsDirectives {
+  maxAge: number;
+  includeSubDomains: boolean;
+  preload: boolean;
+}
+
+/** Tolerant RFC 6797 directive parser (quoted values, any case, first max-age wins). */
+export function parseHstsDirectives(value: string): HstsDirectives {
+  let maxAge: number | null = null;
+  let includeSubDomains = false;
+  let preload = false;
+  for (const part of value.split(';')) {
+    const token = part.trim();
+    if (token.length === 0) continue;
+    const eq = token.indexOf('=');
+    const name = (eq === -1 ? token : token.slice(0, eq)).trim().toLowerCase();
+    const raw = eq === -1 ? '' : token.slice(eq + 1).trim().replace(/^"(.*)"$/, '$1');
+    if (name === 'max-age' && maxAge === null && /^\d+$/.test(raw)) maxAge = parseInt(raw, 10);
+    else if (name === 'includesubdomains') includeSubDomains = true;
+    else if (name === 'preload') preload = true;
+  }
+  return { maxAge: maxAge ?? 0, includeSubDomains, preload };
+}
+
 /**
  * Evaluate HSTS posture for the final response hop.
  * This function is pure — no browser APIs are used.
@@ -53,11 +77,12 @@ export function checkHsts(finalHop: Hop): Finding[] {
     return findings;
   }
 
-  // HSTS-002: max-age present but below the recommended minimum.
-  // Also fires when max-age directive cannot be parsed (treated as 0).
-  const maxAgeMatch = /max-age\s*=\s*(\d+)/i.exec(headerValue);
-  const maxAge = maxAgeMatch !== null ? parseInt(maxAgeMatch[1] ?? '0', 10) : 0;
+  // Parse directives per RFC 6797 §6.1: case-insensitive names, optional quoted-string values,
+  // first occurrence wins, unknown directives ignored. (A bare regex mis-reads max-age="31536000".)
+  const directives = parseHstsDirectives(headerValue);
+  const maxAge = directives.maxAge;
 
+  // HSTS-002: max-age present but below the recommended minimum (or missing/unparseable => 0).
   if (maxAge < HSTS_MIN_MAX_AGE) {
     findings.push({
       ruleId: 'HSTS-002',
@@ -73,7 +98,7 @@ export function checkHsts(finalHop: Hop): Finding[] {
   }
 
   // HSTS-003: includeSubDomains directive is absent.
-  if (!/includeSubDomains/i.test(headerValue)) {
+  if (!directives.includeSubDomains) {
     findings.push({
       ruleId: 'HSTS-003',
       category: 'transport',
@@ -88,8 +113,8 @@ export function checkHsts(finalHop: Hop): Finding[] {
     });
   }
 
-  const hasIncludeSubdomains = /includeSubDomains/i.test(headerValue);
-  const hasPreload = /(?:^|;)\s*preload\s*(?:;|$)/i.test(headerValue);
+  const hasIncludeSubdomains = directives.includeSubDomains;
+  const hasPreload = directives.preload;
   const meetsBasicPreloadRequirements = maxAge >= HSTS_PRELOAD_MAX_AGE && hasIncludeSubdomains;
 
   if (hasPreload && !meetsBasicPreloadRequirements) {

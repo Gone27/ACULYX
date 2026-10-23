@@ -18,6 +18,8 @@ const CSP_BYPASS_HOSTS: ReadonlySet<string> = new Set(
   }).filter((host) => host.length > 0),
 );
 
+const NONCE_OR_HASH_RE = /'(?:nonce-[a-z0-9+/=_-]+|sha(?:256|384|512)-[a-z0-9+/=_-]+)'/i;
+
 function resolveEffective(directives: Map<string, string>, directive: string): string | undefined {
   return directives.get(directive) ?? directives.get('default-src');
 }
@@ -56,7 +58,7 @@ export interface CspResult {
   directives: Map<string, string>;
 }
 
-export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
+function checkSinglePolicy(finalHop: Hop, metaCspFound = false): CspResult {
   const findings: Finding[] = [];
   const cspValue = finalHop.headers[CSP_HEADER];
   const fromCache = finalHop.fromCache === true;
@@ -141,7 +143,8 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
   const effectiveScriptSrc = resolveEffective(directives, 'script-src');
 
   if (effectiveScriptSrc !== undefined) {
-    const { isModernStrict, hasStrictDynamic } = hasCspBypassProtection(effectiveScriptSrc);
+    const scriptLc = effectiveScriptSrc.toLowerCase(); // CSP keywords are ASCII case-insensitive
+    const { isModernStrict, hasStrictDynamic } = hasCspBypassProtection(scriptLc);
     const bypassProneHosts = hasStrictDynamic ? [] : findBypassProneHosts(effectiveScriptSrc);
 
     if (bypassProneHosts.length > 0) {
@@ -207,7 +210,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
       }
     }
 
-    if (effectiveScriptSrc.includes("'unsafe-inline'")) {
+    if (scriptLc.includes("'unsafe-inline'")) {
       if (isModernStrict) {
         findings.push({
           ruleId: 'CSP-002',
@@ -241,7 +244,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
       }
     }
 
-    if (effectiveScriptSrc.includes("'unsafe-eval'")) {
+    if (scriptLc.includes("'unsafe-eval'")) {
       findings.push({
         ruleId: 'CSP-003',
         category: 'header',
@@ -258,7 +261,7 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
       });
     }
 
-    if (hasWildcardSource(effectiveScriptSrc, hasStrictDynamic)) {
+    if (hasWildcardSource(scriptLc, hasStrictDynamic)) {
       findings.push({
         ruleId: 'CSP-004',
         category: 'header',
@@ -273,6 +276,62 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
         reference: REFERENCE,
         limitations: fromCache ? ['Response served from cache.'] : ['Passive policy inspection.'],
       });
+    }
+  }
+
+  // --- Review additions: gaps that produced false negatives -------------------------------
+  const mk = (ruleId: string, severity: Finding['severity'], title: string, impact: string, evidence: string, recommendation: string): Finding => ({
+    ruleId, category: 'header', severity, confidence: 'deterministic', provenance: 'response-header',
+    outcome: fromCache ? 'partial-coverage' : 'fail', title, impact,
+    evidence: sanitizeEvidence(evidence), recommendation, reference: REFERENCE,
+    limitations: fromCache ? ['Response served from cache.'] : ['Passive policy inspection.'],
+  });
+
+  const scriptEffective = resolveEffective(directives, 'script-src')?.toLowerCase();
+  if (scriptEffective !== undefined) {
+    const t = sourceTokens(scriptEffective);
+    const strictDyn = t.includes("'strict-dynamic'");
+    if (t.includes('blob:') && !strictDyn) {
+      findings.push(mk('CSP-004B', 'low', "CSP script-src allows 'blob:' sources",
+        'Attacker-controlled Blob URLs (for example created from injected data) can be executed as scripts, weakening the allowlist.',
+        scriptEffective, "Remove 'blob:' from script-src unless a Worker/Blob design strictly requires it."));
+    }
+    if (t.includes("'unsafe-hashes'")) {
+      findings.push(mk('CSP-004H', 'low', "CSP script-src uses 'unsafe-hashes'",
+        'Allows hashed inline event handlers (onclick=...), re-enabling the inline-handler injection surface for any matching hash.',
+        scriptEffective, "Refactor inline handlers to addEventListener and drop 'unsafe-hashes'."));
+    }
+  }
+
+  // script-src-elem / script-src-attr override script-src for <script> elements and inline handlers.
+  for (const name of ['script-src-elem', 'script-src-attr'] as const) {
+    const v = directives.get(name)?.toLowerCase();
+    if (v === undefined) continue;
+    const t = sourceTokens(v);
+    const nonceOrHash = NONCE_OR_HASH_RE.test(v) || t.includes("'strict-dynamic'");
+    if (t.includes("'unsafe-inline'") && !(name === 'script-src-elem' && nonceOrHash)) {
+      findings.push(mk(name === 'script-src-elem' ? 'CSP-002E' : 'CSP-002A', 'high',
+        `CSP ${name} contains 'unsafe-inline' (overrides script-src)`,
+        'This directive takes precedence over script-src for its target, so injected inline scripts or handlers can execute even if script-src looks strict.',
+        `${name} ${v}`, `Remove 'unsafe-inline' from ${name}; use nonces/hashes.`));
+    }
+    if (name === 'script-src-elem' && !t.includes("'strict-dynamic'") &&
+        t.some((x) => x === '*' || x === 'http:' || x === 'https:' || x === 'data:' || x === 'blob:')) {
+      findings.push(mk('CSP-004E', 'medium', 'CSP script-src-elem allows wildcard or scheme-only sources',
+        'script-src-elem overrides script-src for <script> elements, so a broad source here lets scripts load from arbitrary hosts.',
+        `${name} ${v}`, 'Replace wildcard/scheme sources with explicit hosts or nonces.'));
+    }
+  }
+
+  // frame-ancestors that allows everything gives no clickjacking protection, and browsers then
+  // IGNORE X-Frame-Options, so it is worse than having no frame-ancestors at all.
+  const fa = directives.get('frame-ancestors');
+  if (fa !== undefined) {
+    const ft = sourceTokens(fa.toLowerCase());
+    if (ft.some((x) => x === '*' || x === 'https:' || x === 'http:' || x === 'data:')) {
+      findings.push(mk('CSP-005W', 'medium', "CSP frame-ancestors allows any origin to embed this page",
+        'Any site can frame this page, and because frame-ancestors is present browsers ignore X-Frame-Options, so clickjacking protection is effectively absent.',
+        `frame-ancestors ${fa}`, "Use frame-ancestors 'none' or 'self' (or an explicit allowlist)."));
     }
   }
 
@@ -411,5 +470,52 @@ export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
     // Ignore parser errors — a malformed CSP is already flagged by our own checks above.
   }
 
+  return { findings, directives };
+}
+
+// ─── Multiple enforced policies ───────────────────────────────────────────────
+
+/** Browsers enforce EVERY Content-Security-Policy header (and every comma-separated policy). */
+function collectEnforcedPolicies(hop: Hop): string[] {
+  const raw = (hop.rawHeaders ?? [])
+    .filter((h) => h.name.toLowerCase() === CSP_HEADER)
+    .map((h) => h.value);
+  const values = raw.length > 0 ? raw : (hop.headers[CSP_HEADER] !== undefined ? [hop.headers[CSP_HEADER]] : []);
+  return values.flatMap((v) => v.split(',')).map((v) => v.trim()).filter((v) => v.length > 0);
+}
+
+/**
+ * Evaluate the response's CSP. When several policies are enforced (CDN + origin is common) the
+ * effective policy is their intersection, so a weakness is only real if EVERY policy has it.
+ * The previous "last header wins" behaviour reported the wrong policy in both directions.
+ */
+export function checkCsp(finalHop: Hop, metaCspFound = false): CspResult {
+  const policies = collectEnforcedPolicies(finalHop);
+  if (policies.length <= 1) return checkSinglePolicy(finalHop, metaCspFound);
+
+  const results = policies.map((policy) =>
+    checkSinglePolicy({ ...finalHop, headers: { ...finalHop.headers, [CSP_HEADER]: policy } }, metaCspFound));
+
+  const first = results[0] as CspResult;
+  const inAll = (ruleId: string): boolean => results.every((r) => r.findings.some((f) => f.ruleId === ruleId));
+  const findings = first.findings.filter((f) => inAll(f.ruleId));
+
+  const directives = new Map<string, string>();
+  for (const r of results) for (const [k, v] of r.directives) if (!directives.has(k)) directives.set(k, v);
+
+  findings.push({
+    ruleId: 'CSP-011',
+    category: 'header',
+    severity: 'info',
+    confidence: 'deterministic',
+    provenance: 'response-header',
+    outcome: 'pass',
+    title: `${policies.length} Content-Security-Policy policies are enforced together`,
+    impact: 'Browsers enforce all policies at once; the effective policy is the intersection, so weaknesses are only reported when every policy has them.',
+    evidence: sanitizeEvidence(`${policies.length} policies`),
+    recommendation: 'Confirm the layered policies are intentional (for example CDN plus origin) and that they do not contradict each other.',
+    reference: REFERENCE,
+    limitations: ['Per-policy results were intersected by rule id.'],
+  });
   return { findings, directives };
 }

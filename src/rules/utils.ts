@@ -234,18 +234,25 @@ export function isSensitiveCookie(
   if (alwaysSensitive.includes(name) || alwaysSensitive.includes(lowerName)) return { isSensitive: true, reason: 'override' };
 
   if (lowerName.startsWith('__host-') || lowerName.startsWith('__secure-')) return { isSensitive: true, reason: 'prefix' };
+  // A CSRF/XSRF marker does not make a *session* cookie harmless (e.g. "xsrf_session").
+  if (
+    /(^|[-_.:])(csrf|xsrf)([-_.:]|$)/i.test(name) &&
+    /(^|[-_.:])(session|sess|sid|auth|jwt)([-_.:]|$)/i.test(name)
+  ) {
+    return { isSensitive: true, reason: 'regex' };
+  }
   if (NON_SENSITIVE_COOKIE_RE.test(name)) return { isSensitive: false, reason: 'regex' };
 
   if (SENSITIVE_COOKIE_RE.test(name)) return { isSensitive: true, reason: 'regex' };
 
   // Split camelCase tokens: e.g. "authToken" -> "auth token", "sessionToken" -> "session token"
-  const splitCamel = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  const splitCamel = name.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
   if (splitCamel !== name) {
     if (SENSITIVE_COOKIE_RE.test(splitCamel)) return { isSensitive: true, reason: 'regex' };
   }
 
   // Common standalone session IDs without delimiters:
-  if (/^(?:sessionid|sessid|authtoken|sessiontoken|uid)$/i.test(lowerName)) {
+  if (/^(?:sessionid|sessid|ssid|userid|authtoken|sessiontoken|refreshtoken|accesstoken|idtoken|bearer|\.aspxauth|\.aspnetcore\.(?:cookies|identity\.application|session)(?:c\d+)?|uid)$/i.test(lowerName)) {
     return { isSensitive: true, reason: 'regex' };
   }
 

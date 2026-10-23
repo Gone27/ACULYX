@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-10-23
+
+### Security & Accuracy
+- **Secrets Detector (F1) Pattern Fixes & Vendor Expansions**:
+  - Corrected malformed OpenAI API key regex quantifier (`{20,}T3BlbkFJ`).
+  - Added detection for GitHub fine-grained personal access tokens (`github_pat_`), Hugging Face access tokens (`hf_`), Discord bot tokens, Twilio Account SID & Auth Token credentials, and hard-coded Bearer tokens with Shannon entropy validation.
+- **CSP Multi-Policy Concurrency & Granular Directive Checks**:
+  - Implemented multi-policy evaluation (`collectEnforcedPolicies`): browsers enforce all active CSP policies simultaneously; weaknesses are only flagged if permitted across all enforced policies. Emits `CSP-011` when multiple policies are active.
+  - Case-insensitive keyword checks across all directives.
+  - Added `CSP-004B` for `blob:` scheme in script execution contexts.
+  - Added `CSP-004H` for `'unsafe-hashes'` in script-src / default-src.
+  - Added CSP Level 3 directive override evaluations: `CSP-002E` (`'unsafe-inline'` in `script-src-elem`), `CSP-002A` (`'unsafe-inline'` in `script-src-attr`), and `CSP-004E` (wildcards in `script-src-elem`).
+  - Added `CSP-005W` for overly broad `frame-ancestors` (`*` or plain `https:` wildcard).
+- **HSTS RFC 6797 Directive Parsing Compliance**:
+  - Implemented `parseHstsDirectives()` with case-insensitivity, support for quoted parameter values (e.g., `max-age="31536000"`), and strict first-occurrence directive precedence.
+- **X-Content-Type-Options Fetch Spec Compliance**:
+  - Evaluates the first comma-separated token per the Fetch specification, safely accepting duplicate proxy headers (e.g. `nosniff, nosniff`).
+- **Cookie Sensitivity Heuristics**:
+  - Preserved session-identifier cookies bearing CSRF markers (e.g. `xsrf_session`).
+  - Fixed camelCase boundary word splitting to preserve underscores.
+  - Added detection for standalone session token identifiers (`SSID`, `refreshToken`, `.AspNetCore.Cookies`, `.ASPXAUTH`, `userid`).
+- **Comprehensive Review Regression Test Suite**:
+  - Added `tests/rules/review-fixes.test.ts` with 26 targeted regression tests, bringing total test coverage to 736 unit tests across 51 test suites.
+
 ## [2.0.2] - 2026-10-23
 
 ### Security & Hardening

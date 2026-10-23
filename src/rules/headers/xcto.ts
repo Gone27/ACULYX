@@ -42,7 +42,10 @@ export function checkXcto(finalHop: Hop): Finding[] {
   }
 
   // Header is present but the value is not 'nosniff'.
-  if (rawValue.trim().toLowerCase() !== 'nosniff') {
+  // Fetch spec "determine nosniff": only the FIRST comma-separated value is evaluated, so a
+  // proxy-duplicated "nosniff, nosniff" is still effective and must not be reported.
+  const firstValue = (rawValue.split(',')[0] ?? '').trim().toLowerCase();
+  if (firstValue !== 'nosniff') {
     return [
       {
         ruleId: 'XCTO-001',

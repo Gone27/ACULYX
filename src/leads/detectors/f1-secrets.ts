@@ -476,7 +476,7 @@ export function detectSecrets(
   }
 
   // OpenAI API Key
-  const openaiMatches = code.match(/\b(?:sk-(?:live-)?[a-zA-Z0-9]{20,T3BlbkFJ[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9_-]{40,}|sk-svcacct-[a-zA-Z0-9_-]{40,}|sk-[a-zA-Z0-9]{48})(?=[^a-zA-Z0-9_-]|$)/g);
+  const openaiMatches = code.match(/\b(?:sk-(?:live-)?[a-zA-Z0-9]{20,}T3BlbkFJ[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9_-]{40,}|sk-svcacct-[a-zA-Z0-9_-]{40,}|sk-[a-zA-Z0-9]{48})(?=[^a-zA-Z0-9_-]|$)/g);
   if (openaiMatches) {
     for (const match of openaiMatches) {
       if (isPlaceholder(match)) continue;
@@ -886,6 +886,40 @@ export function detectSecrets(
         origin,
         url,
         sourceSensor: 'S2',
+      });
+    }
+  }
+
+  // 3b. Additional vendor formats (review additions)
+  const simple: Array<{ id: string; title: string; re: RegExp; potential: Lead['potential']; tags: string[]; remediation: string; group?: number }> = [
+    { id: 'SEC-GH-FINE', title: 'GitHub Fine-Grained Personal Access Token Exposure', re: /\bgithub_pat_[A-Za-z0-9_]{50,}\b/g, potential: 'critical', tags: ['github', 'secret'], remediation: 'Revoke the token in GitHub settings and rotate it.' },
+    { id: 'SEC-HF', title: 'Hugging Face Access Token Exposure', re: /\bhf_[A-Za-z0-9]{30,}\b/g, potential: 'high', tags: ['huggingface', 'secret'], remediation: 'Revoke the token in Hugging Face settings and rotate it.' },
+    { id: 'SEC-DISCORD', title: 'Discord Bot Token Exposure', re: /\b[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}\b/g, potential: 'high', tags: ['discord', 'secret'], remediation: 'Reset the bot token in the Discord developer portal.' },
+    { id: 'SEC-TWILIO-AUTH', title: 'Twilio Auth Token Exposure (context match)', re: /\b(?:twilio[\w.-]{0,20}|auth_?token)["']?\s*[:=,]\s*["']([0-9a-f]{32})["']/gi, potential: 'high', tags: ['twilio', 'secret'], remediation: 'Rotate the Twilio Auth Token and move it server-side.', group: 1 },
+    { id: 'SEC-BEARER', title: 'Hard-coded Bearer Credential in Source', re: /\bAuthorization["']?\s*[:=]\s*["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/gi, potential: 'high', tags: ['bearer', 'auth', 'secret'], remediation: 'Remove the static credential from client code and issue per-user tokens.', group: 1 },
+  ];
+  for (const rule of simple) {
+    for (const m of code.matchAll(rule.re)) {
+      const match = rule.group !== undefined ? (m[rule.group] ?? '') : m[0];
+      if (match.length === 0 || isPlaceholder(match)) continue;
+      leads.push({
+        id: nextLeadId(rule.id),
+        ruleId: 'SEC-001',
+        family: 'F1',
+        tier: 'observed',
+        potential: rule.potential,
+        confidence: 0.9,
+        title: rule.title,
+        needs: ['verify the credential is live and its scope'],
+        doesNotProve: ['that the credential is currently valid'],
+        evidence: { preview: maskSecret(match), location: maskLocation(url), context: rule.title },
+        tags: rule.tags,
+        scopeStatus,
+        timestamp: Date.now(),
+        origin,
+        url,
+        sourceSensor: 'S2',
+        remediation: rule.remediation,
       });
     }
   }
