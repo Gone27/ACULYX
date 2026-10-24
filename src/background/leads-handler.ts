@@ -494,6 +494,13 @@ export async function handleDomLeadsCollected(
   return getLeadsState(tabId, origin);
 }
 
+const tabMainWorldCounts = new Map<number, number>();
+const MAX_BACKGROUND_S3_PER_TAB = 100;
+
+export function resetMainWorldCountForTab(tabId: number): void {
+  tabMainWorldCounts.delete(tabId);
+}
+
 /**
  * S3: Sensor 3 Main-World Hook event handler.
  */
@@ -506,6 +513,20 @@ export function handleMainWorldEvent(
     return getLeadsState(tabId, origin);
   }
 
+  // Schema validation on background boundary: reject unknown event types
+  if (!['sink', 'postmessage_call', 'postmessage_listener', 'storage_write'].includes(event.eventType)) {
+    return getLeadsState(tabId, origin);
+  }
+
+  // Enforce background rate limit per tab
+  if (typeof tabId === 'number' && tabId >= 0) {
+    const curCount = tabMainWorldCounts.get(tabId) ?? 0;
+    if (curCount >= MAX_BACKGROUND_S3_PER_TAB) {
+      return getLeadsState(tabId, origin);
+    }
+    tabMainWorldCounts.set(tabId, curCount + 1);
+  }
+
   const safeUrl = typeof url === 'string' ? url : '';
   const maskedLoc = maskLocation(safeUrl);
   const sanitizedUrl = maskedLoc.length > 0 ? maskedLoc : safeUrl;
@@ -516,7 +537,14 @@ export function handleMainWorldEvent(
   }
 
   if (event.eventType === 'sink') {
-    const sinkName = typeof event.sinkName === 'string' && event.sinkName.length > 0 ? event.sinkName : 'sink';
+    if (typeof event.sinkName !== 'string' || event.sinkName.length === 0) {
+      return getLeadsState(tabId, origin);
+    }
+    const allowedSources = ['location.hash', 'location.search', 'document.referrer', 'window.name', 'window.postMessage', 'controlled input'];
+    if (typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0 && !allowedSources.includes(event.sourceCategory)) {
+      return getLeadsState(tabId, origin);
+    }
+    const sinkName = event.sinkName;
     const sourceCategory = typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0 ? event.sourceCategory : 'controlled input';
     const contextStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : `Assigned to ${sinkName}`;
     const lead: Lead = {

@@ -301,7 +301,7 @@ function sanitizeClientUrl(rawUrl: string): string {
   }
 }
 
-const ALLOWED_SINKS = new Set([
+export const ALLOWED_SINKS = new Set([
   'Element.innerHTML',
   'Element.outerHTML',
   'Element.insertAdjacentHTML',
@@ -313,8 +313,29 @@ const ALLOWED_SINKS = new Set([
   'location.replace',
 ]);
 
+export const ALLOWED_SOURCE_CATEGORIES = new Set([
+  'location.hash',
+  'location.search',
+  'document.referrer',
+  'window.name',
+  'window.postMessage',
+  'controlled input',
+]);
+
+export const ALLOWED_EVENT_TYPES = new Set([
+  'sink',
+  'postmessage_call',
+  'postmessage_listener',
+  'storage_write',
+]);
+
 let domCollectorInstalledInClosure = false;
 let triggerCollectionFn: (() => void) | null = null;
+
+export function resetDomCollectorForTesting(): void {
+  domCollectorInstalledInClosure = false;
+  triggerCollectionFn = null;
+}
 
 export function initDomCollector(): void {
   if (domCollectorInstalledInClosure) {
@@ -352,11 +373,10 @@ export function initDomCollector(): void {
       const detail = customEvent.detail as RawMainWorldDetail;
 
       // 2. Validate eventType whitelist
-      if (typeof detail.eventType !== 'string') return;
-      const eventType = detail.eventType;
-      if (!['sink', 'postmessage_call', 'postmessage_listener', 'storage_write'].includes(eventType)) {
+      if (typeof detail.eventType !== 'string' || !ALLOWED_EVENT_TYPES.has(detail.eventType)) {
         return;
       }
+      const eventType = detail.eventType;
 
       const typeCount = eventCountsByType.get(eventType) ?? 0;
       if (typeCount >= MAX_EVENTS_PER_TYPE) return;
@@ -366,13 +386,16 @@ export function initDomCollector(): void {
         if (typeof detail.sinkName !== 'string' || !ALLOWED_SINKS.has(detail.sinkName)) {
           return;
         }
+        if (typeof detail.sourceCategory === 'string' && !ALLOWED_SOURCE_CATEGORIES.has(detail.sourceCategory)) {
+          return;
+        }
       }
 
-      // 4. Strict payload caps: clamp string lengths to prevent memory exhaustion
+      // 4. Strict payload caps: clamp string lengths and strictly extract only allowed primitive properties
       const safeDetail = {
         eventType,
-        sinkName: typeof detail.sinkName === 'string' ? detail.sinkName.slice(0, 80) : undefined,
-        sourceCategory: typeof detail.sourceCategory === 'string' ? detail.sourceCategory.slice(0, 64) : undefined,
+        sinkName: typeof detail.sinkName === 'string' && ALLOWED_SINKS.has(detail.sinkName) ? detail.sinkName : undefined,
+        sourceCategory: typeof detail.sourceCategory === 'string' && ALLOWED_SOURCE_CATEGORIES.has(detail.sourceCategory) ? detail.sourceCategory : undefined,
         targetOrigin: typeof detail.targetOrigin === 'string' ? detail.targetOrigin.slice(0, 128) : undefined,
         hasOriginCheck: typeof detail.hasOriginCheck === 'boolean' ? detail.hasOriginCheck : undefined,
         storageKey: typeof detail.storageKey === 'string' ? detail.storageKey.slice(0, 64) : undefined,
