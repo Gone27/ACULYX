@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type dns from 'node:dns';
 import {
   buildCliReport,
   formatMarkdown,
@@ -13,6 +14,8 @@ import {
   verifyAuditBundle,
   isPrivateOrLocalHost,
   createPinnedLookup,
+  safeFetchTarget,
+  type DnsLookupFn,
 } from '../src/cli';
 import fixes from '../fixes.json';
 import packageInfo from '../package.json';
@@ -346,6 +349,108 @@ describe('ACULYX CLI report', () => {
           resolve();
         });
       });
+    });
+
+    it('rejects mixed public and private DNS answers from stub resolver', async () => {
+      const mixedResolver: DnsLookupFn = (_hostname, _options, callback) => {
+        callback(null, [
+          { address: '93.184.216.34', family: 4 },
+          { address: '10.0.0.1', family: 4 },
+        ]);
+      };
+
+      const pinnedLookup = createPinnedLookup(false, mixedResolver);
+      await new Promise<void>((resolve) => {
+        pinnedLookup('rebind-test.com', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('SSRF Protection');
+          expect(err?.message).toContain('10.0.0.1');
+          resolve();
+        });
+      });
+    });
+
+    it('rejects IPv4-mapped IPv6 private addresses during DNS resolution', async () => {
+      const ipv6MappedResolver: DnsLookupFn = (_hostname, _options, callback) => {
+        callback(null, [
+          { address: '::ffff:127.0.0.1', family: 6 },
+        ]);
+      };
+
+      const pinnedLookup = createPinnedLookup(false, ipv6MappedResolver);
+      await new Promise<void>((resolve) => {
+        pinnedLookup('mapped-v6-test.com', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('SSRF Protection');
+          resolve();
+        });
+      });
+    });
+
+    it('rejects empty DNS answers and forwards resolver errors', async () => {
+      const emptyResolver: DnsLookupFn = (_hostname, _options, callback) => {
+        callback(null, []);
+      };
+
+      const pinnedEmpty = createPinnedLookup(false, emptyResolver);
+      await new Promise<void>((resolve) => {
+        pinnedEmpty('empty-dns.com', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('Unable to resolve host');
+          resolve();
+        });
+      });
+
+      const failingResolver: DnsLookupFn = (_hostname, _options, callback) => {
+        callback(new Error('ENOTFOUND lookup failure'), []);
+      };
+
+      const pinnedFail = createPinnedLookup(false, failingResolver);
+      await new Promise<void>((resolve) => {
+        pinnedFail('error-dns.com', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('ENOTFOUND lookup failure');
+          resolve();
+        });
+      });
+    });
+
+    it('correctly returns both single-address and all-addresses shapes for Node agent', async () => {
+      const publicResolver: DnsLookupFn = (_hostname, _options, callback) => {
+        callback(null, [
+          { address: '93.184.216.34', family: 4 },
+        ]);
+      };
+
+      const pinnedLookup = createPinnedLookup(false, publicResolver);
+
+      // Single address shape (options = {})
+      await new Promise<void>((resolve) => {
+        pinnedLookup('public-site.com', {}, (err, address, family) => {
+          expect(err).toBeNull();
+          expect(address).toBe('93.184.216.34');
+          expect(family).toBe(4);
+          resolve();
+        });
+      });
+
+      // All addresses shape (options = { all: true })
+      await new Promise<void>((resolve) => {
+        pinnedLookup('public-site.com', { all: true }, (err, addresses) => {
+          expect(err).toBeNull();
+          expect(Array.isArray(addresses)).toBe(true);
+          expect(addresses).toHaveLength(1);
+          expect((addresses as dns.LookupAddress[])[0]?.address).toBe('93.184.216.34');
+          resolve();
+        });
+      });
+    });
+
+    it('blocks redirects to private network addresses before connection', async () => {
+      // safeFetchTarget with a private redirect target
+      await expect(
+        safeFetchTarget(new URL('http://127.0.0.1:8080/redirect'), { allowPrivateIps: false })
+      ).rejects.toThrow(/SSRF Protection/);
     });
   });
 });

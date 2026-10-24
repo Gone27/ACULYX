@@ -634,7 +634,16 @@ export async function validateHostForSsrf(hostname: string, allowPrivate: boolea
   }
 }
 
-export function createPinnedLookup(allowPrivate: boolean) {
+export type DnsLookupFn = (
+  hostname: string,
+  options: { all: true },
+  callback: (err: NodeJS.ErrnoException | null, addresses: dns.LookupAddress[]) => void
+) => void;
+
+export function createPinnedLookup(
+  allowPrivate: boolean,
+  lookupFn: DnsLookupFn = (h, opts, cb) => dns.lookup(h, opts, cb)
+) {
   return (
     hostname: string,
     options: dns.LookupOptions | number,
@@ -671,7 +680,7 @@ export function createPinnedLookup(allowPrivate: boolean) {
       return;
     }
 
-    dns.lookup(cleanHost, { all: true }, (err, addresses) => {
+    lookupFn(cleanHost, { all: true }, (err, addresses) => {
       if (err) {
         callback(err, '');
         return;
@@ -767,11 +776,15 @@ function singleFetch(
 
 export async function safeFetchTarget(
   targetUrl: URL,
-  options?: { allowPrivateIps?: boolean | undefined; maxRedirects?: number | undefined },
+  options?: {
+    allowPrivateIps?: boolean | undefined;
+    maxRedirects?: number | undefined;
+    lookupFn?: DnsLookupFn | undefined;
+  },
 ): Promise<{ url: string; status: number; headers: Record<string, string> }> {
   const allowPrivate = options?.allowPrivateIps ?? false;
   const maxRedirects = options?.maxRedirects ?? 5;
-  const pinnedLookup = createPinnedLookup(allowPrivate);
+  const pinnedLookup = createPinnedLookup(allowPrivate, options?.lookupFn);
   const httpAgent = new http.Agent({ lookup: pinnedLookup, keepAlive: false });
   const httpsAgent = new https.Agent({ lookup: pinnedLookup, keepAlive: false });
 
