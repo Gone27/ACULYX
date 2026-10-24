@@ -47,6 +47,6 @@
   },
   "overrides": {
     "source-map-js": "^1.2.2",
-    "body-parser": ">=1.20.3"
+    "body-parser": "1.20.9"
   }
 }
