@@ -1,4 +1,4 @@
-export type VerificationTarget = 'source' | 'chrome' | 'firefox';
+export type VerificationTarget = 'source' | 'chrome' | 'firefox' | 'full';
 
 export interface ZipEntry {
   name: string;

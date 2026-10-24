@@ -169,20 +169,22 @@ npm run build          # Builds Chrome production distribution (dist/)
 npm run build:firefox  # Builds Firefox MV3 production distribution (dist-firefox/)
 
 # 7. Package and Verify Release Artifacts
-npm run pack           # Generates ACULYX-source.zip, ACULYX-chrome.zip, and ACULYX-firefox.zip
+npm run pack           # Generates ACULYX-full.zip, ACULYX-source.zip, ACULYX-chrome.zip, and ACULYX-firefox.zip
 npm run verify:pack    # Verifies entry paths, flat packaging, and manifest invariants
 ```
 
 ### Release Artifacts & Store Packaging
 
-ACULYX strictly separates source distribution archives from browser store submission packages:
+ACULYX provides clearly separated distribution packages for users, auditors, and browser store submissions:
 
-1. **Source Archive (`ACULYX-source.zip`)**:
-   Contains complete uncompiled source files, tests, scripts, and documentation for offline building, security reviews, and audits. Excludes `dist/`, `node_modules/`, `.git/`, `.agents/`, test fixtures, reports, and binary archives.
-2. **Chrome Web Store Package (`ACULYX-chrome.zip`)**:
-   Flat archive of `dist/` with `manifest.json` at root. Excludes Firefox-specific Gecko settings, development source code, test suites, and internal metadata.
-3. **Firefox AMO Package (`ACULYX-firefox.zip`)**:
-   Flat archive of `dist-firefox/` with `manifest.json` at root. Contains `browser_specific_settings.gecko` and excludes Chrome-exclusive permissions and APIs (e.g., `sidePanel`).
+1. **Full Project Package (`ACULYX-full.zip` / `ACULYX.zip`)**:
+   Complete all-in-one distribution bundle containing the entire project: source code, tests, documentation, scripts, plus all pre-built targets ready to load into browsers (`dist/` for Chromium, `dist-firefox/` for Firefox, and `dist-hunter/`). Excludes `node_modules/`, `.git/`, and temporary build caches.
+2. **Source Archive (`ACULYX-source.zip`)**:
+   Clean source-only distribution containing complete uncompiled source files, tests, scripts, and documentation for offline building, security reviews, and compliance audits. Excludes built artifacts (`dist*`), `node_modules/`, `.git/`, `.agents/`, test fixtures, reports, and binary archives.
+3. **Chrome Web Store Package (`ACULYX-chrome.zip`)**:
+   Flat archive of `dist/` with `manifest.json` directly at the root (no wrapper folder). Excludes Firefox-specific Gecko settings, development source code, test suites, and internal metadata.
+4. **Firefox AMO Package (`ACULYX-firefox.zip`)**:
+   Flat archive of `dist-firefox/` with `manifest.json` directly at the root. Contains `browser_specific_settings.gecko` and excludes Chrome-exclusive permissions and APIs (e.g., `sidePanel`).
 
 ---
 

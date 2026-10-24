@@ -328,5 +328,53 @@ describe('Release ZIP Packaging & Verifier', () => {
         expect(result.errors).toHaveLength(0);
       });
     });
+
+    describe('target: full', () => {
+      it('rejects full zip if forbidden node_modules or .git are present', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: '{}', method: 0 },
+          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'dist/manifest.json', content: '{}', method: 0 },
+          { name: 'node_modules/lib/index.js', content: 'dep', method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-full-forbidden.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'full');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('node_modules/'))).toBe(true);
+      });
+
+      it('rejects full zip if built dist directory is missing', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: '{}', method: 0 },
+          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-full-no-dist.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'full');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('dist/manifest.json'))).toBe(true);
+      });
+
+      it('accepts valid full project archive containing source and built distributions', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: '{}', method: 0 },
+          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'dist/manifest.json', content: '{"name":"aculyx"}', method: 8 },
+          { name: 'dist-firefox/manifest.json', content: '{"name":"aculyx"}', method: 8 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-full-valid.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'full', { smokeExtract: true });
+        expect(result.success).toBe(true);
+        expect(result.errors).toHaveLength(0);
+      });
+    });
   });
 });

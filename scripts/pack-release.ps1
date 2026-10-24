@@ -49,7 +49,7 @@ function Pack-Folder([string]$SourceDir, [string]$DestZip, [string[]]$ExcludeDir
     Write-Host "Successfully packed $DestZip ($([math]::Round($len / 1MB, 2)) MB, $($files.Count) files)"
 }
 
-# 1. Source Archive
+# 1. Source Archive (Clean source only)
 if ($Target -eq "source" -or $Target -eq "all") {
     $sourceZip = Join-Path $OutputDir "ACULYX-source.zip"
     $excludeDirs = @(
@@ -67,10 +67,27 @@ if ($Target -eq "source" -or $Target -eq "all") {
     )
     $excludeExts = @(".zip", ".log")
     Pack-Folder $repoRoot $sourceZip $excludeDirs $excludeExts
+}
 
-    # Also keep legacy ACULYX.zip synced with source archive
+# 2. Full Project Archive (Source, tests, docs, plus built dist/, dist-firefox/, dist-hunter/)
+if ($Target -eq "full" -or $Target -eq "all") {
+    $fullZip = Join-Path $OutputDir "ACULYX-full.zip"
+    $excludeDirs = @(
+        "node_modules",
+        ".git",
+        ".agents",
+        ".system_generated",
+        "test-results",
+        "playwright-report",
+        "coverage",
+        ".vite-temp"
+    )
+    $excludeExts = @(".zip", ".log")
+    Pack-Folder $repoRoot $fullZip $excludeDirs $excludeExts
+
+    # Also sync ACULYX.zip to full archive so extracting ACULYX.zip provides the complete project ready to run
     $legacyZip = Join-Path $OutputDir "ACULYX.zip"
-    Copy-Item -Force $sourceZip $legacyZip
+    Copy-Item -Force $fullZip $legacyZip
 }
 
 # 2. Chrome Web Store Package (Flat dist/ contents)

@@ -162,6 +162,36 @@ export function verifyZipArchive(zipPath, target, options = {}) {
     if (!hasPackageJson) errors.push('Essential file missing from source archive: package.json');
     if (!hasManifest) errors.push('Essential file missing from source archive: manifest.json');
     if (!hasSrc) errors.push('Source directory "src/" missing from source archive');
+  } else if (target === 'full') {
+    const forbiddenPrefixes = [
+      'node_modules/',
+      '.git/',
+      '.agents/',
+      '.system_generated/',
+      'test-results/',
+      'playwright-report/',
+      'coverage/',
+      '.vite-temp/',
+    ];
+
+    for (const name of entries) {
+      if (forbiddenPrefixes.some((p) => name.startsWith(p))) {
+        errors.push(`Full archive contains forbidden temporary or dependency directory: "${name}"`);
+      }
+      if (name.endsWith('.zip')) {
+        errors.push(`Full archive contains nested ZIP file: "${name}"`);
+      }
+    }
+
+    const hasPackageJson = entries.includes('package.json');
+    const hasManifest = entries.includes('manifest.json');
+    const hasSrc = entries.some((e) => e.startsWith('src/'));
+    const hasDistManifest = entries.includes('dist/manifest.json');
+
+    if (!hasPackageJson) errors.push('Essential file missing from full archive: package.json');
+    if (!hasManifest) errors.push('Essential file missing from full archive: manifest.json');
+    if (!hasSrc) errors.push('Source directory "src/" missing from full archive');
+    if (!hasDistManifest) errors.push('Built distribution directory "dist/manifest.json" missing from full archive');
   } else if (target === 'chrome' || target === 'firefox') {
     // Both Chrome and Firefox store packages must be FLAT (no wrapper dir)
     const hasRootManifest = entries.includes('manifest.json');
@@ -310,6 +340,8 @@ if (isCli) {
       zipPath = 'D:/Projects/ACULYX-chrome.zip';
     } else if (target === 'firefox') {
       zipPath = 'D:/Projects/ACULYX-firefox.zip';
+    } else if (target === 'full') {
+      zipPath = 'D:/Projects/ACULYX-full.zip';
     } else {
       zipPath = 'D:/Projects/ACULYX-source.zip';
       if (!fs.existsSync(zipPath) && fs.existsSync('D:/Projects/ACULYX.zip')) {
@@ -323,6 +355,7 @@ if (isCli) {
     const base = path.basename(zipPath).toLowerCase();
     if (base.includes('chrome')) target = 'chrome';
     else if (base.includes('firefox')) target = 'firefox';
+    else if (base.includes('full')) target = 'full';
     else target = 'source';
   }
 
