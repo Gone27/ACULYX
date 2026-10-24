@@ -1,5 +1,6 @@
 import type { Lead } from '../types';
 import { maskSecret, maskLocation } from '../sieve/mask';
+import { parseCacheControl, parseVaryTokens } from '../../rules/utils';
 
 const RFC1918_REGEX = /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/;
 const INTERNAL_HOST_REGEX = /\b[a-zA-Z0-9_\-.]+\.(?:internal|corp|local|svc\.cluster\.local|lan)\b/i;
@@ -101,7 +102,8 @@ export function detectHeaderLeads(
       });
     }
 
-    if (reflectsOrigin && (typeof vary !== 'string' || !vary.toLowerCase().includes('origin'))) {
+    const varyTokens = parseVaryTokens(typeof vary === 'string' ? vary : undefined);
+    if (reflectsOrigin && !varyTokens.has('origin') && !varyTokens.has('*')) {
       leads.push({
         id: nextLeadId('COR-NOVARY'),
         ruleId: 'COR-001',
@@ -214,7 +216,8 @@ export function detectHeaderLeads(
   const cookieHeader = lowerHeaders['set-cookie'];
   const hasAuth = (typeof authHeader === 'string' && authHeader.length > 0) || (typeof cookieHeader === 'string' && cookieHeader.length > 0);
   if (typeof cacheControl === 'string' && cacheControl.length > 0 && hasAuth) {
-    if (/(public|s-maxage)/i.test(cacheControl) && !/no-store/i.test(cacheControl)) {
+    const cc = parseCacheControl(cacheControl);
+    if ((cc.has('public') || cc.has('s-maxage')) && !cc.has('no-store')) {
       leads.push({
         id: nextLeadId('CAC-AUTH'),
         ruleId: 'CAC-001',

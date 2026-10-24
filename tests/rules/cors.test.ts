@@ -120,4 +120,21 @@ describe('checkCors', () => {
     expect(findings[0]?.severity).toBe('low');
     expect(findings[0]?.title).toContain('Vary: Origin');
   });
+
+  it('flags CORS-002 when Vary header contains substring like x-origin instead of exact Origin token', () => {
+    const apiHop = {
+      ...makeHop({
+        'access-control-allow-origin': 'https://trusted-partner.com',
+        'vary': 'x-origin, accept-encoding',
+        'content-type': 'application/json',
+      }),
+      tabId: 1,
+      normalizedPath: 'https://example.com/api/data',
+      method: 'GET',
+      requestOrigin: 'https://other.com',
+    };
+    const findings = checkCors(apiHop);
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.ruleId).toBe('CORS-002');
+  });
 });

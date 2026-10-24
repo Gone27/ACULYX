@@ -1,7 +1,7 @@
 /** CORS response policy checks for the captured document or API response. */
 
 import type { Finding, Hop, ApiHop } from '../../shared/types';
-import { sanitizeEvidence, originFromUrl } from '../utils';
+import { sanitizeEvidence, originFromUrl, parseVaryTokens } from '../utils';
 
 const REF_CORS = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS';
 
@@ -104,8 +104,9 @@ export function checkCors(hop: Hop | ApiHop): Finding[] {
     const hopOrigin = originFromUrl(hop.url);
     const isSameOrigin = hopOrigin !== null && hopOrigin.toLowerCase() === lowerOrigin;
     if (!isSameOrigin) {
-      const vary = hop.headers['vary']?.toLowerCase() ?? '';
-      if (!vary.includes('origin')) {
+      const varyTokens = parseVaryTokens(hop.headers['vary']);
+      if (!varyTokens.has('origin') && !varyTokens.has('*')) {
+        const vary = hop.headers['vary'] ?? '';
         findings.push({
           ruleId: 'CORS-002',
           category: 'cors',

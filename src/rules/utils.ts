@@ -53,6 +53,74 @@ export function checkDuplicateHeaders(hop: Hop): Finding[] {
   return findings;
 }
 
+export interface CacheControlDirectives {
+  directives: Map<string, string | null>;
+  has(name: string): boolean;
+  get(name: string): string | null | undefined;
+}
+
+/**
+ * Parses HTTP Cache-Control header into exact directive names and optional arguments (RFC 9111 §5.2).
+ * Handles multiple lines and comma-separated tokens without substring collision.
+ */
+export function parseCacheControl(headerValue: string | string[] | undefined): CacheControlDirectives {
+  const map = new Map<string, string | null>();
+  if (headerValue === undefined) {
+    return {
+      directives: map,
+      has: (name: string) => map.has(name.toLowerCase()),
+      get: (name: string) => map.get(name.toLowerCase()),
+    };
+  }
+
+  const rawValues = Array.isArray(headerValue) ? headerValue : [headerValue];
+  for (const raw of rawValues) {
+    if (typeof raw !== 'string') continue;
+    const parts = raw.split(',');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed.length === 0) continue;
+      const eqIdx = trimmed.indexOf('=');
+      let name: string;
+      let val: string | null = null;
+      if (eqIdx === -1) {
+        name = trimmed.toLowerCase();
+      } else {
+        name = trimmed.slice(0, eqIdx).trim().toLowerCase();
+        let rawVal = trimmed.slice(eqIdx + 1).trim();
+        if (rawVal.startsWith('"') && rawVal.endsWith('"') && rawVal.length >= 2) {
+          rawVal = rawVal.slice(1, -1);
+        }
+        val = rawVal;
+      }
+      if (name.length > 0) {
+        map.set(name, val);
+      }
+    }
+  }
+
+  return {
+    directives: map,
+    has: (name: string) => map.has(name.toLowerCase()),
+    get: (name: string) => map.get(name.toLowerCase()),
+  };
+}
+
+/**
+ * Parses HTTP Vary header into exact, lowercase field-name tokens (RFC 9110 §12.5.5).
+ */
+export function parseVaryTokens(varyHeader: string | undefined): Set<string> {
+  const set = new Set<string>();
+  if (typeof varyHeader !== 'string') return set;
+  for (const part of varyHeader.split(',')) {
+    const trimmed = part.trim().toLowerCase();
+    if (trimmed.length > 0) {
+      set.add(trimmed);
+    }
+  }
+  return set;
+}
+
 // ─── Header normalisation & Redaction ─────────────────────────────────────────
 
 /**

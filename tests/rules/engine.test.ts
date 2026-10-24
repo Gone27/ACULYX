@@ -527,6 +527,43 @@ describe('checkCacheCookie — explicit cases', () => {
     const hop = makeHop({ headers: { 'cache-control': 'max-age=3600' } });
     expect(checkCacheCookie(hop).map((f) => f.ruleId)).not.toContain('CACHE-001');
   });
+
+  it('CACHE-001: Set-Cookie with pseudo-directive x-no-store-fake fires CACHE-001 fail without being suppressed', () => {
+    const hop = makeHop({
+      headers: {
+        'set-cookie': 'session=abc; Path=/',
+        'cache-control': 'x-no-store-fake, max-age=3600',
+      },
+    });
+    const findings = checkCacheCookie(hop);
+    expect(findings.map((f) => f.ruleId)).toContain('CACHE-001');
+    expect(findings[0]?.outcome).toBe('fail');
+  });
+
+  it('CACHE-001: Set-Cookie with private=0 is not treated as valid mitigated private directive', () => {
+    const hop = makeHop({
+      headers: {
+        'set-cookie': 'session=abc; Path=/',
+        'cache-control': 'private=0, max-age=3600',
+      },
+    });
+    const findings = checkCacheCookie(hop);
+    expect(findings.map((f) => f.ruleId)).toContain('CACHE-001');
+    expect(findings[0]?.outcome).toBe('fail');
+  });
+
+  it('Mitigated CACHE-001: Set-Cookie with exact private directive produces pass/info outcome', () => {
+    const hop = makeHop({
+      headers: {
+        'set-cookie': 'session=abc; Path=/',
+        'cache-control': 'private, max-age=3600',
+      },
+    });
+    const findings = checkCacheCookie(hop);
+    expect(findings.map((f) => f.ruleId)).toContain('CACHE-001');
+    expect(findings[0]?.outcome).toBe('pass');
+    expect(findings[0]?.severity).toBe('info');
+  });
 });
 
 // ==========================================================================

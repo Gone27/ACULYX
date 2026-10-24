@@ -37,7 +37,7 @@
  */
 
 import type { Finding, Hop, CookieRecord, SubdomainTrustVector } from '../../shared/types';
-import { sanitizeEvidence, parseCspDirectives, isSensitiveCookie, hasCspBypassProtection } from '../utils';
+import { sanitizeEvidence, parseCspDirectives, isSensitiveCookie, hasCspBypassProtection, parseVaryTokens } from '../utils';
 
 const REF_SUBDOMAIN =
   'https://portswigger.net/web-security/host-header/exploiting#password-reset-poisoning-via-dangling-markup';
@@ -367,7 +367,7 @@ export function checkSubdomainTrust(
         // corsOrigin not a valid URL
       }
     }
-  } else if (varyHeader.toLowerCase().includes('origin')) {
+  } else if (parseVaryTokens(varyHeader).has('origin')) {
     // Vary: Origin is required by the CORS spec for *any* response that varies
     // by origin — including responses with a safe, explicit ACAO allowlist.
     // We only treat it as a suspicious reflection indicator when the ACAO header

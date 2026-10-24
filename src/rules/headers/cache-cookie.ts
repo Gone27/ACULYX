@@ -1,7 +1,7 @@
 /** Cache-Control + Cookie Rule with Bounded Precision. */
 
 import type { Finding, Hop } from '../../shared/types';
-import { sanitizeEvidence, isSensitiveCookie } from '../utils';
+import { sanitizeEvidence, isSensitiveCookie, parseCacheControl } from '../utils';
 
 const REFERENCE = 'https://owasp.org/www-project-secure-headers/#cache-control';
 const CACHE_CONTROL_HEADER = 'cache-control';
@@ -52,15 +52,18 @@ export function checkCacheCookie(
     }];
   }
 
-  const normalised = cacheControlValue.toLowerCase();
+  const cc = parseCacheControl(cacheControlValue);
 
-  // Full compliance: no-store present (known-safe).
-  if (normalised.includes('no-store')) {
+  // Full compliance: exact no-store present (known-safe).
+  if (cc.has('no-store')) {
     return [];
   }
 
-  // Mitigated: 'private' or 'no-cache'
-  if (normalised.includes('private') || normalised.includes('no-cache')) {
+  // Mitigated: 'private' (without invalid value like =0) or 'no-cache'
+  const isPrivateValid = cc.has('private') && cc.get('private') !== '0';
+  const isNoCacheValid = cc.has('no-cache') && cc.get('no-cache') !== '0';
+
+  if (isPrivateValid || isNoCacheValid) {
     return [{
       ruleId: 'CACHE-001',
       category: 'header',
