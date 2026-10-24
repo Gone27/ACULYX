@@ -40,6 +40,21 @@ describe('Bounty Hardening: F1 Secrets', () => {
     expect(isPlaceholder('mock_auth_token')).toBe(true);
     expect(isPlaceholder('test-credential')).toBe(true);
   });
+
+  it('processes massive adversarial inputs with repeated underscores/hyphens in linear time without ReDoS', () => {
+    // 100 KB and 1 MB adversarial test inputs
+    const attackPayload100k = 'const ' + 'a_'.repeat(50_000) + 'secret = "some_secret_value_12345678";';
+    const start100k = performance.now();
+    detectSecrets(attackPayload100k, 'https://example.com/bundle.js');
+    const elapsed100k = performance.now() - start100k;
+    expect(elapsed100k).toBeLessThan(300);
+
+    const attackPayload1mb = 'const ' + 'a-'.repeat(500_000) + 'token = "some_secret_token_12345678";';
+    const start1mb = performance.now();
+    detectSecrets(attackPayload1mb, 'https://example.com/bundle.js');
+    const elapsed1mb = performance.now() - start1mb;
+    expect(elapsed1mb).toBeLessThan(1500);
+  });
 });
 
 describe('Bounty Hardening: F2 Template Literal Endpoints', () => {
@@ -62,11 +77,20 @@ describe('Bounty Hardening: F5 Params Context & Fragment Routing', () => {
     expect(leads.some(l => l.ruleId === 'PAR-002' && l.title.includes('redirect_uri'))).toBe(true);
   });
 
-  it('adjusts IDOR parameter signal based on path context', () => {
-    // Public blog context -> skipped or downgraded
+  it('adjusts IDOR parameter signal based on path context and action verbs', () => {
+    // Public blog context -> retained as info whisper rather than silently dropped
     const publicUrl = 'https://example.com/blog/article?id=123';
     const publicLeads = detectParamLeads(publicUrl).filter(l => l.title.includes('IDOR'));
-    expect(publicLeads).toHaveLength(0);
+    expect(publicLeads).toHaveLength(1);
+    expect(publicLeads[0]?.potential).toBe('info');
+    expect(publicLeads[0]?.tags).toContain('public-context');
+
+    // Action path on content route -> elevated to high potential with action-path tag
+    const actionUrl = 'https://example.com/post/42/edit?id=42';
+    const actionLeads = detectParamLeads(actionUrl).filter(l => l.title.includes('IDOR'));
+    expect(actionLeads).toHaveLength(1);
+    expect(actionLeads[0]?.potential).toBe('high');
+    expect(actionLeads[0]?.tags).toContain('action-path');
 
     // Private account context -> high potential
     const accountUrl = 'https://example.com/account/settings?user_id=456';

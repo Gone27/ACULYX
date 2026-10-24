@@ -278,15 +278,16 @@ describe('Detector F8: Third-Party & Recon Feed', () => {
 
 describe('Sensor S3: Main-World Events (Untrusted Tagging & Bounds)', () => {
   it('marks all S3 sink events with [Page-Reported] prefix, page-reported tag, and capped tier', () => {
+    const canary = 'CANARY_SECRET_TAINT_VALUE_9999';
     const res = handleMainWorldEvent({
       type: 'MAIN_WORLD_LEADS_EVENT',
-      url: 'https://example.com/test#access_token=SECRET',
+      url: `https://example.com/test#access_token=${canary}`,
       origin: 'https://example.com',
       event: {
         eventType: 'sink',
         sinkName: 'Element.innerHTML',
-        sourceValue: '<img src=x onerror=alert(1)>',
-        details: 'Assigned payload to Element.innerHTML',
+        sourceCategory: 'location.hash',
+        details: 'Sink Element.innerHTML received string containing data from location.hash',
       },
     }, DEFAULT_SETTINGS);
 
@@ -297,6 +298,9 @@ describe('Sensor S3: Main-World Events (Untrusted Tagging & Bounds)', () => {
     expect(['weak', 'whisper']).toContain(s3Lead?.tier);
     expect(s3Lead?.url).toBe('https://example.com/test');
     expect(s3Lead?.url).not.toContain('access_token');
+    expect(s3Lead?.url).not.toContain(canary);
+    expect(s3Lead?.evidence.preview).toContain('Controlled input from location.hash detected');
+    expect(s3Lead?.evidence.preview).not.toContain(canary);
   });
 
   it('marks S3 postmessage calls with [Page-Reported] and clamps tier to weak', () => {

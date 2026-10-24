@@ -964,16 +964,17 @@ export function detectSecrets(
   }
 
   // 4. SEC-003: GENERIC CONTEXT SECRETS (Quoted JSON keys, assignments, template literals)
-  const genericAssignRegex = /(?:["']?)((?:[a-zA-Z0-9_$-]+[-_])?(?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret|signing[-_]?key|encryption[-_]?key)[a-zA-Z0-9_$-]*)(?:["']?)\s*[:=]\s*["'`]([^"'`\r\n]{8,})["'`]/gi;
+  // Linear-time, bounded non-backtracking matcher to prevent ReDoS on adversarial code inputs.
+  const genericAssignRegex = /(?:["']([a-zA-Z0-9_$-]{1,64})["']|\b([a-zA-Z0-9_$-]{1,64}))\s*[:=]\s*["'`]([^"'`\r\n]{8,256})["'`]/g;
+  const SECRET_KEYWORD_RE = /(?:^|[-_])(?:secret|token|passw(?:or)?d|api[-_]?key|private[-_]?key|client[-_]?secret|signing[-_]?key|encryption[-_]?key)(?:[-_]|$)/i;
+
   let assignMatch: RegExpExecArray | null;
   while ((assignMatch = genericAssignRegex.exec(code)) !== null) {
-    const keyName = assignMatch[1];
-    const val = assignMatch[2];
-    if (val === undefined || val.length === 0 || isPlaceholder(val)) continue;
-    if (val.length < 8) continue;
+    const rawKey = assignMatch[1] ?? assignMatch[2];
+    if (rawKey === undefined || rawKey.length === 0) continue;
 
-    // Guard against URLs, paths, endpoints, and configuration parameters
-    const keyLower = (keyName ?? '').toLowerCase();
+    const keyLower = rawKey.toLowerCase();
+    // Exclude URL/path/config descriptors
     if (
       keyLower.endsWith('_url') ||
       keyLower.endsWith('_uri') ||
@@ -989,6 +990,16 @@ export function detectSecrets(
     ) {
       continue;
     }
+
+    // Verify key matches secret keyword either directly or via split camelCase
+    const isKeyword = SECRET_KEYWORD_RE.test(rawKey) ||
+      SECRET_KEYWORD_RE.test(rawKey.replace(/([a-z0-9])([A-Z])/g, '$1_$2'));
+    if (!isKeyword) continue;
+
+    const val = assignMatch[3];
+    if (val === undefined || val.length === 0 || isPlaceholder(val)) continue;
+    if (val.length < 8) continue;
+
     const valTrim = val.trim();
     if (
       valTrim.startsWith('http://') ||
@@ -1015,13 +1026,13 @@ export function detectSecrets(
         tier: 'weak',
         potential: 'high',
         confidence: 0.65,
-        title: `High-Entropy Secret Assignment Detected (${keyName ?? 'key'})`,
+        title: `High-Entropy Secret Assignment Detected (${rawKey})`,
         needs: ['manual confirmation of secret purpose'],
         doesNotProve: ['production credential status'],
         evidence: {
           preview: maskSecret(valTrim),
           location: maskLocation(url),
-          context: `Key: ${keyName ?? 'secret'}, high entropy (${entropy.toFixed(2)}) assignment`,
+          context: `Key: ${rawKey}, high entropy (${entropy.toFixed(2)}) assignment`,
         },
         tags: ['generic', 'secret', 'entropy'],
         scopeStatus,

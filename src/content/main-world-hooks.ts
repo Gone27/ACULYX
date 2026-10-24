@@ -13,7 +13,7 @@ export interface MainWorldLeadEventDetail {
   eventType: 'sink' | 'postmessage_call' | 'postmessage_listener' | 'storage_write';
   nonce?: string | undefined;
   sinkName?: string | undefined;
-  sourceValue?: string | undefined;
+  sourceCategory?: string | undefined;
   targetOrigin?: string | undefined;
   hasOriginCheck?: boolean | undefined;
   storageKey?: string | undefined;
@@ -157,7 +157,7 @@ export function installMainWorldHooks(): void {
         emitEvent({
           eventType: 'sink',
           sinkName,
-          sourceValue: src.value.slice(0, 80),
+          sourceCategory: src.name,
           details: `Sink ${sinkName} received string containing data from ${src.name}`,
         });
         break;

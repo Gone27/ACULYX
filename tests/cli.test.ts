@@ -12,6 +12,7 @@ import {
   buildAuditBundle,
   verifyAuditBundle,
   isPrivateOrLocalHost,
+  createPinnedLookup,
 } from '../src/cli';
 import fixes from '../fixes.json';
 import packageInfo from '../package.json';
@@ -306,6 +307,45 @@ describe('ACULYX CLI report', () => {
       expect(isPrivateOrLocalHost('fda.gov')).toBe(false);
       expect(isPrivateOrLocalHost('fdic.gov')).toBe(false);
       expect(isPrivateOrLocalHost('fc2.com')).toBe(false);
+    });
+
+    it('pins connection lookup and rejects private/reserved IP addresses at socket creation time', async () => {
+      const blockedLookup = createPinnedLookup(false);
+
+      // Blocked localhost / local targets
+      await new Promise<void>((resolve) => {
+        blockedLookup('127.0.0.1', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('SSRF Protection');
+          resolve();
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        blockedLookup('169.254.169.254', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('SSRF Protection');
+          resolve();
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        blockedLookup('localhost', {}, (err) => {
+          expect(err).toBeDefined();
+          expect(err?.message).toContain('SSRF Protection');
+          resolve();
+        });
+      });
+
+      // Allowed when allowPrivate is true
+      const allowedLookup = createPinnedLookup(true);
+      await new Promise<void>((resolve) => {
+        allowedLookup('127.0.0.1', {}, (err, address) => {
+          expect(err).toBeNull();
+          expect(address).toBe('127.0.0.1');
+          resolve();
+        });
+      });
     });
   });
 });

@@ -333,7 +333,7 @@ export function initDomCollector(): void {
   interface RawMainWorldDetail {
     eventType?: unknown;
     sinkName?: unknown;
-    sourceValue?: unknown;
+    sourceCategory?: unknown;
     targetOrigin?: unknown;
     hasOriginCheck?: unknown;
     storageKey?: unknown;
@@ -372,7 +372,7 @@ export function initDomCollector(): void {
       const safeDetail = {
         eventType,
         sinkName: typeof detail.sinkName === 'string' ? detail.sinkName.slice(0, 80) : undefined,
-        sourceValue: typeof detail.sourceValue === 'string' ? detail.sourceValue.slice(0, 128) : undefined,
+        sourceCategory: typeof detail.sourceCategory === 'string' ? detail.sourceCategory.slice(0, 64) : undefined,
         targetOrigin: typeof detail.targetOrigin === 'string' ? detail.targetOrigin.slice(0, 128) : undefined,
         hasOriginCheck: typeof detail.hasOriginCheck === 'boolean' ? detail.hasOriginCheck : undefined,
         storageKey: typeof detail.storageKey === 'string' ? detail.storageKey.slice(0, 64) : undefined,

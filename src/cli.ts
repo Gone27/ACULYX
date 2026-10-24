@@ -5,6 +5,9 @@ import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { isIP, isIPv4 } from 'node:net';
 import { lookup } from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
+import dns from 'node:dns';
 import packageInfo from '../package.json';
 import fixesData from '../fixes.json';
 import { runRules } from './rules/engine';
@@ -631,48 +634,186 @@ export async function validateHostForSsrf(hostname: string, allowPrivate: boolea
   }
 }
 
+export function createPinnedLookup(allowPrivate: boolean) {
+  return (
+    hostname: string,
+    options: dns.LookupOptions | number,
+    callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void
+  ): void => {
+    const isAll = typeof options === 'object' && options !== null && options.all === true;
+    if (!allowPrivate && isPrivateOrLocalHost(hostname)) {
+      callback(
+        new Error(
+          `SSRF Protection: Access to private or local network target (${hostname}) is blocked. Pass --allow-private-ips to permit local development auditing.`
+        ),
+        ''
+      );
+      return;
+    }
+
+    const cleanHost = hostname.trim().replace(/^\[|\]$/g, '');
+    const ipVer = isIP(cleanHost);
+    if (ipVer !== 0) {
+      if (!allowPrivate && isPrivateOrReservedIp(cleanHost)) {
+        callback(
+          new Error(
+            `SSRF Protection: Target IP "${cleanHost}" is a private or reserved address. Request blocked.`
+          ),
+          ''
+        );
+        return;
+      }
+      if (isAll) {
+        callback(null, [{ address: cleanHost, family: ipVer }]);
+      } else {
+        callback(null, cleanHost, ipVer);
+      }
+      return;
+    }
+
+    dns.lookup(cleanHost, { all: true }, (err, addresses) => {
+      if (err) {
+        callback(err, '');
+        return;
+      }
+      if (!Array.isArray(addresses) || addresses.length === 0) {
+        callback(new Error(`SSRF Protection: Unable to resolve host "${cleanHost}".`), '');
+        return;
+      }
+
+      if (!allowPrivate) {
+        for (const addr of addresses) {
+          if (isPrivateOrReservedIp(addr.address)) {
+            callback(
+              new Error(
+                `SSRF Protection: Target host "${cleanHost}" resolves to private or reserved IP address (${addr.address}). Request blocked.`
+              ),
+              ''
+            );
+            return;
+          }
+        }
+      }
+
+      const chosen = addresses[0];
+      if (chosen === undefined) {
+        callback(new Error(`SSRF Protection: Unable to resolve host "${cleanHost}".`), '');
+        return;
+      }
+      if (isAll) {
+        callback(null, [chosen]);
+      } else {
+        callback(null, chosen.address, chosen.family);
+      }
+    });
+  };
+}
+
+function singleFetch(
+  url: URL,
+  httpAgent: http.Agent,
+  httpsAgent: https.Agent,
+  timeoutMs: number
+): Promise<{ status: number; headers: Record<string, string>; location?: string | undefined }> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const isHttps = url.protocol === 'https:';
+    const client = isHttps ? https : http;
+    const agent = isHttps ? httpsAgent : httpAgent;
+
+    const req = client.request(
+      url,
+      {
+        method: 'GET',
+        agent,
+        headers: {
+          'User-Agent': 'ACULYX/2.0.3 (CLI Security Scanner)',
+          'Accept': '*/*',
+        },
+      },
+      (res) => {
+        const rawHeaders = res.rawHeaders;
+        const headers: Record<string, string> = {};
+        for (let i = 0; i < rawHeaders.length; i += 2) {
+          const name = rawHeaders[i]?.toLowerCase() ?? '';
+          const val = rawHeaders[i + 1] ?? '';
+          if (!name) continue;
+          if (name === 'set-cookie' || name === 'authorization' || name === 'proxy-authorization') {
+            headers[name] = '[redacted]';
+          } else {
+            headers[name] = headers[name] !== undefined ? `${headers[name]}, ${val}` : val;
+          }
+        }
+        const location = typeof res.headers.location === 'string' ? res.headers.location : undefined;
+        res.resume();
+        resolvePromise({
+          status: res.statusCode ?? 0,
+          headers,
+          location,
+        });
+      }
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timed out after ${timeoutMs}ms.`));
+    });
+
+    req.on('error', (err) => {
+      rejectPromise(err);
+    });
+
+    req.end();
+  });
+}
+
 export async function safeFetchTarget(
   targetUrl: URL,
   options?: { allowPrivateIps?: boolean | undefined; maxRedirects?: number | undefined },
 ): Promise<{ url: string; status: number; headers: Record<string, string> }> {
   const allowPrivate = options?.allowPrivateIps ?? false;
   const maxRedirects = options?.maxRedirects ?? 5;
+  const pinnedLookup = createPinnedLookup(allowPrivate);
+  const httpAgent = new http.Agent({ lookup: pinnedLookup, keepAlive: false });
+  const httpsAgent = new https.Agent({ lookup: pinnedLookup, keepAlive: false });
 
   let currentUrl = targetUrl;
-  let response: Response;
   let redirectCount = 0;
+  let finalStatus = 0;
+  let finalHeaders: Record<string, string> = {};
 
-  while (true) {
-    await validateHostForSsrf(currentUrl.hostname, allowPrivate);
+  try {
+    while (true) {
+      await validateHostForSsrf(currentUrl.hostname, allowPrivate);
 
-    response = await fetch(currentUrl, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(15_000),
-    });
+      const res = await singleFetch(currentUrl, httpAgent, httpsAgent, 15_000);
+      finalStatus = res.status;
+      finalHeaders = res.headers;
 
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location');
-      if (location === null || location.length === 0) break;
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        const location = res.location;
+        if (location === undefined || location.length === 0) break;
 
-      redirectCount++;
-      if (redirectCount > maxRedirects) {
-        throw new Error(`Exceeded maximum redirect limit of ${maxRedirects}.`);
+        redirectCount++;
+        if (redirectCount > maxRedirects) {
+          throw new Error(`Exceeded maximum redirect limit of ${maxRedirects}.`);
+        }
+
+        currentUrl = new URL(location, currentUrl);
+        if (currentUrl.protocol !== 'http:' && currentUrl.protocol !== 'https:') {
+          throw new Error(`Disallowed redirect protocol: ${currentUrl.protocol}`);
+        }
+        continue;
       }
-
-      currentUrl = new URL(location, currentUrl);
-      if (currentUrl.protocol !== 'http:' && currentUrl.protocol !== 'https:') {
-        throw new Error(`Disallowed redirect protocol: ${currentUrl.protocol}`);
-      }
-      continue;
+      break;
     }
-    break;
+  } finally {
+    httpAgent.destroy();
+    httpsAgent.destroy();
   }
 
-  const headers = redactResponseHeaders(response.headers);
   return {
     url: currentUrl.href,
-    status: response.status,
-    headers,
+    status: finalStatus,
+    headers: finalHeaders,
   };
 }
 

@@ -174,4 +174,53 @@ describe('Lead Engine Canary Leak Tests', () => {
     expect(json, 'JSON leaked metadata canary').not.toContain(META_CANARY);
     expect(sarif, 'SARIF leaked metadata canary').not.toContain(META_CANARY);
   });
+
+  it('guarantees page-derived taint source values never cross the messaging boundary into lead evidence or store', () => {
+    const taintCanaries = {
+      hash: 'CANARY_HASH_TOKEN_SECRET_111',
+      search: 'CANARY_SEARCH_PARAM_SECRET_222',
+      referrer: 'CANARY_REFERRER_SECRET_333',
+      windowName: 'CANARY_WINDOW_NAME_SECRET_444',
+      postMessage: 'CANARY_POST_MESSAGE_SECRET_555',
+    };
+
+    const store = new LeadStore();
+
+    for (const [sourceCat, canary] of Object.entries(taintCanaries)) {
+      // In the new P0 design, only safe metadata (sourceCategory) is transmitted, never sourceValue
+      const lead: Lead = {
+        id: `LD-SINK-${sourceCat}-01`,
+        ruleId: 'PAR-004',
+        family: 'F5',
+        tier: 'weak',
+        potential: 'medium',
+        confidence: 0.7,
+        title: `[Page-Reported] Client-Side DOM Sink Execution with Controlled Input (Element.innerHTML)`,
+        needs: ['audit whether input reaches sink unescaped to verify DOM XSS'],
+        doesNotProve: ['exploitable DOM XSS execution'],
+        evidence: {
+          preview: maskSecret(`Controlled input from ${sourceCat} detected`),
+          location: maskLocation('https://example.com/test'),
+          context: `Sink Element.innerHTML received string containing data from ${sourceCat}`,
+        },
+        tags: ['page-reported', 'dom-xss', 'sink', 'taint-lite', 'Element.innerHTML'],
+        scopeStatus: 'in-scope',
+        timestamp: Date.now(),
+        origin: 'https://example.com',
+        url: 'https://example.com/test',
+        sourceSensor: 'S3',
+      };
+
+      store.addLead(lead);
+
+      const leads = store.getLeadsForOrigin('https://example.com');
+      const serialized = JSON.stringify(leads);
+      const md = formatLeadsReportMarkdown(leads);
+      const json = formatLeadsReportJson(leads);
+
+      expect(serialized, `Stored taint canary for ${sourceCat}`).not.toContain(canary);
+      expect(md, `Markdown report leaked taint canary for ${sourceCat}`).not.toContain(canary);
+      expect(json, `JSON report leaked taint canary for ${sourceCat}`).not.toContain(canary);
+    }
+  });
 });

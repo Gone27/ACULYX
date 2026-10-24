@@ -1,7 +1,7 @@
 # Privacy Policy for ACULYX: Header & Cookie Security Checker
 
 **Effective Date:** September 25, 2026
-**Last Updated:** October 22, 2026
+**Last Updated:** October 24, 2026
 **Author & Maintainer:** Dhyan Patel
 
 ## 1. Overview & Core Philosophy

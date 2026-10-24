@@ -517,7 +517,7 @@ export function handleMainWorldEvent(
 
   if (event.eventType === 'sink') {
     const sinkName = typeof event.sinkName === 'string' && event.sinkName.length > 0 ? event.sinkName : 'sink';
-    const sourceVal = typeof event.sourceValue === 'string' && event.sourceValue.length > 0 ? event.sourceValue : 'tainted-input';
+    const sourceCategory = typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0 ? event.sourceCategory : 'controlled input';
     const contextStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : `Assigned to ${sinkName}`;
     const lead: Lead = {
       id: nextId('SINK-TAINT'),
@@ -530,7 +530,7 @@ export function handleMainWorldEvent(
       needs: ['audit whether input reaches sink unescaped to verify DOM XSS'],
       doesNotProve: ['exploitable DOM XSS execution'],
       evidence: {
-        preview: maskSecret(sourceVal),
+        preview: maskSecret(`Controlled input from ${sourceCategory} detected`),
         location: maskLocation(sanitizedUrl),
         context: contextStr,
       },

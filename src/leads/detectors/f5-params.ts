@@ -85,9 +85,12 @@ export function detectParamLeads(
   }
 
   const pathLower = parsed.pathname.toLowerCase();
-  // Public/content paths reduce IDOR signal; account/admin paths increase it
-  const isPublicContext = /\/(blog|article|post|news|product|item|category|tag|page|doc|faq|help|about|contact|search|explore|discover)(?:\/|$)/.test(pathLower);
-  const isPrivateContext = /\/(account|profile|user|admin|settings|dashboard|orders|billing|payment|manage|internal|api\/v[0-9])(?:\/|$)/.test(pathLower);
+  // Action verbs (e.g. /post/42/edit, /file/123/download) elevate IDOR significance even on content paths
+  const hasActionPath = /(?:^|\/)(edit|delete|update|modify|remove|download|export|share|transfer|view|print|generate)(?:[/?#]|$)/.test(pathLower);
+  // Private / authenticated / administrative paths
+  const isPrivateContext = /(?:^|\/)(account|accounts|profile|profiles|user|users|member|members|customer|customers|team|teams|org|orgs|organization|organizations|admin|settings|dashboard|order|orders|billing|invoice|invoices|subscription|subscriptions|payment|payments|manage|internal|portal|api\/v[0-9])(?:[/?#]|$)/.test(pathLower);
+  // Pure public/content paths reduce IDOR potential to info whisper rather than dropping silently
+  const isPublicContext = !hasActionPath && /(?:^|\/)(blog|article|post|posts|news|product|products|item|items|category|categories|tag|tags|page|pages|doc|docs|documentation|faq|help|about|contact|search|explore|discover)(?:[/?#]|$)/.test(pathLower);
 
   for (const name of paramNames) {
     const category = classifyParamName(name);
@@ -163,13 +166,14 @@ export function detectParamLeads(
         sourceSensor: 'S1',
       });
     } else if (category === 'idor') {
-      // Adjust signal strength based on URL path context
-      const idorPotential: Lead['potential'] = isPrivateContext ? 'high' : (isPublicContext ? 'info' : 'medium');
-      const idorConfidence = isPrivateContext ? 0.75 : (isPublicContext ? 0.3 : 0.55);
-      if (isPublicContext && idorConfidence < 0.4) {
-        // Skip entirely for clearly public content pages to avoid extreme noise
-        continue;
-      }
+      // Adjust signal strength based on URL path and action context
+      const idorPotential: Lead['potential'] = hasActionPath
+        ? 'high'
+        : (isPrivateContext ? 'high' : (isPublicContext ? 'info' : 'medium'));
+      const idorConfidence = hasActionPath
+        ? 0.70
+        : (isPrivateContext ? 0.75 : (isPublicContext ? 0.35 : 0.55));
+
       leads.push({
         id: nextLeadId('PAR-IDOR'),
         ruleId: 'PAR-002',
@@ -177,16 +181,22 @@ export function detectParamLeads(
         tier: 'whisper',
         potential: idorPotential,
         confidence: idorConfidence,
-        title: `IDOR Candidate Parameter: ${name}`,
+        title: `IDOR Candidate Parameter: ${name}${hasActionPath ? ' (Action Path)' : ''}`,
         needs: ['verify whether parameter value controls access to another user\'s resource'],
         doesNotProve: ['insecure direct object reference without access control validation'],
         evidence: {
           preview: maskSecret(name),
           location: maskLocation(url),
           extractedNames: [name],
-          context: `Parameter '${name}' belongs to IDOR class; path context: ${isPrivateContext ? 'private' : (isPublicContext ? 'public' : 'neutral')}`,
+          context: `Parameter '${name}' belongs to IDOR class; path context: ${hasActionPath ? 'action' : (isPrivateContext ? 'private' : (isPublicContext ? 'public' : 'neutral'))}`,
         },
-        tags: ['idor-param', 'idor', 'param-lead'],
+        tags: [
+          'idor-param',
+          'idor',
+          'param-lead',
+          ...(hasActionPath ? ['action-path'] : []),
+          ...(isPublicContext ? ['public-context'] : []),
+        ],
         scopeStatus,
         timestamp: Date.now(),
         origin,

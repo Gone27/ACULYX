@@ -5,21 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.3] - 2026-10-23
+## [2.0.3] - 2026-10-24
 
 ### Security & Accuracy
+- **Zero-Trust Messaging Privacy Boundary Hardening (P0)**:
+  - Eliminated raw page-derived input values (`sourceValue`) across the extension messaging boundary.
+  - S3 main-world hooks now relay strictly category metadata (`sourceCategory`: `location.hash`, `location.search`, `document.referrer`, `window.name`, `window.postMessage`) without transmitting user-controlled strings to the background service worker.
+  - Added comprehensive multi-source canary taint leak integration tests in `tests/leads/canary-leak.test.ts`.
+- **F1 Generic Secret ReDoS Elimination (P1)**:
+  - Replaced exponential-backtracking generic secret regex with a bounded linear-time two-stage matcher (`/[a-zA-Z0-9_$-]{1,64}/` key token capture followed by bounded keyword validation).
+  - Added adversarial scaling benchmarks in `tests/leads/bounty-hardening.test.ts` verifying sub-second execution on 100 KB and 1 MB adversarial payloads.
+- **SSRF DNS Rebinding Elimination (P1)**:
+  - Implemented socket-level DNS connection pinning in CLI (`createPinnedLookup`).
+  - Intercepts hostname resolution during TCP/TLS socket creation, verifying that every resolved IP is non-private and pinning the socket connection to the validated address.
+  - Added unit test suite in `tests/cli.test.ts` verifying connection pinning and rejection of private IPs.
+- **Action-Path IDOR Parameter Intelligence (P1)**:
+  - Added action verb recognition (`/edit`, `/delete`, `/update`, `/modify`, `/download`, `/export`, etc.) to elevate IDOR potential on content routes.
+  - Expanded private context recognition to plural entities (`users`, `accounts`, `profiles`, `members`, `customers`, `teams`, `orgs`, `invoices`, `subscriptions`).
+  - Replaced silent IDOR lead drops on public content pages with low-noise whisper/info leads tagged `public-context`.
+- **Dependency Advisory Mitigation (P1)**:
+  - Pinned `body-parser` to secure patched versions (`>=1.20.3`) in `package.json` overrides.
+- **COOK-004 Cross-Browser Accuracy (P2)**:
+  - Updated rule finding text and recommendations to distinguish Chromium's Lax-by-default from Safari and default Firefox (which treat unlabelled cookies as `SameSite=None`), clarifying real-world CSRF exposure.
+- **Release Packaging Hardening (P2)**:
+  - Rewrote `scripts/pack-release.ps1` using .NET `ZipArchive` to strictly exclude development directories (`.agents`, `.system_generated`, `node_modules`, `.git`, `test-results`, `playwright-report`, `coverage`) and enforce standard RFC 1951 forward-slash entry paths.
 - **Bug Bounty Tool Hardening & Noise Reduction**:
   - **Lead ID Collision Resistance**: Replaced monotonic module-level `leadCounter` across all F1–F8 detectors with collision-free `crypto.randomUUID()` identifiers that survive service worker idle/sleep cycles.
   - **Secrets Detector (F1) Noise Reduction & Entropy Validation**:
     - Implemented standalone non-production marker detection in `isPlaceholder` (`test`, `demo`, `fake`, `mock`, `staging`).
     - Separated Discord bot token detection with per-segment HMAC entropy checking (`>= 4.0`), eliminating false positives on arbitrary base64 strings.
     - Increased hard-coded Bearer token length threshold to 32+ characters and enforced Shannon entropy `>= 3.5`.
-    - Replaced inner alternating capture group in `SEC-003` generic secret regex with non-backtracking character class `[^"'\`\r\n]{8,}` to eliminate ReDoS risk on large JavaScript bundles.
   - **Endpoint Detector (F2) Parameterized Template Literal Discovery**:
     - Added support for backtick template literal paths in network clients (`fetch`, `axios`, etc.), normalizing variable expressions `${...}` into `{param}` REST placeholders.
-  - **Parameter Harvesting (F5) Fragment Routing & Context-Aware IDOR**:
+  - **Parameter Harvesting (F5) Fragment Routing**:
     - Added URL hash fragment query parameter extraction (`#redirect_uri=...`), capturing client-side SPA and OAuth flow parameters.
-    - Implemented URL path context awareness for IDOR candidates: suppresses false-positive IDOR flags on public content paths (`/blog`, `/docs`, `/product`) while boosting confidence and potential on authenticated resource paths (`/account`, `/admin`, `/billing`).
   - **Header Leaks (F6) Target Infrastructure Whitelist**:
     - Restricted `INF-001` internal RFC1918/hostname disclosure scanning to genuine backend disclosure headers (`x-backend-server`, `x-real-ip`, etc.), avoiding false positives from client-originating `x-forwarded-for` headers.
   - **Response Body Detector (F7) Stack Trace Precision & GraphQL Introspection**:
@@ -32,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Lead Priority Triage Suppression**:
     - Set calculated priority to `0` for leads triaged as `false_positive`.
   - **Comprehensive Test Suite Expansion**:
-    - Added `tests/leads/bounty-hardening.test.ts` (12 tests) and `tests/rules/review-fixes.test.ts` (26 tests), expanding test coverage to **748 unit tests across 52 test suites** alongside 9 Playwright E2E browser tests.
+    - Expanded test suite to **756 unit tests across 52 test suites** alongside 9 Playwright E2E browser tests.
 - **Secrets Detector (F1) Pattern Fixes & Vendor Expansions**:
   - Corrected malformed OpenAI API key regex quantifier (`{20,}T3BlbkFJ`).
   - Added detection for GitHub fine-grained personal access tokens (`github_pat_`), Hugging Face access tokens (`hf_`), Discord bot tokens, Twilio Account SID & Auth Token credentials, and hard-coded Bearer tokens with Shannon entropy validation.

@@ -135,7 +135,7 @@ export interface MainWorldLeadsEventMessage {
   event: {
     eventType: 'sink' | 'postmessage_call' | 'postmessage_listener' | 'storage_write';
     sinkName?: string;
-    sourceValue?: string;
+    sourceCategory?: string;
     targetOrigin?: string;
     hasOriginCheck?: boolean;
     storageKey?: string;

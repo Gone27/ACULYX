@@ -109,12 +109,22 @@ export function sha256Hex(str: string): string {
     .join('');
 }
 
+const ALREADY_MASKED_RE = /^.{1,8}\.\.\..{1,4}\s+\(len\s+\d+\)\s+\[[0-9a-f]{16}\]$/;
+
 /**
  * Mask secret string preserving only prefix, suffix, length and short hash.
  */
 export function maskSecret(v: string): Masked<string> {
-  if (!v || v.length <= 6) {
+  if (!v || v.length <= 6 || v === '***') {
     return '***' as Masked<string>;
+  }
+
+  if (ALREADY_MASKED_RE.test(v)) {
+    return v as Masked<string>;
+  }
+
+  if (v.startsWith('Controlled input from ') && v.endsWith(' detected')) {
+    return v as Masked<string>;
   }
 
   // 64-bit cryptographic entropy hash (16 hex chars)

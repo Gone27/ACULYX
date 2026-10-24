@@ -120,19 +120,19 @@ function checkSameSiteMissing(
     provenance: 'cookie-metadata',
     outcome: effectiveOutcome,
     title: isSensitive
-      ? `Sensitive cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute — CSRF exposure risk on older browsers`
-      : `Cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute (defaults to Lax in modern browsers)`,
+      ? `Sensitive cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute — cross-site request exposure on Safari, Firefox, and legacy browsers`
+      : `Cookie "${sanitizeEvidence(cookie.name)}" has no explicit SameSite attribute (Lax in Chromium; None in Safari and standard Firefox)`,
     impact: isSensitive
-      ? 'Without an explicit SameSite attribute, this sensitive session cookie relies on browser Lax-by-default. Older clients (pre-Chrome 80, iOS 12 Safari) will send it with all cross-site requests, enabling CSRF attacks.'
-      : 'Modern browsers automatically enforce SameSite=Lax for this cookie, though older clients without Lax-by-default support may still attach it to cross-site requests.',
+      ? 'Without an explicit SameSite attribute, only Chromium-based browsers apply Lax-by-default. Browsers such as Apple Safari, iOS WebKit, and standard Firefox configurations do NOT default to Lax and continue to send unlabelled cookies with cross-site requests, leaving sensitive actions vulnerable to CSRF.'
+      : 'While Chromium defaults unlabelled cookies to SameSite=Lax, Safari and default Firefox installations do not enforce Lax-by-default and may attach the cookie to cross-site contexts.',
     evidence: sanitizeEvidence(cookie.name),
     recommendation: isSensitive
-      ? 'Add SameSite=Strict or SameSite=Lax to this sensitive cookie. Prefer Strict for authentication cookies.'
-      : 'Modern browsers (Chrome 80+, Firefox, Safari) enforce SameSite=Lax by default. Explicitly setting SameSite=Lax or Strict is recommended for defense-in-depth on legacy clients.',
+      ? 'Explicitly set SameSite=Strict or SameSite=Lax. Prefer SameSite=Strict for authentication and session management cookies, or SameSite=Lax for top-level navigation flows.'
+      : 'Explicitly declare SameSite=Lax or SameSite=Strict for defense-in-depth across non-Chromium browsers (Safari, Firefox) and legacy clients.',
     reference: REF_SAMESITE,
     limitations: isSensitive
-      ? ['Passive metadata inspection; sensitivity inferred from cookie name pattern.']
-      : ['Informational observation; modern browsers enforce Lax by default.'],
+      ? ['Passive metadata inspection; cross-browser default handling differs between Chromium (Lax) and Safari/Firefox (None).']
+      : ['Informational observation; cross-browser default handling differs between Chromium (Lax) and Safari/Firefox (None).'],
   };
 }
 
