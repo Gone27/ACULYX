@@ -26,6 +26,7 @@ import { executeHunterProbe } from '../leads/hunter/hunter';
 import { maskSecret, maskLocation } from '../leads/sieve/mask';
 import { ScopeEngine } from '../shared/scope/engine';
 import { originFromUrl } from '../rules/utils';
+import { canCollectForTab } from './capture-policy';
 import type {
   Lead,
   HunterProbeRequest,
@@ -130,6 +131,19 @@ export async function handleDomLeadsCollected(
   settings: SettingsV2
 ): Promise<LeadStateUpdateMessage> {
   const { url, origin, data, tabId } = msg;
+
+  // Authoritative monitoring & capture policy gate: Fail closed if Off, not permitted, or stale
+  if (!canCollectForTab(tabId ?? -1, url, { settings, generation: msg.generation })) {
+    return {
+      type: 'LEAD_STATE_UPDATE',
+      tabId: tabId ?? -1,
+      origin,
+      leads: [],
+      activeChains: [],
+      stats: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+    };
+  }
+
   const scopeStatus = resolveScopeStatus(url, settings);
 
   // Issue 4: Fail-closed scope gate — discard out-of-scope DOM collection
@@ -509,6 +523,19 @@ export function handleMainWorldEvent(
   settings: SettingsV2
 ): LeadStateUpdateMessage {
   const { url, origin, event, tabId } = msg;
+
+  // Authoritative monitoring & capture policy gate: Fail closed if Off, not permitted, or stale
+  if (!canCollectForTab(tabId ?? -1, url, { settings, generation: msg.generation })) {
+    return {
+      type: 'LEAD_STATE_UPDATE',
+      tabId: tabId ?? -1,
+      origin,
+      leads: [],
+      activeChains: [],
+      stats: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+    };
+  }
+
   if (typeof event !== 'object' || event === null || typeof event.eventType !== 'string') {
     return getLeadsState(tabId, origin);
   }

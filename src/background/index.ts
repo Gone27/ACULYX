@@ -17,7 +17,7 @@
 
 import { tabStates, initLifecycle, hydrateFromSession, originAuthBaselines } from './lifecycle';
 import { registerCaptureListeners, captureMap, clearInFlightCaptures, inFlightRequests, incognitoTabIds, registerParamHarvester } from './capture';
-import { CapturePolicy } from './capture-policy';
+import { CapturePolicy, canCollectForTab } from './capture-policy';
 import { correlateCookies } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
 import {
@@ -251,12 +251,12 @@ export const settingsReady = SettingsService.whenReady().then(async (s) => {
   currentSettings = s;
   settingsTransitionPipeline.setLastAppliedSettings(s);
   await CapturePolicy.refreshSnapshot();
-  void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true);
+  void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true && s.monitoringMode !== 'off');
   return s;
 });
 SettingsService.onSettingsChanged((s) => {
   currentSettings = s;
-  void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true);
+  void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true && s.monitoringMode !== 'off');
 });
 
 // Session hydration barrier (MV3 recovery)
@@ -975,6 +975,9 @@ registerParamHarvester((url, paramNames, tabId, isIncognito) => {
   if (isIncognito === true || incognitoTabIds.has(tabId)) {
     return;
   }
+  if (!canCollectForTab(tabId, url, { settings: currentSettings, isIncognito })) {
+    return;
+  }
   if (currentSettings.leadsEnabled === true) {
     void handleParamHarvest(url, paramNames, tabId, currentSettings);
   }
@@ -990,7 +993,7 @@ async function syncS3ScriptRegistration(enabled: boolean): Promise<void> {
     if (existing.length > 0) {
       await chrome.scripting.unregisterContentScripts({ ids: [S3_SCRIPT_ID] });
     }
-    if (enabled && currentSettings.leadsEnabled === true) {
+    if (enabled && currentSettings.leadsEnabled === true && currentSettings.monitoringMode !== 'off') {
       await chrome.scripting.registerContentScripts([
         {
           id: S3_SCRIPT_ID,
@@ -1009,8 +1012,7 @@ async function syncS3ScriptRegistration(enabled: boolean): Promise<void> {
 
 function injectLeadsCollectors(tabId: number, url: string): void {
   if (tabId < 0) return;
-  if (currentSettings.leadsEnabled !== true) return;
-  if (isRestrictedUrl(url)) return;
+  if (!canCollectForTab(tabId, url, { settings: currentSettings })) return;
   if (typeof chrome.scripting === 'undefined') return;
 
   void chrome.scripting
@@ -1042,13 +1044,17 @@ function injectLeadsCollectors(tabId: number, url: string): void {
 // S2 & S3: Navigation completion and history-state updates (SPAs) leads collector injection across all frames
 if (typeof chrome.webNavigation?.onCompleted?.addListener === 'function') {
   chrome.webNavigation.onCompleted.addListener((details): void => {
-    injectLeadsCollectors(details.tabId, details.url);
+    if (canCollectForTab(details.tabId, details.url, { settings: currentSettings })) {
+      injectLeadsCollectors(details.tabId, details.url);
+    }
   });
 }
 
 if (typeof chrome.webNavigation?.onHistoryStateUpdated?.addListener === 'function') {
   chrome.webNavigation.onHistoryStateUpdated.addListener((details): void => {
-    injectLeadsCollectors(details.tabId, details.url);
+    if (canCollectForTab(details.tabId, details.url, { settings: currentSettings })) {
+      injectLeadsCollectors(details.tabId, details.url);
+    }
   });
 }
 
@@ -1734,30 +1740,25 @@ chrome.runtime.onMessage.addListener(
     });
 
     if (message.type === 'DOM_LEADS_COLLECTED') {
-      // 1. Leads feature toggle check
-      if (currentSettings.leadsEnabled !== true) {
-        sendResponse(emptyDenialLeadsState(message.tabId, message.origin));
-        return false;
-      }
-      // 2. Sender validation: MUST come from a web page tab content script
+      // 1. Sender validation: MUST come from a web page tab content script
       if (!isContentScriptSender(_sender) || _sender.tab === undefined || typeof _sender.tab.id !== 'number') {
         sendResponse(emptyDenialLeadsState());
         return false;
       }
       const tabId = _sender.tab.id;
-      // 3. Incognito isolation: private browsing tabs must never enter persistent lead/recon stores
-      if (_sender.tab.incognito === true || incognitoTabIds.has(tabId)) {
-        sendResponse(emptyDenialLeadsState(tabId, message.origin));
-        return false;
-      }
-      // 4. Generation check: discard stale harvests from prior navigations
-      const currentGen = getTabGeneration(tabId);
-      if (message.generation !== undefined && message.generation !== currentGen) {
-        sendResponse(emptyDenialLeadsState(tabId, message.origin));
-        return false;
-      }
-      // 5. Derive trusted tab context from browser sender state
       const tabUrl = typeof _sender.tab.url === 'string' && _sender.tab.url.length > 0 ? _sender.tab.url : message.url;
+
+      // 2. Authoritative monitoring & capture policy gate: Fail closed if Off, not permitted, out of scope, or stale
+      if (!canCollectForTab(tabId, tabUrl, {
+        settings: currentSettings,
+        generation: message.generation,
+        isIncognito: _sender.tab.incognito,
+      })) {
+        sendResponse(emptyDenialLeadsState(tabId, message.origin));
+        return false;
+      }
+
+      // 3. Derive trusted tab context from browser sender state
       const safeOrigin = originFromUrl(tabUrl) ?? message.origin;
       const validatedMessage: DomLeadsCollectedMessage = {
         ...message,
@@ -1774,8 +1775,8 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'MAIN_WORLD_LEADS_EVENT') {
-      // 1. Feature toggle check: both leads and deep mode must be enabled
-      if (currentSettings.leadsEnabled !== true || currentSettings.deepModeEnabled !== true) {
+      // 1. Deep mode toggle check
+      if (currentSettings.deepModeEnabled !== true) {
         sendResponse(emptyDenialLeadsState(message.tabId, message.origin));
         return false;
       }
@@ -1785,18 +1786,18 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
       const tabId = _sender.tab.id;
-      // 3. Incognito isolation:
-      if (_sender.tab.incognito === true || incognitoTabIds.has(tabId)) {
-        sendResponse(emptyDenialLeadsState(tabId, message.origin));
-        return false;
-      }
-      // 4. Generation check:
-      const currentGen = getTabGeneration(tabId);
-      if (message.generation !== undefined && message.generation !== currentGen) {
-        sendResponse(emptyDenialLeadsState(tabId, message.origin));
-        return false;
-      }
       const tabUrl = typeof _sender.tab.url === 'string' && _sender.tab.url.length > 0 ? _sender.tab.url : message.url;
+
+      // 3. Authoritative monitoring & capture policy gate: Fail closed if Off, not permitted, out of scope, or stale
+      if (!canCollectForTab(tabId, tabUrl, {
+        settings: currentSettings,
+        generation: message.generation,
+        isIncognito: _sender.tab.incognito,
+      })) {
+        sendResponse(emptyDenialLeadsState(tabId, message.origin));
+        return false;
+      }
+
       const safeOrigin = originFromUrl(tabUrl) ?? message.origin;
       const validatedMessage: MainWorldLeadsEventMessage = {
         ...message,
@@ -1980,6 +1981,10 @@ chrome.runtime.onMessage.addListener(
       const targetTabId = message.tabId;
       const targetUrl = message.url;
       if (typeof targetTabId === 'number' && targetTabId >= 0 && typeof targetUrl === 'string' && targetUrl.length > 0) {
+        if (!canCollectForTab(targetTabId, targetUrl, { settings: currentSettings })) {
+          sendResponse({ success: false, error: 'Monitoring is off or capture not allowed for target' });
+          return false;
+        }
         injectLeadsCollectors(targetTabId, targetUrl);
         if (typeof chrome.tabs?.sendMessage === 'function') {
           void chrome.tabs.sendMessage(targetTabId, { type: 'RESCAN_DOM_LEADS' }).catch(() => undefined);

@@ -9,6 +9,9 @@ import { isRestrictedUrl } from '../shared/gating';
 import { originFromUrl } from '../rules/utils';
 import { SettingsService } from '../shared/settings';
 import { PermissionsService, normalizePermissionOrigin } from './permissions';
+import { incognitoTabIds } from './capture';
+import { getTabGeneration } from './generations';
+import { ScopeEngine } from '../shared/scope/engine';
 import type { SettingsV2 } from '../shared/types';
 
 export interface CapturePolicySnapshot {
@@ -76,6 +79,75 @@ export function isCaptureAllowedAtBoundary(
   }
 
   return false;
+}
+
+export interface CanCollectOptions {
+  generation?: number | undefined;
+  settings?: SettingsV2 | undefined;
+  isIncognito?: boolean | undefined;
+  snapshot?: CapturePolicySnapshot | undefined;
+}
+
+/**
+ * Authoritative shared gate for client-side DOM & S3 sensor injection and message receipt.
+ * Ensures that if monitoring is Off, permissions are revoked, tab is incognito,
+ * generation is stale, leads are disabled, or target is out-of-scope, sensor collection
+ * is immediately rejected without mutating state or persisting leads.
+ */
+export function canCollectForTab(
+  tabId: number | undefined,
+  url: string,
+  options: CanCollectOptions = {},
+): boolean {
+  if (!url || isRestrictedUrl(url)) return false;
+
+  // 1. Incognito isolation check
+  if (options.isIncognito === true) return false;
+  if (typeof tabId === 'number' && tabId >= 0) {
+    if (incognitoTabIds.has(tabId)) {
+      return false;
+    }
+    // 2. Navigation generation check (late arrival prevention)
+    if (options.generation !== undefined && options.generation !== getTabGeneration(tabId)) {
+      return false;
+    }
+  }
+
+  // 3. Settings check
+  if (options.settings) {
+    if (options.settings.monitoringMode === 'off') return false;
+    if (options.settings.leadsEnabled !== true) return false;
+
+    // 4. Scope policy check
+    if (
+      typeof options.settings.activeScopeProfileId === 'string' &&
+      options.settings.activeScopeProfileId.length > 0 &&
+      options.settings.scopeProfiles !== undefined &&
+      options.settings.scopeProfiles.length > 0
+    ) {
+      const activeId = options.settings.activeScopeProfileId;
+      const profile = options.settings.scopeProfiles.find((p) => p.id === activeId);
+      if (profile) {
+        const engine = new ScopeEngine(profile);
+        const evalResult = engine.evaluate(url);
+        if (evalResult.status === 'out-of-scope') {
+          return false;
+        }
+      }
+    }
+  }
+
+  const snapshot = options.snapshot ?? currentSnapshot;
+  // 5. If policy snapshot is initialized/ready, enforce boundary capture permissions
+  if (snapshot.ready) {
+    if (!isCaptureAllowedAtBoundary(url, snapshot)) {
+      return false;
+    }
+  } else if (snapshot.mode === 'off' && !options.settings) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
