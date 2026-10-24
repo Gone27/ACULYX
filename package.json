@@ -14,6 +14,8 @@
     "build": "vite build",
     "build:firefox": "vite build && node scripts/build-firefox.js",
     "build:hunter": "vite build && node scripts/build-hunter.js",
+    "pack": "powershell -ExecutionPolicy Bypass -File scripts/pack-release.ps1 -Target all",
+    "verify:pack": "node scripts/verify-release-zip.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
