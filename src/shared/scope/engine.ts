@@ -42,16 +42,18 @@ export class ScopeEngine {
   }
 
   public setRules(rules: ScopeRule[]): void {
-    this.rules = (rules ?? []).map((r) => {
-      const sanitized: ScopeRule = {
-        pattern: r.pattern,
-        type: r.type,
-      };
-      if (typeof r.description === 'string' && r.description.trim().length > 0) {
-        sanitized.description = r.description.trim();
-      }
-      return sanitized;
-    });
+    this.rules = (rules ?? [])
+      .filter((r) => r.type === 'include' || r.type === 'exclude')
+      .map((r) => {
+        const sanitized: ScopeRule = {
+          pattern: r.pattern,
+          type: r.type,
+        };
+        if (typeof r.description === 'string' && r.description.trim().length > 0) {
+          sanitized.description = r.description.trim();
+        }
+        return sanitized;
+      });
   }
 
   public getRules(): ScopeRule[] {
@@ -59,6 +61,9 @@ export class ScopeEngine {
   }
 
   public addRule(rule: ScopeRule): void {
+    if (rule.type !== 'include' && rule.type !== 'exclude') {
+      return;
+    }
     const sanitized: ScopeRule = {
       pattern: rule.pattern,
       type: rule.type,

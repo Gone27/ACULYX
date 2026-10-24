@@ -50,6 +50,41 @@ describe('Settings schema v2 and migration', () => {
     expect(v2.legacyAllowedOrigins).toEqual(['https://example.com', 'https://api.test']);
   });
 
+  it('never coerces an invalid or misspelled rule type into include and rejects malformed scope rules fail-closed', () => {
+    const rawWithInvalidRule = {
+      schemaVersion: 2,
+      scopeProfiles: [
+        {
+          id: 'test-profile',
+          name: 'Bug Bounty Target',
+          rules: [
+            { pattern: 'target.com', type: 'exlude' }, // Typo for exclude
+            { pattern: 'malformed.com', type: 'allow' }, // Unknown type
+            { pattern: 'legit.com', type: 'include' },
+            { pattern: 'blocked.com', type: 'exclude' },
+          ],
+        },
+      ],
+      activeScopeProfileId: 'test-profile',
+    };
+
+    const migrated = migrateSettings(rawWithInvalidRule);
+    const profile = migrated.scopeProfiles?.find((p) => p.id === 'test-profile');
+    expect(profile).toBeDefined();
+
+    // The invalid rule types ('exlude', 'allow') must NOT be coerced to 'include'
+    const targetRule = profile?.rules.find((r) => r.pattern === 'target.com');
+    const allowRule = profile?.rules.find((r) => r.pattern === 'malformed.com');
+    expect(targetRule).toBeUndefined();
+    expect(allowRule).toBeUndefined();
+
+    // Valid rules must be preserved
+    expect(profile?.rules).toEqual([
+      { pattern: 'legit.com', type: 'include' },
+      { pattern: 'blocked.com', type: 'exclude' },
+    ]);
+  });
+
   it('clamps retainHistoryDays (0..365) and maxHistoryPerOrigin (1..50)', () => {
     const clampedUnder = migrateSettings({
       schemaVersion: 2,

@@ -11,6 +11,7 @@
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from './constants';
 import type { Severity, SettingsV2, ScopeProfile, ScopeRule } from './types';
+import { validateScopeRule } from './scope/validate';
 import {
   storageWriteBarrier,
   getStorageResetEpoch,
@@ -221,13 +222,35 @@ export function migrateSettings(raw: unknown): SettingsV2 {
             ((r as Record<string, unknown>).pattern as string).trim().length > 0
           ) {
             const ruleObj = r as Record<string, unknown>;
+            const rawType = typeof ruleObj.type === 'string' ? ruleObj.type.trim().toLowerCase() : '';
+
+            // Fail-closed: Never coerce an unknown, misspelled, or invalid type to 'include'
+            if (rawType !== 'include' && rawType !== 'exclude') {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[ACULYX] Rejected malformed scope rule with invalid type "${String(ruleObj.type)}" for pattern "${String(ruleObj.pattern)}". Rule dropped fail-closed.`,
+              );
+              continue;
+            }
+
             const rule: ScopeRule = {
               pattern: ((ruleObj.pattern as string) ?? '').trim(),
-              type: ruleObj.type === 'exclude' ? 'exclude' : 'include',
+              type: rawType,
             };
             if (typeof ruleObj.description === 'string' && ruleObj.description.trim().length > 0) {
               rule.description = ruleObj.description.trim();
             }
+
+            // Validate rule pattern syntax fail-closed
+            const validation = validateScopeRule(rule);
+            if (!validation.valid) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[ACULYX] Rejected invalid scope rule: ${validation.error}. Rule dropped fail-closed.`,
+              );
+              continue;
+            }
+
             sanitizedRules.push(rule);
           }
         }
