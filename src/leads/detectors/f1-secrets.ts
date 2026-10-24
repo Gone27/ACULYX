@@ -1005,20 +1005,41 @@ export function detectSecrets(
       valTrim.startsWith('http://') ||
       valTrim.startsWith('https://') ||
       valTrim.startsWith('//') ||
-      valTrim.startsWith('/') ||
       valTrim.startsWith('./') ||
       valTrim.startsWith('../') ||
       valTrim.startsWith('data:')
     ) {
       continue;
     }
+
+    if (valTrim.startsWith('/')) {
+      const isPathKey =
+        keyLower.includes('path') ||
+        keyLower.includes('route') ||
+        keyLower.includes('endpoint') ||
+        keyLower.includes('url') ||
+        keyLower.includes('uri') ||
+        keyLower.includes('dir') ||
+        keyLower.includes('file');
+      const isPathStructure =
+        isPathKey ||
+        /\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+/.test(valTrim) ||
+        /\.(?:js|css|html|json|png|jpg|jpeg|gif|svg|ico|wasm|map|txt|xml|woff2?|ttf|eot)(?:[?#]|$)/i.test(valTrim) ||
+        /^\/[a-z0-9_-]+$/.test(valTrim);
+
+      if (isPathStructure) {
+        continue;
+      }
+    }
+
     // High-entropy secret tokens do not contain spaces or tabs
     if (valTrim.includes(' ') || valTrim.includes('\t')) {
       continue;
     }
 
     const entropy = calculateEntropy(valTrim);
-    if ((valTrim.length >= 16 && entropy > 2.8) || (valTrim.length >= 8 && entropy > 3.0)) {
+    const minEntropy = valTrim.startsWith('/') ? 3.2 : 2.8;
+    if ((valTrim.length >= 16 && entropy > minEntropy) || (valTrim.length >= 8 && !valTrim.startsWith('/') && entropy > 3.0)) {
       leads.push({
         id: nextLeadId('SEC-GEN'),
         ruleId: 'SEC-003',

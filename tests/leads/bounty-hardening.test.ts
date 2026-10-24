@@ -55,6 +55,22 @@ describe('Bounty Hardening: F1 Secrets', () => {
     const elapsed1mb = performance.now() - start1mb;
     expect(elapsed1mb).toBeLessThan(1500);
   });
+
+  it('detects slash-leading high-entropy credentials while ignoring standard paths under path-like keys', () => {
+    // 1. High-entropy credential starting with / under secret key: MUST be detected
+    const slashSecret = 'const api_secret = "/7bX9qK2mP8vL4wZ1yC5dE0fG=";';
+    const detected = detectSecrets(slashSecret, 'https://example.com/app.js');
+    expect(detected.some(l => l.ruleId === 'SEC-003')).toBe(true);
+
+    // 2. Normal path under path/endpoint key or standard multi-segment route: MUST NOT be detected
+    const normalPath = 'const login_endpoint_path = "/auth/v1/oauth/token";';
+    const notDetected = detectSecrets(normalPath, 'https://example.com/app.js');
+    expect(notDetected.filter(l => l.ruleId === 'SEC-003')).toHaveLength(0);
+
+    const assetPath = 'const token_icon_url = "/assets/icons/token-logo.png";';
+    const notDetectedAsset = detectSecrets(assetPath, 'https://example.com/app.js');
+    expect(notDetectedAsset.filter(l => l.ruleId === 'SEC-003')).toHaveLength(0);
+  });
 });
 
 describe('Bounty Hardening: F2 Template Literal Endpoints', () => {
