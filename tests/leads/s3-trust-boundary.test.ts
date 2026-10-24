@@ -205,4 +205,47 @@ describe('S3 Event Trust Boundary & Schema Validation', () => {
     const resBadType = handleMainWorldEvent(badTypeMsg, DEFAULT_SETTINGS);
     expect(resBadType.leads.filter(l => l.sourceSensor === 'S3')).toHaveLength(0);
   });
+
+  it('guarantees page-controlled text in details, storageKey, targetOrigin cannot leak canaries into runtime messages or stored lead fields', () => {
+    initDomCollector();
+
+    const canaryDetails = 'CANARY_DETAILS_SECRET_999';
+    const canaryStorage = 'CANARY_STORAGE_KEY_888';
+    const canaryOrigin = 'CANARY_ORIGIN_777';
+
+    // Dispatch custom event with canaries in page-controllable text fields
+    const sinkDetail = {
+      eventType: 'sink',
+      sinkName: 'Element.innerHTML',
+      sourceCategory: 'location.hash',
+      details: `Exploit string ${canaryDetails}`,
+      storageKey: `key_${canaryStorage}`,
+      targetOrigin: `http://${canaryOrigin}.com`,
+    };
+
+    window.dispatchEvent(new CustomEvent('__ACULYX_MAIN_WORLD_EVENT__', { detail: sinkDetail }));
+
+    expect(sentMessages.length).toBe(1);
+    const sent = sentMessages[0] as MainWorldLeadsEventMessage;
+
+    // Outgoing runtime message must NOT contain the canaries
+    const sentJson = JSON.stringify(sent);
+    expect(sentJson).not.toContain(canaryDetails);
+    expect(sentJson).not.toContain(canaryStorage);
+    expect(sentJson).not.toContain(canaryOrigin);
+
+    // Process through background leads handler
+    const res = handleMainWorldEvent(sent, DEFAULT_SETTINGS);
+
+    // Stored lead fields, evidence, and context must NOT contain any canaries
+    const resJson = JSON.stringify(res);
+    expect(resJson).not.toContain(canaryDetails);
+    expect(resJson).not.toContain(canaryStorage);
+    expect(resJson).not.toContain(canaryOrigin);
+
+    const leadStoreJson = JSON.stringify(globalLeadStore.getAllLeads());
+    expect(leadStoreJson).not.toContain(canaryDetails);
+    expect(leadStoreJson).not.toContain(canaryStorage);
+    expect(leadStoreJson).not.toContain(canaryOrigin);
+  });
 });

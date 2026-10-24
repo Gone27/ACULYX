@@ -126,6 +126,34 @@ export interface DomLeadsCollectedMessage {
   };
 }
 
+export const S3_ALLOWED_SINKS = new Set([
+  'Element.innerHTML',
+  'Element.outerHTML',
+  'Element.insertAdjacentHTML',
+  'document.write',
+  'document.writeln',
+  'window.eval',
+  'setTimeout(string)',
+  'location.assign',
+  'location.replace',
+]);
+
+export const S3_ALLOWED_SOURCE_CATEGORIES = new Set([
+  'location.hash',
+  'location.search',
+  'document.referrer',
+  'window.name',
+  'window.postMessage',
+  'controlled input',
+]);
+
+export const S3_ALLOWED_EVENT_TYPES = new Set([
+  'sink',
+  'postmessage_call',
+  'postmessage_listener',
+  'storage_write',
+]);
+
 export interface MainWorldLeadsEventMessage {
   type: 'MAIN_WORLD_LEADS_EVENT';
   tabId?: number;
@@ -134,14 +162,14 @@ export interface MainWorldLeadsEventMessage {
   generation?: number;
   event: {
     eventType: 'sink' | 'postmessage_call' | 'postmessage_listener' | 'storage_write';
-    sinkName?: string;
-    sourceCategory?: string;
-    targetOrigin?: string;
-    hasOriginCheck?: boolean;
-    storageKey?: string;
-    tokenShape?: string;
-    location?: string;
-    details?: string;
+    sinkName?: string | undefined;
+    sourceCategory?: string | undefined;
+    targetOrigin?: string | undefined;
+    hasOriginCheck?: boolean | undefined;
+    storageKey?: string | undefined;
+    tokenShape?: string | undefined;
+    location?: string | undefined;
+    details?: string | undefined;
   };
 }
 

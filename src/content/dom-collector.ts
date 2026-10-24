@@ -301,33 +301,16 @@ function sanitizeClientUrl(rawUrl: string): string {
   }
 }
 
-export const ALLOWED_SINKS = new Set([
-  'Element.innerHTML',
-  'Element.outerHTML',
-  'Element.insertAdjacentHTML',
-  'document.write',
-  'document.writeln',
-  'window.eval',
-  'setTimeout(string)',
-  'location.assign',
-  'location.replace',
-]);
+import {
+  S3_ALLOWED_SINKS,
+  S3_ALLOWED_SOURCE_CATEGORIES,
+  S3_ALLOWED_EVENT_TYPES,
+  type MainWorldLeadsEventMessage,
+} from '../shared/messaging';
 
-export const ALLOWED_SOURCE_CATEGORIES = new Set([
-  'location.hash',
-  'location.search',
-  'document.referrer',
-  'window.name',
-  'window.postMessage',
-  'controlled input',
-]);
-
-export const ALLOWED_EVENT_TYPES = new Set([
-  'sink',
-  'postmessage_call',
-  'postmessage_listener',
-  'storage_write',
-]);
+export const ALLOWED_SINKS = S3_ALLOWED_SINKS;
+export const ALLOWED_SOURCE_CATEGORIES = S3_ALLOWED_SOURCE_CATEGORIES;
+export const ALLOWED_EVENT_TYPES = S3_ALLOWED_EVENT_TYPES;
 
 let domCollectorInstalledInClosure = false;
 let triggerCollectionFn: (() => void) | null = null;
@@ -381,7 +364,9 @@ export function initDomCollector(): void {
       const typeCount = eventCountsByType.get(eventType) ?? 0;
       if (typeCount >= MAX_EVENTS_PER_TYPE) return;
 
-      // 3. Validate sink payload
+      // 3. Strict schema extraction and validation per eventType (reject page-controlled arbitrary strings)
+      let safeDetail: MainWorldLeadsEventMessage['event'] | null = null;
+
       if (eventType === 'sink') {
         if (typeof detail.sinkName !== 'string' || !ALLOWED_SINKS.has(detail.sinkName)) {
           return;
@@ -389,19 +374,54 @@ export function initDomCollector(): void {
         if (typeof detail.sourceCategory === 'string' && !ALLOWED_SOURCE_CATEGORIES.has(detail.sourceCategory)) {
           return;
         }
+        const sinkName = detail.sinkName;
+        const sourceCategory = typeof detail.sourceCategory === 'string'
+          ? detail.sourceCategory
+          : 'controlled input';
+        safeDetail = {
+          eventType: 'sink',
+          sinkName,
+          sourceCategory,
+          details: `Sink ${sinkName} invoked with ${sourceCategory}`,
+        };
+      } else if (eventType === 'postmessage_call') {
+        if (detail.targetOrigin !== '*') {
+          return;
+        }
+        safeDetail = {
+          eventType: 'postmessage_call',
+          targetOrigin: '*',
+          details: 'window.postMessage sent message to wildcard target origin "*"',
+        };
+      } else if (eventType === 'postmessage_listener') {
+        safeDetail = {
+          eventType: 'postmessage_listener',
+          hasOriginCheck: detail.hasOriginCheck === true,
+          details: 'Message listener registered without origin validation check',
+        };
+      } else if (eventType === 'storage_write') {
+        if (typeof detail.storageKey !== 'string' || detail.storageKey.length === 0) {
+          return;
+        }
+        const sanitizedKey = detail.storageKey.slice(0, 64).replace(/[^\w.:-]/g, '');
+        if (sanitizedKey.length === 0) return;
+
+        const allowedShapes = new Set(['JWT (JSON Web Token)', 'Bearer Token', 'High-Entropy Hex Token']);
+        const tokenShape = typeof detail.tokenShape === 'string' && allowedShapes.has(detail.tokenShape)
+          ? detail.tokenShape
+          : undefined;
+
+        safeDetail = {
+          eventType: 'storage_write',
+          storageKey: sanitizedKey,
+          tokenShape,
+          details: tokenShape !== undefined
+            ? `Storage write to key "${sanitizedKey}" contains ${tokenShape} shape in memory`
+            : `Storage write to key "${sanitizedKey}" observed`,
+        };
       }
 
-      // 4. Strict payload caps: clamp string lengths and strictly extract only allowed primitive properties
-      const safeDetail = {
-        eventType,
-        sinkName: typeof detail.sinkName === 'string' && ALLOWED_SINKS.has(detail.sinkName) ? detail.sinkName : undefined,
-        sourceCategory: typeof detail.sourceCategory === 'string' && ALLOWED_SOURCE_CATEGORIES.has(detail.sourceCategory) ? detail.sourceCategory : undefined,
-        targetOrigin: typeof detail.targetOrigin === 'string' ? detail.targetOrigin.slice(0, 128) : undefined,
-        hasOriginCheck: typeof detail.hasOriginCheck === 'boolean' ? detail.hasOriginCheck : undefined,
-        storageKey: typeof detail.storageKey === 'string' ? detail.storageKey.slice(0, 64) : undefined,
-        tokenShape: typeof detail.tokenShape === 'string' ? detail.tokenShape.slice(0, 64) : undefined,
-        details: typeof detail.details === 'string' ? detail.details.slice(0, 256) : undefined,
-      };
+      if (safeDetail === null) return;
 
       eventCountsByType.set(eventType, typeCount + 1);
       totalMainWorldEventCount++;

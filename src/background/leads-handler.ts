@@ -33,10 +33,12 @@ import type {
   HunterLedgerEntry,
   HunterConfig,
 } from '../leads/types';
-import type {
-  DomLeadsCollectedMessage,
-  MainWorldLeadsEventMessage,
-  LeadStateUpdateMessage,
+import {
+  S3_ALLOWED_SINKS,
+  S3_ALLOWED_SOURCE_CATEGORIES,
+  type DomLeadsCollectedMessage,
+  type MainWorldLeadsEventMessage,
+  type LeadStateUpdateMessage,
 } from '../shared/messaging';
 import type { SettingsV2 } from '../shared/types';
 
@@ -564,16 +566,17 @@ export function handleMainWorldEvent(
   }
 
   if (event.eventType === 'sink') {
-    if (typeof event.sinkName !== 'string' || event.sinkName.length === 0) {
+    if (typeof event.sinkName !== 'string' || event.sinkName.length === 0 || !S3_ALLOWED_SINKS.has(event.sinkName)) {
       return getLeadsState(tabId, origin);
     }
-    const allowedSources = ['location.hash', 'location.search', 'document.referrer', 'window.name', 'window.postMessage', 'controlled input'];
-    if (typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0 && !allowedSources.includes(event.sourceCategory)) {
+    if (typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0 && !S3_ALLOWED_SOURCE_CATEGORIES.has(event.sourceCategory)) {
       return getLeadsState(tabId, origin);
     }
+    const sourceCategory = typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0
+      ? event.sourceCategory
+      : 'controlled input';
     const sinkName = event.sinkName;
-    const sourceCategory = typeof event.sourceCategory === 'string' && event.sourceCategory.length > 0 ? event.sourceCategory : 'controlled input';
-    const contextStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : `Assigned to ${sinkName}`;
+    const contextStr = `Sink ${sinkName} invoked with ${sourceCategory}`;
     const lead: Lead = {
       id: nextId('SINK-TAINT'),
       ruleId: 'PAR-004',
@@ -598,7 +601,7 @@ export function handleMainWorldEvent(
     };
     globalLeadStore.addLead(lead, tabId);
   } else if (event.eventType === 'postmessage_call') {
-    const detailsStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : 'postMessage(*)';
+    const detailsStr = 'window.postMessage sent message to wildcard target origin "*"';
     const lead: Lead = {
       id: nextId('POST-WILD'),
       ruleId: 'IFR-001',
@@ -623,7 +626,7 @@ export function handleMainWorldEvent(
     };
     globalLeadStore.addLead(lead, tabId);
   } else if (event.eventType === 'postmessage_listener') {
-    const detailsStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : 'message listener missing origin check';
+    const detailsStr = 'Message listener registered without origin validation check';
     const lead: Lead = {
       id: nextId('POST-NO-ORIGIN'),
       ruleId: 'IFR-002',
@@ -648,9 +651,20 @@ export function handleMainWorldEvent(
     };
     globalLeadStore.addLead(lead, tabId);
   } else if (event.eventType === 'storage_write') {
-    const keyStr = typeof event.storageKey === 'string' && event.storageKey.length > 0 ? event.storageKey : 'key';
-    const previewStr = typeof event.storageKey === 'string' && event.storageKey.length > 0 ? event.storageKey : 'storage-token';
-    const contextStr = typeof event.details === 'string' && event.details.length > 0 ? event.details : `Key: ${keyStr}`;
+    const rawKey = typeof event.storageKey === 'string'
+      ? event.storageKey.slice(0, 64).replace(/[^\w.:-]/g, '')
+      : '';
+    if (rawKey.length === 0) {
+      return getLeadsState(tabId, origin);
+    }
+    const safeKey = maskSecret(rawKey);
+    const allowedShapes = ['JWT (JSON Web Token)', 'Bearer Token', 'High-Entropy Hex Token'];
+    const tokenShape = typeof event.tokenShape === 'string' && allowedShapes.includes(event.tokenShape)
+      ? event.tokenShape
+      : undefined;
+    const contextStr = tokenShape !== undefined
+      ? `Storage write to key "${safeKey}" contains ${tokenShape} shape in memory`
+      : `Storage write to key "${safeKey}" observed`;
     const lead: Lead = {
       id: nextId('STOR-TOKEN'),
       ruleId: 'AUTH-003',
@@ -658,15 +672,15 @@ export function handleMainWorldEvent(
       tier: 'whisper',
       potential: 'info',
       confidence: 0.65,
-      title: `[Page-Reported] Sensitive Token Stored in Web Storage (${keyStr})`,
+      title: `[Page-Reported] Client-Side Storage Token Write Observed (${safeKey})`,
       needs: ['check if tokens stored in localStorage are vulnerable to XSS exfiltration'],
       doesNotProve: ['token compromise'],
       evidence: {
-        preview: maskSecret(previewStr),
+        preview: safeKey,
         location: maskLocation(sanitizedUrl),
         context: contextStr,
       },
-      tags: ['page-reported', 'storage', 'jwt', 'auth-token', keyStr],
+      tags: ['page-reported', 'storage', 'token', 'auth-lead'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
