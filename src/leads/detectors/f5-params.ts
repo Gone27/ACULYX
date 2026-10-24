@@ -28,6 +28,7 @@ const FILE_PARAMS = new Set([
 const IDOR_PARAMS = new Set([
   'id', 'user_id', 'account_id', 'doc_id', 'order_id', 'profile_id',
   'uuid', 'uid', 'customer_id', 'member_id', 'team_id', 'org_id',
+  'item', 'item_id', 'product_id', 'post_id', 'file_id', 'invoice_id',
 ]);
 
 const DEBUG_PARAMS = new Set([
@@ -183,12 +184,15 @@ export function detectParamLeads(
         confidence: idorConfidence,
         title: `IDOR Candidate Parameter: ${name}${hasActionPath ? ' (Action Path)' : ''}`,
         needs: ['verify whether parameter value controls access to another user\'s resource'],
-        doesNotProve: ['insecure direct object reference without access control validation'],
+        doesNotProve: [
+          'insecure direct object reference without access control validation',
+          'that the server fails to authorize the caller',
+        ],
         evidence: {
           preview: maskSecret(name),
           location: maskLocation(url),
           extractedNames: [name],
-          context: `Parameter '${name}' belongs to IDOR class; path context: ${hasActionPath ? 'action' : (isPrivateContext ? 'private' : (isPublicContext ? 'public' : 'neutral'))}`,
+          context: `Parameter '${name}' matches IDOR naming pattern; path context: ${hasActionPath ? 'action route (elevated priority ranking)' : (isPrivateContext ? 'authenticated/private context' : (isPublicContext ? 'public content path (informational signal)' : 'neutral context'))}; passive observation does not prove missing authorization.`,
         },
         tags: [
           'idor-param',

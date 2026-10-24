@@ -117,6 +117,23 @@ describe('COOK-004 — SameSite absent', () => {
     // SameSite=none is not "missing" — different rule
     expect(ruleIds([makeCookie({ sameSite: 'none', secure: true })])).not.toContain('COOK-004');
   });
+
+  it('produces conservative, source-backed finding copy for COOK-004', () => {
+    const findingsSensitive = checkCookies([makeCookie({ name: 'auth_session', sameSite: '' })], true);
+    const findingS = findingsSensitive.find((f) => f.ruleId === 'COOK-004');
+    expect(findingS).toBeDefined();
+    expect(findingS?.title).toBe('Sensitive cookie "auth_session" has no explicit SameSite attribute');
+    expect(findingS?.impact).toContain('Without an explicit SameSite attribute, cookie transmission depends on client browser implementation and configuration');
+    expect(findingS?.recommendation).toContain('Explicitly declare SameSite=Strict or SameSite=Lax rather than relying on browser defaults');
+    expect(findingS?.limitations?.[0]).toContain('Passive cookie metadata inspection');
+
+    const findingsNonSensitive = checkCookies([makeCookie({ name: 'ui_theme', sameSite: '' })], true);
+    const findingNS = findingsNonSensitive.find((f) => f.ruleId === 'COOK-004');
+    expect(findingNS).toBeDefined();
+    expect(findingNS?.title).toBe('Cookie "ui_theme" has no explicit SameSite attribute');
+    expect(findingNS?.impact).toContain('Without an explicit SameSite attribute, browser handling of unlabelled cookies depends on client version');
+    expect(findingNS?.recommendation).toContain('Explicitly set SameSite=Lax or SameSite=Strict');
+  });
 });
 
 // ---------------------------------------------------------------------------

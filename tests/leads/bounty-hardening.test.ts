@@ -114,6 +114,76 @@ describe('Bounty Hardening: F5 Params Context & Fragment Routing', () => {
     expect(accountLeads).toHaveLength(1);
     expect(accountLeads[0]?.potential).toBe('high');
   });
+
+  it('evaluates table-driven IDOR corpus distinguishing action verbs, public content, and benign routes', () => {
+    const corpus = [
+      {
+        url: 'https://example.com/post/42/edit?id=42',
+        shouldFire: true,
+        actionPath: true,
+        potential: 'high',
+      },
+      {
+        url: 'https://example.com/doc/9?id=9',
+        shouldFire: true,
+        actionPath: false,
+        potential: 'info',
+      },
+      {
+        url: 'https://example.com/users/5?user_id=5',
+        shouldFire: true,
+        actionPath: false,
+        potential: 'high',
+      },
+      {
+        url: 'https://example.com/products?item=5',
+        shouldFire: true,
+        actionPath: false,
+        potential: 'info',
+      },
+      {
+        url: 'https://example.com/editors?id=42',
+        shouldFire: true,
+        actionPath: false,
+        potential: 'medium',
+      },
+      {
+        url: 'https://example.com/share-button?id=42',
+        shouldFire: true,
+        actionPath: false,
+        potential: 'medium',
+      },
+      {
+        url: 'https://example.com/static/docs/help.html?id=42',
+        shouldFire: true,
+        actionPath: false,
+        potential: 'info',
+      },
+      {
+        url: 'https://example.com/app/dashboard?theme=dark&sort=asc',
+        shouldFire: false,
+        actionPath: false,
+        potential: null,
+      },
+    ];
+
+    for (const testCase of corpus) {
+      const leads = detectParamLeads(testCase.url).filter((l) => l.ruleId === 'PAR-002' && l.tags.includes('idor-param'));
+      if (testCase.shouldFire) {
+        expect(leads.length, `Expected IDOR lead for ${testCase.url}`).toBeGreaterThan(0);
+        const lead = leads[0];
+        expect(lead?.potential).toBe(testCase.potential);
+        if (testCase.actionPath) {
+          expect(lead?.tags).toContain('action-path');
+        } else {
+          expect(lead?.tags).not.toContain('action-path');
+        }
+        expect(lead?.doesNotProve).toContain('insecure direct object reference without access control validation');
+      } else {
+        expect(leads, `Expected NO IDOR lead for ${testCase.url}`).toHaveLength(0);
+      }
+    }
+  });
 });
 
 describe('Bounty Hardening: F6 Infrastructure Disclosures', () => {
