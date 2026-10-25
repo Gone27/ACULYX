@@ -1,12 +1,16 @@
 param(
     [string]$Target = "all",
-    [string]$OutputDir = "D:/Projects"
+    [string]$OutputDir = ""
 )
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$repoRoot = (Resolve-Path "D:/Projects/ACULYX").Path
+if (-not $OutputDir) {
+    $OutputDir = (Resolve-Path "$PSScriptRoot/../..").Path
+}
+
+$repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 
 function Pack-Folder([string]$SourceDir, [string]$DestZip, [string[]]$ExcludeDirs, [string[]]$ExcludeExtensions) {
     if (Test-Path $DestZip) {

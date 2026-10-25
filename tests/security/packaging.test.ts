@@ -310,7 +310,7 @@ describe('Release ZIP Packaging & Verifier', () => {
           browser_specific_settings: {
             gecko: {
               id: 'aculyx@dhyanpatel.com',
-              strict_min_version: '128.0',
+              strict_min_version: '140.0',
             },
           },
           permissions: ['storage', 'tabs'],

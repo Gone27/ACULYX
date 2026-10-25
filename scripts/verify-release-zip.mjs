@@ -336,17 +336,31 @@ if (isCli) {
   if (!zipPath) {
     if (process.env.ACULYX_ZIP_PATH) {
       zipPath = process.env.ACULYX_ZIP_PATH;
-    } else if (target === 'chrome') {
-      zipPath = 'D:/Projects/ACULYX-chrome.zip';
-    } else if (target === 'firefox') {
-      zipPath = 'D:/Projects/ACULYX-firefox.zip';
-    } else if (target === 'full') {
-      zipPath = 'D:/Projects/ACULYX-full.zip';
     } else {
-      zipPath = 'D:/Projects/ACULYX-source.zip';
-      if (!fs.existsSync(zipPath) && fs.existsSync('D:/Projects/ACULYX.zip')) {
-        zipPath = 'D:/Projects/ACULYX.zip';
-      }
+      const cwd = process.cwd();
+      const parentDir = path.resolve(cwd, '..');
+      const candidates = [
+        path.join(parentDir, `ACULYX-${target}.zip`),
+        path.join(cwd, `ACULYX-${target}.zip`),
+        path.join(parentDir, 'ACULYX-full.zip'),
+        path.join(cwd, 'ACULYX-full.zip'),
+        path.join(parentDir, 'ACULYX-source.zip'),
+        path.join(cwd, 'ACULYX-source.zip'),
+        path.join(parentDir, 'ACULYX.zip'),
+        path.join(cwd, 'ACULYX.zip'),
+        `D:/Projects/ACULYX-${target}.zip`,
+        'D:/Projects/ACULYX-full.zip',
+        'D:/Projects/ACULYX-source.zip',
+        'D:/Projects/ACULYX.zip',
+      ];
+      const found = candidates.find(p => {
+        try {
+          return fs.existsSync(p);
+        } catch {
+          return false;
+        }
+      });
+      zipPath = found || path.join(parentDir, `ACULYX-${target}.zip`);
     }
   }
 
