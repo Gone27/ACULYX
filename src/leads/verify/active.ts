@@ -67,11 +67,20 @@ export function interpretSourceMapProbe(outcome: HunterProbeOutcome): ActiveResu
     };
   }
   const st = res.status;
-  if (st === 401 || st === 403 || st === 404 || st === 410) {
+  if (st === 401 || st === 403) {
+    return {
+      status: 'uncertain',
+      summary: `Source map is not retrievable without authentication (HTTP ${st}).`,
+      checks: [check('sourcemap-fetch', 'inconclusive', `GET returned HTTP ${st}; access requires authentication.`)],
+      missing: ['Test with authorized session if permitted by program rules.'],
+      ran: true,
+    };
+  }
+  if (st === 404 || st === 410) {
     return {
       status: 'false_positive',
-      summary: `Source map is not retrievable without authentication (HTTP ${st}).`,
-      checks: [check('sourcemap-fetch', 'fail', `GET returned HTTP ${st}.`)],
+      summary: `Source map not found at referenced URL (HTTP ${st}).`,
+      checks: [check('sourcemap-fetch', 'fail', `GET returned HTTP ${st}; resource not found at this location.`)],
       missing: [],
       ran: true,
     };
@@ -88,20 +97,33 @@ export function interpretSourceMapProbe(outcome: HunterProbeOutcome): ActiveResu
         ran: true,
       };
     }
-    const looksLikeMap = /"version"\s*:\s*3/.test(body) && /"sources"\s*:\s*\[/.test(body);
-    if (looksLikeMap) {
-      const hasContent = /"sourcesContent"\s*:\s*\[/.test(body);
+
+    let parsedMap: Record<string, unknown> | null = null;
+    try {
+      const trimmed = body.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        const obj: unknown = JSON.parse(trimmed);
+        if (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
+          parsedMap = obj as Record<string, unknown>;
+        }
+      }
+    } catch {
+      parsedMap = null;
+    }
+
+    if (parsedMap !== null && parsedMap.version === 3 && Array.isArray(parsedMap.sources)) {
+      const hasContent = Array.isArray(parsedMap.sourcesContent) && parsedMap.sourcesContent.length > 0;
       return {
         status: 'confirmed',
         summary: hasContent
           ? 'Source map is publicly downloadable and embeds original source (sourcesContent).'
           : 'Source map is publicly downloadable (original file paths exposed).',
         checks: [
-          check('sourcemap-fetch', 'pass', `HTTP ${st}, valid source-map structure (version 3, sources[]).`),
+          check('sourcemap-fetch', 'pass', `HTTP ${st}, valid source-map JSON structure (version 3, ${parsedMap.sources.length} sources).`),
           check(
             'sourcemap-content',
             hasContent ? 'pass' : 'inconclusive',
-            hasContent ? 'sourcesContent present in first bytes.' : 'sourcesContent not seen in the sampled bytes.',
+            hasContent ? 'sourcesContent array present in source map.' : 'sourcesContent not present in parsed map.',
           ),
         ],
         missing: [],
@@ -158,10 +180,10 @@ export function interpretBucketProbe(outcome: HunterProbeOutcome, provider: 'aws
   }
   if ((st === 403 || st === 401) && /AccessDenied|Forbidden|AllAccessDisabled/i.test(body + ' ' + headerOf(res.headers, 'content-type'))) {
     return {
-      status: 'false_positive',
-      summary: 'Bucket exists but denies anonymous listing (default-secure).',
-      checks: [check('bucket-list', 'fail', `HTTP ${st} AccessDenied. Individual object ACLs were not tested.`)],
-      missing: [],
+      status: 'informational',
+      summary: `Bucket exists but anonymous listing is denied (HTTP ${st} AccessDenied); individual object read access was not tested.`,
+      checks: [check('bucket-list', 'inconclusive', `HTTP ${st} AccessDenied. Listing is denied. Object-level read permissions were not tested.`)],
+      missing: ['Test object-level read permissions on specific known object paths.'],
       ran: true,
     };
   }

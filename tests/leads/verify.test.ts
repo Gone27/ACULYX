@@ -269,11 +269,16 @@ describe('active interpreters (pure)', () => {
     },
   };
 
-  it('source map: confirmed only for a real map; HTML fallback and 404 are false positives', () => {
+  it('source map: confirmed only for valid bounded JSON map; HTML fallback and 404 are false positives, 401/403 are uncertain', () => {
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"],"sourcesContent":["x"]}', { 'content-type': 'application/json' })).status).toBe('confirmed');
-    expect(interpretSourceMapProbe(out(200, '<!doctype html><html></html>', { 'content-type': 'text/html' })).status).toBe('false_positive');
+    // Truncated / malformed JSON must not confirm
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"] ...truncated', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    // Non-JSON regex-only matches in HTML fallback
+    expect(interpretSourceMapProbe(out(200, '<!doctype html><html>"version": 3, "sources": []</html>', { 'content-type': 'text/html' })).status).toBe('false_positive');
     expect(interpretSourceMapProbe(out(404)).status).toBe('false_positive');
-    expect(interpretSourceMapProbe(out(403)).status).toBe('false_positive');
+    // 401/403: auth protected, not retrieved in this request, returns uncertain rather than false_positive
+    expect(interpretSourceMapProbe(out(403)).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(out(401)).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(500)).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(0)).status).toBe('uncertain');
     const b = interpretSourceMapProbe(blocked);
@@ -281,9 +286,15 @@ describe('active interpreters (pure)', () => {
     expect(b.ran).toBe(false);
   });
 
-  it('bucket: listing=confirmed, AccessDenied=false_positive, NoSuchBucket=likely, else uncertain', () => {
+  it('bucket: listing=confirmed, AccessDenied=informational (inconclusive check, never false_positive), NoSuchBucket=likely, else uncertain', () => {
     expect(interpretBucketProbe(out(200, '<?xml?><ListBucketResult>'), 'aws').status).toBe('confirmed');
-    expect(interpretBucketProbe(out(403, '<Error><Code>AccessDenied</Code></Error>'), 'aws').status).toBe('false_positive');
+    const denied = interpretBucketProbe(out(403, '<Error><Code>AccessDenied</Code></Error>'), 'aws');
+    expect(denied.status).toBe('informational');
+    expect(denied.checks[0]?.outcome).toBe('inconclusive');
+    expect(denied.checks[0]?.detail).toContain('AccessDenied');
+    expect(denied.checks[0]?.detail).toContain('Object-level read permissions were not tested');
+    expect(denied.missing.some((m) => m.includes('object-level read'))).toBe(true);
+
     expect(interpretBucketProbe(out(404, '<Error><Code>NoSuchBucket</Code></Error>'), 'aws').status).toBe('likely');
     expect(interpretBucketProbe(out(301, 'PermanentRedirect'), 'aws').status).toBe('uncertain');
     expect(interpretBucketProbe(blocked, 'aws').ran).toBe(false);
