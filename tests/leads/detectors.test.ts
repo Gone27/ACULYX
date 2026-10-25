@@ -252,6 +252,24 @@ describe('Detector F7: Body-Aware', () => {
     expect(errLead?.potential).toBe('high');
   });
 
+  it('does not fire ERR-001 on documentation containing only the phrase Traceback (most recent call last): without stack frames', () => {
+    const docBody = '<html><body><h1>Python Guide</h1><p>In Python, unhandled exceptions print <code>Traceback (most recent call last):</code> followed by the frame stack.</p></body></html>';
+    const leads = detectBodyLeads(docBody, 'text/html', 'https://example.com/docs/python', 'in-scope');
+    expect(leads.filter(l => l.ruleId === 'ERR-001')).toHaveLength(0);
+  });
+
+  it('does not fire ERR-001 on documentation mentioning Illuminate\\ namespace without error context', () => {
+    const docBody = '<p>Import the namespace Illuminate\\Support\\Facades\\DB in your service provider.</p>';
+    const leads = detectBodyLeads(docBody, 'text/html', 'https://example.com/docs/laravel', 'in-scope');
+    expect(leads.filter(l => l.ruleId === 'ERR-001')).toHaveLength(0);
+  });
+
+  it('bounds response body processing to 512 KB', () => {
+    const hugeBody = 'A'.repeat(2 * 1024 * 1024);
+    const leads = detectBodyLeads(hugeBody, 'text/plain', 'https://example.com/huge', 'in-scope');
+    expect(leads).toHaveLength(0);
+  });
+
   it('detects excess data exposure in JSON APIs (API-001)', () => {
     const jsonBody = JSON.stringify({
       id: 1,

@@ -11,7 +11,7 @@
  * Pure DOM construction only (zero innerHTML/outerHTML).
  */
 
-import { detectBodyLeads } from '../leads/detectors/f7-body';
+import { detectBodyLeads, MAX_BODY_BYTES } from '../leads/detectors/f7-body';
 import { detectSecrets } from '../leads/detectors/f1-secrets';
 import { detectEndpoints } from '../leads/detectors/f2-endpoints';
 import { maskLocation } from '../leads/sieve/mask';
@@ -160,15 +160,16 @@ if (typeof chrome !== 'undefined' && typeof chrome.devtools?.network?.onRequestF
     request.getContent((rawContent) => {
       if (typeof rawContent !== 'string' || rawContent.length === 0) return;
 
-      // In-memory detector evaluation (F7: Body, F1: Secrets, F2: Endpoints)
-      const bodyLeads = detectBodyLeads(rawContent, mimeType, url, 'in-scope');
-      const secretLeads = detectSecrets(rawContent, url, 'in-scope');
-      const endpointLeads = (mimeType.includes('javascript') || mimeType.includes('json'))
-        ? detectEndpoints(rawContent, url, 'in-scope')
-        : [];
-
+      const boundedContent = rawContent.length > MAX_BODY_BYTES ? rawContent.slice(0, MAX_BODY_BYTES) : rawContent;
       // CRITICAL: Explicitly decouple content so raw response is garbage collected immediately
       rawContent = '';
+
+      // In-memory detector evaluation (F7: Body, F1: Secrets, F2: Endpoints)
+      const bodyLeads = detectBodyLeads(boundedContent, mimeType, url, 'in-scope');
+      const secretLeads = detectSecrets(boundedContent, url, 'in-scope');
+      const endpointLeads = (mimeType.includes('javascript') || mimeType.includes('json'))
+        ? detectEndpoints(boundedContent, url, 'in-scope')
+        : [];
 
       const allLeads = [...bodyLeads, ...secretLeads, ...endpointLeads];
       if (allLeads.length === 0) return;

@@ -3,6 +3,8 @@ import { maskSecret, maskLocation } from '../sieve/mask';
 
 const SENSITIVE_JSON_KEYS = /^(password|password_hash|passwd|hash|secret|token|ssn|social_security|dob|date_of_birth|role|isadmin|is_admin|internal_.*|private_key)$/i;
 
+export const MAX_BODY_BYTES = 512 * 1024; // 512 KB bound
+
 function nextLeadId(prefix: string): string {
   const uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
@@ -19,6 +21,8 @@ export function detectBodyLeads(
   const leads: Lead[] = [];
   if (!body || typeof body !== 'string') return leads;
 
+  const boundedBody = body.length > MAX_BODY_BYTES ? body.slice(0, MAX_BODY_BYTES) : body;
+
   const origin = (() => {
     try {
       return new URL(url).origin;
@@ -28,18 +32,40 @@ export function detectBodyLeads(
   })();
 
   // 1. ERR-001: Stack Traces & Debug Pages
+  // Require multi-frame or exception corroboration to avoid false positives on documentation or help prose.
   const errorSignatures = [
-    { name: 'Python Traceback / Werkzeug', regex: /Traceback \(most recent call last\):|Werkzeug Debugger/i },
-    { name: 'Java Stack Trace', regex: /\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)[\s\S]{0,200}?\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)/ },
-    { name: 'Laravel Error', regex: /Illuminate\\|Whoops! There was an error\./i },
-    { name: 'Spring Whitelabel Error', regex: /Whitelabel Error Page/i },
-    { name: 'ASP.NET YSOD', regex: /Server Error in ['\/].*Application|Yellow Screen of Death/i },
-    { name: 'PHP Fatal Error / Warning', regex: /(?:Fatal error|Parse error|Warning):\s+.*in\s+.*\.php\s+on\s+line\s+\d+/i },
-    { name: 'Django Debug', regex: /You're seeing this error because you have <code>DEBUG = True<\/code>/i },
+    {
+      name: 'Python Traceback / Werkzeug',
+      regex: /(?:Traceback \(most recent call last\):[\s\S]{1,500}?\bFile\s+["'][^"']+["'],\s+line\s+\d+|Werkzeug Debugger)/i,
+    },
+    {
+      name: 'Java Stack Trace',
+      regex: /\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)[\s\S]{0,200}?\bat [a-zA-Z0-9_.]+\([A-Za-z0-9_]+\.java:\d+\)/,
+    },
+    {
+      name: 'Laravel Error',
+      regex: /(?:Whoops! There was an error\.|ErrorException in [^\s]+|QueryException in [^\s]+|Illuminate\\Database\\QueryException)/i,
+    },
+    {
+      name: 'Spring Whitelabel Error',
+      regex: /(?:Whitelabel Error Page[\s\S]{0,300}?(?:This application has no explicit mapping for \/error|There was an unexpected error))/i,
+    },
+    {
+      name: 'ASP.NET YSOD',
+      regex: /Server Error in ['\/].*Application|Yellow Screen of Death|\[HttpException \(0x[0-9a-fA-F]+\):/i,
+    },
+    {
+      name: 'PHP Fatal Error / Warning',
+      regex: /(?:Fatal error|Parse error|Warning):\s+.*in\s+.*\.php\s+on\s+line\s+\d+/i,
+    },
+    {
+      name: 'Django Debug',
+      regex: /You're seeing this error because you have <code>DEBUG = True<\/code>/i,
+    },
   ];
 
   for (const sig of errorSignatures) {
-    if (sig.regex.test(body)) {
+    if (sig.regex.test(boundedBody)) {
       leads.push({
         id: nextLeadId('ERR-STACK'),
         ruleId: 'ERR-001',
@@ -68,9 +94,9 @@ export function detectBodyLeads(
   }
 
   // 2. API-001: Excess Data Exposure in JSON Responses
-  if (contentType.toLowerCase().includes('application/json') || body.trim().startsWith('{') || body.trim().startsWith('[')) {
+  if (contentType.toLowerCase().includes('application/json') || boundedBody.trim().startsWith('{') || boundedBody.trim().startsWith('[')) {
     try {
-      const parsed: unknown = JSON.parse(body);
+      const parsed: unknown = JSON.parse(boundedBody);
       const sensitiveKeysFound = new Set<string>();
 
       const inspectObject = (obj: unknown, depth = 0) => {
