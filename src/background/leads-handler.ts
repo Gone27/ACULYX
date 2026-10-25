@@ -281,8 +281,9 @@ export async function handleDomLeadsCollected(
         }
       }
 
-      if (typeof script.sourceMappingURL === 'string' && script.sourceMappingURL.length > 0) {
+      if (typeof script.sourceMappingURL === 'string' && script.sourceMappingURL.length > 0 && !script.sourceMappingURL.startsWith('data:')) {
         const maskedScriptUrl = maskLocation(scriptUrl);
+        const maskedSmUrl = maskLocation(script.sourceMappingURL);
         const smLead: Lead = {
           id: nextId('MAP-REF'),
           ruleId: 'MAP-001',
@@ -290,11 +291,13 @@ export async function handleDomLeadsCollected(
           tier: 'observed',
           potential: 'low',
           confidence: 0.95,
-          title: `JavaScript Source Map Reference Detected: ${script.sourceMappingURL}`,
+          title: maskedSmUrl.length > 0
+            ? `JavaScript Source Map Reference Detected: ${maskedSmUrl}`
+            : 'JavaScript Source Map Reference Detected',
           needs: ['fetch .map file to inspect original TypeScript/JavaScript source code'],
           doesNotProve: ['source map is accessible without authorization'],
           evidence: {
-            preview: maskSecret(script.sourceMappingURL),
+            preview: maskedSmUrl.length > 0 ? maskedSmUrl : maskSecret(script.sourceMappingURL),
             location: maskLocation(scriptUrl),
             context: `Found sourceMappingURL in script tag`,
           },

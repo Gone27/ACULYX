@@ -177,6 +177,52 @@ describe('Detector F3: Source Maps', () => {
     const mapLead = leads.find(l => l.ruleId === 'MAP-001');
     expect(mapLead).toBeDefined();
   });
+
+  it('rejects invalid inline source map data URLs without emitting MAP-001 or MAP-002', () => {
+    const invalidCode = 'console.log("fail");\n//# sourceMappingURL=data:application/json;base64,not-valid';
+    const leads = detectSourceMaps(invalidCode, {}, 'https://example.com/app.js', 'in-scope');
+    expect(leads.filter(l => l.ruleId === 'MAP-001' || l.ruleId === 'MAP-002')).toHaveLength(0);
+  });
+
+  it('detects valid inline source map with internal build paths (MAP-002)', () => {
+    const validMap = {
+      version: 3,
+      sources: ['/Users/dev/project/src/index.ts', 'webpack:///internal/auth.ts'],
+    };
+    const b64 = Buffer.from(JSON.stringify(validMap)).toString('base64');
+    const code = `console.log("ok");\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+    const leads = detectSourceMaps(code, {}, 'https://example.com/app.js', 'in-scope');
+    const mapLead = leads.find(l => l.ruleId === 'MAP-002');
+    expect(mapLead).toBeDefined();
+    expect(mapLead?.title).toBe('Inline Source Map with Internal Build Paths');
+    expect(mapLead?.potential).toBe('medium');
+    expect(mapLead?.evidence.preview).toContain('/Users/dev/project/src/index.ts');
+  });
+
+  it('detects valid inline source map without internal build paths as generic inline map', () => {
+    const publicMap = {
+      version: 3,
+      sources: ['index.js', 'vendor.js'],
+    };
+    const b64 = Buffer.from(JSON.stringify(publicMap)).toString('base64');
+    const code = `console.log("ok");\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+    const leads = detectSourceMaps(code, {}, 'https://example.com/app.js', 'in-scope');
+    const mapLead = leads.find(l => l.ruleId === 'MAP-002');
+    expect(mapLead).toBeDefined();
+    expect(mapLead?.title).toBe('Inline JavaScript Source Map Detected');
+    expect(mapLead?.potential).toBe('low');
+  });
+
+  it('masks credentials and fragments in source map reference URLs (MAP-001)', () => {
+    const code = 'console.log("ready");\n//# sourceMappingURL=https://admin:supersecret@cdn.example.com/assets/app.js.map#access_token=xyz123';
+    const leads = detectSourceMaps(code, {}, 'https://example.com/bundle.js', 'in-scope');
+    const mapLead = leads.find(l => l.ruleId === 'MAP-001');
+    expect(mapLead).toBeDefined();
+    expect(mapLead?.title).not.toContain('supersecret');
+    expect(mapLead?.title).not.toContain('access_token=xyz123');
+    expect(mapLead?.evidence.preview).not.toContain('supersecret');
+    expect(mapLead?.evidence.preview).not.toContain('access_token=xyz123');
+  });
 });
 
 describe('Detector F4: Auth, OAuth, Forms', () => {

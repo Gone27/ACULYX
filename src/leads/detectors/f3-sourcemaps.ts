@@ -1,4 +1,4 @@
-import type { Lead } from '../types';
+import type { Lead, Masked } from '../types';
 import { maskSecret, maskLocation } from '../sieve/mask';
 
 function nextLeadId(prefix: string): string {
@@ -33,7 +33,8 @@ export function detectSourceMaps(
   const smComment = smCommentMatch !== null && smCommentMatch[1] !== undefined ? smCommentMatch[1] : undefined;
   const smTarget = smHeader !== undefined ? smHeader : smComment;
 
-  if (smTarget !== undefined && smTarget.length > 0) {
+  if (smTarget !== undefined && smTarget.length > 0 && !smTarget.startsWith('data:')) {
+    const maskedTarget = maskLocation(smTarget);
     leads.push({
       id: nextLeadId('MAP-REF'),
       ruleId: 'MAP-001',
@@ -41,11 +42,11 @@ export function detectSourceMaps(
       tier: 'observed',
       potential: 'low',
       confidence: 1.0,
-      title: 'JavaScript Source Map Reference Detected',
+      title: maskedTarget.length > 0 ? `JavaScript Source Map Reference Detected: ${maskedTarget}` : 'JavaScript Source Map Reference Detected',
       needs: ['fetch source map URL to verify unminified original source retrieval'],
       doesNotProve: ['original source code download succeeds', 'secrets in source code'],
       evidence: {
-        preview: maskSecret(smTarget),
+        preview: maskedTarget.length > 0 ? maskedTarget : maskSecret(smTarget),
         location: maskLocation(url),
         context: smHeader !== undefined ? 'SourceMap HTTP response header' : 'sourceMappingURL comment in script',
       },
@@ -53,55 +54,73 @@ export function detectSourceMaps(
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: maskLocation(url),
       sourceSensor: 'S2',
       remediation: 'Remove production source map references if unminified source code contains proprietary logic.',
     });
   }
 
   // 2. MAP-002: Inline Source Maps
-  if (code.length > 0 && code.includes('sourceMappingURL=data:application/json')) {
-    const inlineMatch = code.match(/sourceMappingURL=data:application\/json;base64,([A-Za-z0-9+/=]+)/);
-    const internalPaths: string[] = [];
+  let validMapParsed: Record<string, unknown> | null = null;
+  const inlineMatch = code.length > 0 ? code.match(/(?:\/\/|[\/][*])#\s*sourceMappingURL=data:application\/json([^,\s]*),([^\s*]+)/) : null;
+  if (inlineMatch !== null && inlineMatch[2] !== undefined) {
+    const meta = inlineMatch[1] ?? '';
+    const payload = inlineMatch[2];
+    try {
+      let jsonStr: string;
+      if (meta.includes('base64')) {
+        jsonStr = typeof atob !== 'undefined'
+          ? atob(payload)
+          : Buffer.from(payload, 'base64').toString('utf8');
+      } else {
+        jsonStr = decodeURIComponent(payload);
+      }
+      const parsed = JSON.parse(jsonStr) as unknown;
+      if (parsed !== null && typeof parsed === 'object') {
+        validMapParsed = parsed as Record<string, unknown>;
+      }
+    } catch {
+      validMapParsed = null;
+    }
+  }
 
-    if (inlineMatch !== null && inlineMatch[1] !== undefined && inlineMatch[1].length > 0) {
-      try {
-        const decoded = typeof atob !== 'undefined'
-          ? atob(inlineMatch[1])
-          : Buffer.from(inlineMatch[1], 'base64').toString('utf8');
-        const parsed = JSON.parse(decoded) as Record<string, unknown>;
-        if (Array.isArray(parsed.sources)) {
-          for (const s of parsed.sources) {
-            if (typeof s === 'string' && (s.includes('/Users/') || s.includes('/home/') || s.includes('C:\\') || s.startsWith('webpack:///'))) {
-              internalPaths.push(s);
-            }
-          }
+  if (validMapParsed !== null) {
+    const internalPaths: string[] = [];
+    if (Array.isArray(validMapParsed.sources)) {
+      for (const s of validMapParsed.sources) {
+        if (typeof s === 'string' && (s.includes('/Users/') || s.includes('/home/') || s.includes('C:\\') || s.startsWith('webpack:///'))) {
+          internalPaths.push(s);
         }
-      } catch {
-        // Fallback
       }
     }
 
+    const hasInternalPaths = internalPaths.length > 0;
     leads.push({
       id: nextLeadId('MAP-INLINE'),
       ruleId: 'MAP-002',
       family: 'F3',
       tier: 'observed',
-      potential: 'medium',
-      confidence: 1.0,
-      title: 'Inline Source Map with Internal Build Paths',
+      potential: hasInternalPaths ? 'medium' : 'low',
+      confidence: hasInternalPaths ? 1.0 : 0.85,
+      title: hasInternalPaths
+        ? 'Inline Source Map with Internal Build Paths'
+        : 'Inline JavaScript Source Map Detected',
       needs: ['inspect extracted source tree for hardcoded configs'],
-      doesNotProve: ['runtime exploitability'],
+      doesNotProve: hasInternalPaths
+        ? ['runtime exploitability']
+        : ['internal build paths disclosed', 'runtime exploitability'],
       evidence: {
-        preview: maskSecret(internalPaths.length > 0 ? internalPaths.slice(0, 3).join(', ') : 'Inline Data SourceMap'),
+        preview: (hasInternalPaths
+          ? internalPaths.slice(0, 3).map(p => maskLocation(p)).join(', ')
+          : 'Inline Data SourceMap') as Masked<string>,
         location: maskLocation(url),
-        extractedNames: internalPaths.slice(0, 10),
+        extractedNames: internalPaths.slice(0, 10).map(p => maskLocation(p)),
       },
-      tags: ['sourcemap', 'internal-paths'],
+      tags: hasInternalPaths ? ['sourcemap', 'internal-paths'] : ['sourcemap'],
       scopeStatus,
       timestamp: Date.now(),
       origin,
-      url,
+      url: maskLocation(url),
       sourceSensor: 'S2',
     });
   }
