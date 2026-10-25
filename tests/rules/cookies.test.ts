@@ -163,6 +163,11 @@ describe('COOK-005 — __Host- prefix violations', () => {
   it('does not fire on a cookie without __Host- prefix', () => {
     expect(ruleIds([makeCookie({ name: 'session' })])).not.toContain('COOK-005');
   });
+
+  it('does not fire on lowercase __host- lookalike because cookie prefix matching is strictly case-sensitive per RFC 6265bis', () => {
+    const c = makeCookie({ name: '__host-session', secure: false, path: '/app', domain: 'example.com' });
+    expect(ruleIds([c])).not.toContain('COOK-005');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -181,6 +186,11 @@ describe('COOK-006 — __Secure- prefix violations', () => {
 
   it('does not fire on a cookie without __Secure- prefix', () => {
     expect(ruleIds([makeCookie({ name: 'token', secure: false })])).not.toContain('COOK-006');
+  });
+
+  it('does not fire on lowercase __secure- lookalike because cookie prefix matching is strictly case-sensitive per RFC 6265bis', () => {
+    const c = makeCookie({ name: '__secure-token', secure: false });
+    expect(ruleIds([c])).not.toContain('COOK-006');
   });
 });
 

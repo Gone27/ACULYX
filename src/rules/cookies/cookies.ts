@@ -137,8 +137,8 @@ function checkSameSiteMissing(
 }
 
 function checkHostPrefix(cookie: CookieRecord): Finding | null {
-  const lowerName = cookie.name.toLowerCase();
-  if (!lowerName.startsWith('__host-')) return null;
+  // RFC 6265bis §4.1.3: Prefix matching is strictly case-sensitive.
+  if (!cookie.name.startsWith('__Host-')) return null;
   const violations: string[] = [];
   if (!cookie.secure) violations.push('Secure flag missing');
   if (cookie.path !== '/') violations.push(`Path is "${cookie.path}" (must be /)`);
@@ -163,8 +163,8 @@ function checkHostPrefix(cookie: CookieRecord): Finding | null {
 }
 
 function checkSecurePrefix(cookie: CookieRecord): Finding | null {
-  const lowerName = cookie.name.toLowerCase();
-  if (!lowerName.startsWith('__secure-')) return null;
+  // RFC 6265bis §4.1.3: Prefix matching is strictly case-sensitive.
+  if (!cookie.name.startsWith('__Secure-')) return null;
   if (cookie.secure) return null;
   return {
     ruleId: 'COOK-006',
@@ -183,9 +183,9 @@ function checkSecurePrefix(cookie: CookieRecord): Finding | null {
 }
 
 function checkHttpPrefix(cookie: CookieRecord): Finding | null {
-  const lowerName = cookie.name.toLowerCase();
-  const hostHttp = lowerName.startsWith('__host-http-');
-  const http = hostHttp || lowerName.startsWith('__http-');
+  // Prefix matching is strictly case-sensitive.
+  const hostHttp = cookie.name.startsWith('__Host-Http-');
+  const http = hostHttp || cookie.name.startsWith('__Http-');
   if (!http) return null;
   const violations: string[] = [];
   if (!cookie.secure) violations.push('Secure flag missing');

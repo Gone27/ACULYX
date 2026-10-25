@@ -334,7 +334,10 @@ export function isSensitiveCookie(
   if (alwaysIgnore.includes(name) || alwaysIgnore.includes(lowerName)) return { isSensitive: false, reason: 'override' };
   if (alwaysSensitive.includes(name) || alwaysSensitive.includes(lowerName)) return { isSensitive: true, reason: 'override' };
 
-  if (lowerName.startsWith('__host-') || lowerName.startsWith('__secure-')) return { isSensitive: true, reason: 'prefix' };
+  // Prefix checks per RFC 6265bis §4.1.3 are strictly case-sensitive
+  if (name.startsWith('__Host-') || name.startsWith('__Secure-') || name.startsWith('__Http-') || name.startsWith('__Host-Http-')) {
+    return { isSensitive: true, reason: 'prefix' };
+  }
   // A CSRF/XSRF marker does not make a *session* cookie harmless (e.g. "xsrf_session").
   if (
     /(^|[-_.:])(csrf|xsrf)([-_.:]|$)/i.test(name) &&
