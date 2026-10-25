@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Security, Accuracy & Lead Verification
+- **Classic Content Script Bundling Fix (P0)**:
+  - Eliminated runtime ES module imports inside classic script IIFEs injected via `chrome.scripting.executeScript`.
+  - Content script bundles now inline all required constants and enforce zero module import/export syntax during packaging.
+- **Lead Self-Check & Multi-Dimensional Verdict Engine (P1)**:
+  - Added objective 3-dimensional verdict taxonomy separating technical observation (`evidenceStatus`), scope authority boundary (`scopeStatus`), and researcher vulnerability assessment (`securityAssessment`).
+  - Separated technical detection from scope verification: unknown or out-of-scope targets can never produce a confirmed vulnerability.
+  - Added detection-time cryptographic facts (CRC32, Shannon entropy, JWT claims) without ledgering raw values.
+  - Calibrated token checksum validation to format and arithmetic specification matches rather than vendor minting claims.
+  - Fixed false-positive dismissal bugs: HTTP 403 `AccessDenied` on cloud bucket listings returns informational (inconclusive directory check, never false positive), and expired JWT tokens do not trigger an automatic FP veto.
+- **Active Probe Transparency & Consent UI (P1)**:
+  - Added `planActiveProbe` to compute and present comprehensive probe parameters prior to execution.
+  - Interactive confirmation dialogs disclose exact target URL, request count, method, credentials omission, redirect prevention, and all tested CORS origins (`null`, `https://evil.tld`, subdomains).
+  - See `docs/LEAD_VERIFICATION.md` for full architectural specification.
+
 ## [2.0.3] - 2026-10-24
 
 ### Security & Accuracy
