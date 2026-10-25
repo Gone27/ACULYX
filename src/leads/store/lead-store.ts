@@ -1,6 +1,7 @@
 import type { Lead, LeadFamily, EvidenceTier, LeadPotential, LeadSensor } from '../types';
 import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
+import { calculateLeadPriority } from '../ranking/ranking';
 
 const VALID_FAMILIES = new Set<LeadFamily>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
 const VALID_TIERS = new Set<EvidenceTier>(['observed', 'strong', 'weak', 'whisper']);
@@ -243,12 +244,14 @@ export class LeadStore {
         if (tabId !== undefined) {
           this.associateTabLead(tabId, existing.id);
         }
+        existing.priority = calculateLeadPriority(existing);
       }
       this.scheduleSave();
       return;
     }
 
     // New lead
+    lead.priority = calculateLeadPriority(lead);
     this.leadById.set(lead.id, lead);
     this.dedupMap.set(dedupKey, lead.id);
 
@@ -355,6 +358,7 @@ export class LeadStore {
     if (pinned !== undefined) {
       lead.pinned = pinned;
     }
+    lead.priority = calculateLeadPriority(lead);
     this.scheduleSave();
   }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateLeadPriority } from '../../src/leads/ranking/ranking';
+import { calculateLeadPriority, rankLeads } from '../../src/leads/ranking/ranking';
 import { evaluateChains, CHAINS } from '../../src/leads/chains/chains';
 import type { Lead } from '../../src/leads/types';
 import { maskSecret, maskLocation } from '../../src/leads/sieve/mask';
@@ -68,6 +68,29 @@ describe('Lead Ranking Formula', () => {
     // With chain boost (1.5) and novelty: 56 * 1.2 * 1.5 = 100.8
     const chainedNovelPriority = calculateLeadPriority(lead, true, true);
     expect(chainedNovelPriority).toBeCloseTo(100.8, 1);
+  });
+
+  it('dynamically recalculates priority in rankLeads and does not retain stale priority values', () => {
+    // Lead with stale high priority (95), but triageState changed to false_positive
+    const staleFpLead = createMockLead({
+      id: 'lead-fp',
+      priority: 95,
+      triageState: 'false_positive',
+    });
+    // Normal medium lead with lower priority (40)
+    const activeLead = createMockLead({
+      id: 'lead-active',
+      priority: 40,
+      potential: 'medium',
+      tier: 'observed',
+      scopeStatus: 'in-scope',
+    });
+
+    const ranked = rankLeads([staleFpLead, activeLead]);
+    // The active lead should be ranked first because staleFpLead is false_positive (priority 0)
+    expect(ranked[0]?.id).toBe('lead-active');
+    expect(ranked[1]?.id).toBe('lead-fp');
+    expect(ranked[1]?.priority).toBe(0);
   });
 });
 

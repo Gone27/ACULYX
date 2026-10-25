@@ -44,11 +44,14 @@ export function calculateLeadPriority(
 
 /**
  * Ranks an array of leads in descending order of calculated priority.
+ * Dynamically recomputes priority on every call so mutated scope, triage state,
+ * or vulnerability chains always update rankings and exported priority.
  */
 export function rankLeads(leads: Lead[]): Lead[] {
-  return [...leads].sort((a, b) => {
-    const pA = a.priority ?? calculateLeadPriority(a);
-    const pB = b.priority ?? calculateLeadPriority(b);
-    return pB - pA;
-  });
+  return [...leads]
+    .map(lead => {
+      const priority = calculateLeadPriority(lead);
+      return { ...lead, priority };
+    })
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 }
