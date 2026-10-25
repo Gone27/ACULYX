@@ -145,6 +145,41 @@ describe('Leads Boundary, Scope Isolation & Recon Store Gates', () => {
       const mem = await getReconMemory();
       expect(mem.endpoints.find((e) => e.path.includes('cdn-admin'))).toBeUndefined();
     });
+
+    it('propagates form input types and detects cleartext password form submission in DOM leads', async () => {
+      const msg: DomLeadsCollectedMessage = {
+        type: 'DOM_LEADS_COLLECTED',
+        tabId: 102,
+        url: 'https://target.com/login',
+        origin: 'https://target.com',
+        data: {
+          forms: [
+            {
+              action: 'http://auth.target.com/do-login',
+              method: 'POST',
+              inputNames: ['username', 'passwd'],
+              inputs: [
+                { name: 'username', type: 'text' },
+                { name: 'passwd', type: 'password' },
+              ],
+            },
+          ],
+          iframes: [],
+          scripts: [],
+          links: [],
+          metaTags: [],
+          comments: [],
+          hydrationGlobals: {},
+          resourceTiming: [],
+          storageKeyNames: { localStorage: [], sessionStorage: [] },
+        },
+      };
+
+      const result = await handleDomLeadsCollected(msg, mockSettings);
+      const authLead = result.leads.find((l) => l.ruleId === 'AUTH-003' && l.tags.includes('cleartext-credentials'));
+      expect(authLead).toBeDefined();
+      expect(authLead?.potential).toBe('high');
+    });
   });
 
   describe('DevTools S4 Leads Validation', () => {

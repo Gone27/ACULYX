@@ -184,7 +184,9 @@ export async function handleDomLeadsCollected(
         forms: data.forms.map((f) => ({
           action: f.action,
           method: f.method,
-          inputs: f.inputNames.map((n) => ({ name: n })),
+          inputs: f.inputs !== undefined
+            ? f.inputs.map((i) => ({ name: i.name, type: i.type }))
+            : f.inputNames.map((n) => ({ name: n })),
         })),
         storageKeys: data.storageKeyNames.localStorage,
       },

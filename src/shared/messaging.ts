@@ -105,7 +105,12 @@ export interface DomLeadsCollectedMessage {
   origin: string;
   generation?: number;
   data: {
-    forms: Array<{ action: string; method: string; inputNames: string[] }>;
+    forms: Array<{
+      action: string;
+      method: string;
+      inputNames: string[];
+      inputs?: Array<{ name?: string | undefined; type?: string | undefined }> | undefined;
+    }>;
     iframes: Array<{ src: string; sandbox: string; allow: string }>;
     scripts: Array<{ src: string; inlineContent?: string; sourceMappingURL?: string }>;
     links: Array<{ href: string; rel?: string }>;

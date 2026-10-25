@@ -8,10 +8,16 @@
  * Also listens for CustomEvents from S3 (main-world-hooks) and relays them to background.
  */
 
+export interface ExtractedFormInput {
+  name?: string | undefined;
+  type?: string | undefined;
+}
+
 export interface ExtractedFormData {
   action: string;
   method: string;
   inputNames: string[];
+  inputs?: ExtractedFormInput[] | undefined;
 }
 
 export interface ExtractedIframeData {
@@ -74,16 +80,27 @@ export function collectDomLeads(): DomCollectionResult {
     const action = sanitizeClientUrl(rawAction);
     const method = (form.getAttribute('method') ?? 'GET').toUpperCase();
     const inputNames: string[] = [];
+    const inputs: ExtractedFormInput[] = [];
     const controls = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
       'input, textarea, select'
     );
     for (const ctrl of Array.from(controls)) {
-      const name = ctrl.getAttribute('name');
-      if (typeof name === 'string' && name.trim().length > 0) {
-        inputNames.push(name.trim());
+      const nameAttr = ctrl.getAttribute('name');
+      const name = typeof nameAttr === 'string' && nameAttr.trim().length > 0 ? nameAttr.trim() : undefined;
+      const rawType = ctrl instanceof HTMLInputElement
+        ? (ctrl.getAttribute('type') ?? 'text')
+        : ctrl.tagName.toLowerCase();
+      const type = rawType.trim().toLowerCase();
+
+      if (name !== undefined) {
+        inputNames.push(name);
       }
+      inputs.push({
+        name,
+        type: type.length > 0 ? type : undefined,
+      });
     }
-    forms.push({ action, method, inputNames });
+    forms.push({ action, method, inputNames, inputs });
   }
 
   // 2. Iframes

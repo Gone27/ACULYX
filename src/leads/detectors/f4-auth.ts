@@ -2,15 +2,15 @@ import type { Lead } from '../types';
 import { maskSecret, maskLocation } from '../sieve/mask';
 
 export interface FormInputDesc {
-  name?: string;
-  type?: string;
-  value?: string;
+  name?: string | undefined;
+  type?: string | undefined;
+  value?: string | undefined;
 }
 
 export interface FormDesc {
-  action?: string;
-  method?: string;
-  inputs?: FormInputDesc[];
+  action?: string | undefined;
+  method?: string | undefined;
+  inputs?: FormInputDesc[] | undefined;
 }
 
 export interface AuthDetectionContext {
@@ -188,7 +188,8 @@ export function detectAuthLeads(
     const isFormCleartext = isFormActionHttp || isPageHttp;
 
     for (const input of inputs) {
-      if (input.type === 'password' && isFormCleartext) {
+      const inputType = typeof input.type === 'string' ? input.type.toLowerCase() : undefined;
+      if (inputType === 'password' && isFormCleartext) {
         leads.push({
           id: nextLeadId('AUTH-CLEARTEXT'),
           ruleId: 'AUTH-003',
@@ -210,7 +211,7 @@ export function detectAuthLeads(
           scopeStatus,
           timestamp: Date.now(),
           origin,
-          url,
+          url: maskLocation(url),
           sourceSensor: 'S3',
         });
       }

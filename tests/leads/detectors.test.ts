@@ -244,6 +244,29 @@ describe('Detector F4: Auth, OAuth, Forms', () => {
     const csrfLead = leads.find(l => l.ruleId === 'AUTH-002');
     expect(csrfLead).toBeDefined();
   });
+
+  it('detects cleartext password input with case-insensitive PASSWORD type and unnamed input field (AUTH-003)', () => {
+    const form = {
+      action: 'http://insecure.example.com/login',
+      method: 'POST',
+      inputs: [{ type: 'PASSWORD' }],
+    };
+    const leads = detectAuthLeads({ url: 'https://example.com/login', forms: [form], storageKeys: [] }, 'in-scope');
+    const cleartextLead = leads.find(l => l.ruleId === 'AUTH-003' && l.tags.includes('cleartext-credentials'));
+    expect(cleartextLead).toBeDefined();
+    expect(cleartextLead?.potential).toBe('high');
+  });
+
+  it('does not flag non-password input named password on cleartext page as cleartext password', () => {
+    const form = {
+      action: 'http://insecure.example.com/search',
+      method: 'GET',
+      inputs: [{ name: 'password', type: 'text' }],
+    };
+    const leads = detectAuthLeads({ url: 'http://insecure.example.com/search', forms: [form], storageKeys: [] }, 'in-scope');
+    const cleartextLead = leads.find(l => l.ruleId === 'AUTH-003' && l.tags.includes('cleartext-credentials'));
+    expect(cleartextLead).toBeUndefined();
+  });
 });
 
 describe('Detector F5: Parameter Intelligence', () => {
