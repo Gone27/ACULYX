@@ -9,12 +9,26 @@
  */
 
 import type { Finding, Hop } from '../../shared/types';
-import { sanitizeEvidence } from '../utils';
+import { sanitizeEvidence, getRawHeaderValues } from '../utils';
 
 const REFERENCE =
   'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Referrer-Policy';
 
 const REFERRER_HEADER = 'referrer-policy';
+
+/**
+ * Standard recognized referrer policy tokens per W3C Referrer Policy §8.1.
+ */
+const KNOWN_REFERRER_POLICIES = new Set<string>([
+  'no-referrer',
+  'no-referrer-when-downgrade',
+  'origin',
+  'origin-when-cross-origin',
+  'same-origin',
+  'strict-origin',
+  'strict-origin-when-cross-origin',
+  'unsafe-url',
+]);
 
 /**
  * Policies considered weak because they expose the full URL to cross-origin
@@ -27,6 +41,33 @@ const WEAK_POLICIES = new Set<string>([
 ]);
 
 /**
+ * Parses Referrer-Policy header instances into the effective policy using W3C §8.1/8.2 algorithm:
+ * The tokens are processed left-to-right; the last recognized valid token wins.
+ * Unrecognized tokens are ignored.
+ */
+export function parseReferrerPolicy(rawValues: string[]): {
+  effectivePolicy: string | null;
+  tokens: string[];
+} {
+  const allTokens: string[] = [];
+  let effectivePolicy: string | null = null;
+
+  for (const raw of rawValues) {
+    for (const part of raw.split(',')) {
+      const token = part.trim().toLowerCase();
+      if (token.length > 0) {
+        allTokens.push(token);
+        if (KNOWN_REFERRER_POLICIES.has(token)) {
+          effectivePolicy = token;
+        }
+      }
+    }
+  }
+
+  return { effectivePolicy, tokens: allTokens };
+}
+
+/**
  * Evaluate the Referrer-Policy header for the final response hop.
  * This function is pure — no browser APIs are used.
  *
@@ -34,10 +75,10 @@ const WEAK_POLICIES = new Set<string>([
  * @returns An array of zero or one finding.
  */
 export function checkReferrer(finalHop: Hop): Finding[] {
-  const rawValue = finalHop.headers[REFERRER_HEADER];
+  const rawValues = getRawHeaderValues(finalHop, REFERRER_HEADER);
 
   // Header is absent entirely.
-  if (rawValue === undefined) {
+  if (rawValues.length === 0) {
     return [
       {
         ruleId: 'REF-001',
@@ -55,12 +96,28 @@ export function checkReferrer(finalHop: Hop): Finding[] {
     ];
   }
 
-  // Header is present but the policy is weak.
-  // The spec allows multiple comma-separated values (fallback list); we check
-  // the first recognised token, which browsers use, but also catch single-value
-  // weak policies as-written.
-  const trimmedValue = rawValue.trim().toLowerCase();
-  if (WEAK_POLICIES.has(trimmedValue)) {
+  const { effectivePolicy } = parseReferrerPolicy(rawValues);
+
+  // Header was present but contained only empty or unrecognized tokens.
+  if (effectivePolicy === null) {
+    return [
+      {
+        ruleId: 'REF-001',
+        category: 'header',
+        severity: 'low',
+        title: 'Referrer-Policy is set to an unrecognised value',
+        impact:
+          'Unrecognized values are ignored by modern browsers, falling back to browser default behavior.',
+        evidence: sanitizeEvidence(rawValues.join(', ')),
+        recommendation:
+          'Set Referrer-Policy to "strict-origin-when-cross-origin" or "no-referrer".',
+        reference: REFERENCE,
+      },
+    ];
+  }
+
+  // If the effective policy (last recognized token in fallback list) is weak.
+  if (WEAK_POLICIES.has(effectivePolicy)) {
     return [
       {
         ruleId: 'REF-001',
@@ -69,7 +126,7 @@ export function checkReferrer(finalHop: Hop): Finding[] {
         title: 'Referrer-Policy is set to a weak or privacy-leaking value',
         impact:
           'Transmits the full URL path and sensitive query parameters to third-party destinations when links are clicked.',
-        evidence: sanitizeEvidence(rawValue),
+        evidence: sanitizeEvidence(rawValues.join(', ')),
         recommendation:
           'Replace the current value with "strict-origin-when-cross-origin" or ' +
           '"no-referrer" to minimise referrer leakage.',

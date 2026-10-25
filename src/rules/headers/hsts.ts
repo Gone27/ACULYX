@@ -10,7 +10,7 @@
  */
 
 import type { Finding, Hop } from '../../shared/types';
-import { sanitizeEvidence } from '../utils';
+import { sanitizeEvidence, getRawHeaderValues } from '../utils';
 
 const REFERENCE =
   'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security';
@@ -57,9 +57,9 @@ export function checkHsts(finalHop: Hop): Finding[] {
   }
 
   const findings: Finding[] = [];
-  const headerValue = finalHop.headers[HSTS_HEADER];
+  const rawValues = getRawHeaderValues(finalHop, HSTS_HEADER);
 
-  if (headerValue === undefined) {
+  if (rawValues.length === 0) {
     // HSTS-001: Header is completely absent.
     findings.push({
       ruleId: 'HSTS-001',
@@ -77,13 +77,16 @@ export function checkHsts(finalHop: Hop): Finding[] {
     return findings;
   }
 
-  // Parse directives per RFC 6797 §6.1: case-insensitive names, optional quoted-string values,
-  // first occurrence wins, unknown directives ignored. (A bare regex mis-reads max-age="31536000".)
-  const directives = parseHstsDirectives(headerValue);
-  const maxAge = directives.maxAge;
+  // Parse directives per RFC 6797 §6.1 across all supplied STS header instances.
+  // Evaluate the active / worst-case posture across headers so invalid/zero max-age is not hidden by duplicates.
+  const allParsed = rawValues.map((v) => ({ raw: v, directives: parseHstsDirectives(v) }));
+  const minMaxAge = Math.min(...allParsed.map((p) => p.directives.maxAge));
+  const hasIncludeSubdomains = allParsed.every((p) => p.directives.includeSubDomains);
+  const hasPreload = allParsed.some((p) => p.directives.preload);
+  const combinedEvidence = rawValues.join(' | ');
 
   // HSTS-002: max-age present but below the recommended minimum (or missing/unparseable => 0).
-  if (maxAge < HSTS_MIN_MAX_AGE) {
+  if (minMaxAge < HSTS_MIN_MAX_AGE) {
     findings.push({
       ruleId: 'HSTS-002',
       category: 'transport',
@@ -91,14 +94,14 @@ export function checkHsts(finalHop: Hop): Finding[] {
       title: 'Strict-Transport-Security max-age is below the recommended minimum (1 year)',
       impact:
         'A short expiration allows browsers to silently revert to unencrypted HTTP if a user revisits after the window expires.',
-      evidence: sanitizeEvidence(headerValue),
-      recommendation: `Increase max-age to at least ${HSTS_MIN_MAX_AGE} (1 year). Current value: ${maxAge}.`,
+      evidence: sanitizeEvidence(combinedEvidence),
+      recommendation: `Increase max-age to at least ${HSTS_MIN_MAX_AGE} (1 year). Current value: ${minMaxAge}.`,
       reference: REFERENCE,
     });
   }
 
-  // HSTS-003: includeSubDomains directive is absent.
-  if (!directives.includeSubDomains) {
+  // HSTS-003: includeSubDomains directive is absent in any header instance.
+  if (!hasIncludeSubdomains) {
     findings.push({
       ruleId: 'HSTS-003',
       category: 'transport',
@@ -106,16 +109,14 @@ export function checkHsts(finalHop: Hop): Finding[] {
       title: 'Strict-Transport-Security is missing the includeSubDomains directive',
       impact:
         'Subdomains are not forced to HTTPS, leaving them vulnerable to unencrypted network eavesdropping and cookie injection.',
-      evidence: sanitizeEvidence(headerValue),
+      evidence: sanitizeEvidence(combinedEvidence),
       recommendation:
         'Add the "includeSubDomains" directive to ensure all subdomains are protected.',
       reference: REFERENCE,
     });
   }
 
-  const hasIncludeSubdomains = directives.includeSubDomains;
-  const hasPreload = directives.preload;
-  const meetsBasicPreloadRequirements = maxAge >= HSTS_PRELOAD_MAX_AGE && hasIncludeSubdomains;
+  const meetsBasicPreloadRequirements = minMaxAge >= HSTS_PRELOAD_MAX_AGE && hasIncludeSubdomains;
 
   if (hasPreload && !meetsBasicPreloadRequirements) {
     findings.push({
@@ -123,7 +124,7 @@ export function checkHsts(finalHop: Hop): Finding[] {
       category: 'transport',
       severity: 'info',
       title: 'HSTS preload token is present but basic preload directives are incomplete',
-      evidence: sanitizeEvidence(headerValue),
+      evidence: sanitizeEvidence(combinedEvidence),
       recommendation: 'HSTS preload submissions require max-age of at least 31536000 (1 year) and includeSubDomains. Verify all subdomains support HTTPS before submitting.',
       reference: 'https://hstspreload.org/',
     });
@@ -133,7 +134,7 @@ export function checkHsts(finalHop: Hop): Finding[] {
       category: 'transport',
       severity: 'info',
       title: 'HSTS header meets basic preload directives; preload-list membership is not checked',
-      evidence: sanitizeEvidence(headerValue),
+      evidence: sanitizeEvidence(combinedEvidence),
       recommendation: 'If preload is desired, review all hstspreload.org requirements and submit the domain; these header checks do not verify certificate, redirect, subdomain, or list status.',
       reference: 'https://hstspreload.org/',
     });

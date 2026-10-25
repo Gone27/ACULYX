@@ -165,6 +165,19 @@ describe('checkHsts — explicit cases', () => {
     expect(finding?.title).toContain('preload-list membership is not checked');
   });
 
+  it('HSTS-002: does not let last-value-wins suppress max-age=0 when followed by valid HSTS', () => {
+    const hop = makeHop({
+      url: 'https://example.com/',
+      headers: { 'strict-transport-security': 'max-age=31536000; includeSubDomains' },
+      rawHeaders: [
+        { name: 'Strict-Transport-Security', value: 'max-age=0' },
+        { name: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+      ],
+    });
+    const findings = checkHsts(hop);
+    expect(findings.map((f) => f.ruleId)).toContain('HSTS-002');
+  });
+
   it('XSS payload in HSTS value — no crash; HSTS-002 fires (max-age parse yields 0)', () => {
     const hop = makeHop({
       headers: {
@@ -432,6 +445,29 @@ describe('checkXfo — explicit cases', () => {
     const cspDirectives = new Map([['frame-ancestors', "'none'"]]);
     expect(checkXfo(hop, cspDirectives).map((f) => f.ruleId)).not.toContain('XFO-001');
   });
+
+  it('XFO-001: does not let last-value-wins suppress invalid ALLOWALL before DENY', () => {
+    const hop = makeHop({
+      headers: { 'x-frame-options': 'DENY' },
+      rawHeaders: [
+        { name: 'X-Frame-Options', value: 'ALLOWALL' },
+        { name: 'X-Frame-Options', value: 'DENY' },
+      ],
+    });
+    const findings = checkXfo(hop, new Map());
+    expect(findings.map((f) => f.ruleId)).toContain('XFO-001');
+  });
+
+  it('XFO-001: flags conflicting directives DENY and SAMEORIGIN in same response', () => {
+    const hop = makeHop({
+      headers: { 'x-frame-options': 'DENY, SAMEORIGIN' },
+      rawHeaders: [
+        { name: 'X-Frame-Options', value: 'DENY, SAMEORIGIN' },
+      ],
+    });
+    const findings = checkXfo(hop, new Map());
+    expect(findings.map((f) => f.ruleId)).toContain('XFO-001');
+  });
 });
 
 // ==========================================================================
@@ -444,6 +480,48 @@ describe('checkReferrer — fixture-driven', () => {
       const findings = checkReferrer(hopFromFixture(hop));
       assertFindings(findings, expectedRuleIds, notExpectedRuleIds, description);
     });
+  });
+});
+
+describe('checkReferrer — explicit cases', () => {
+  it('evaluates fallback lists per W3C spec: later strong token overrides earlier weak token', () => {
+    const hop = makeHop({
+      headers: { 'referrer-policy': 'no-referrer-when-downgrade, strict-origin-when-cross-origin' },
+    });
+    const findings = checkReferrer(hop);
+    expect(findings.map((f) => f.ruleId)).not.toContain('REF-001');
+  });
+
+  it('evaluates fallback lists per W3C spec: later weak token overrides earlier strong token and fires REF-001', () => {
+    const hop = makeHop({
+      headers: { 'referrer-policy': 'strict-origin-when-cross-origin, unsafe-url' },
+    });
+    const findings = checkReferrer(hop);
+    expect(findings.map((f) => f.ruleId)).toContain('REF-001');
+  });
+
+  it('evaluates fallback lists across multiple rawHeaders and ignores unrecognized tokens', () => {
+    const hop = makeHop({
+      headers: {},
+      rawHeaders: [
+        { name: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { name: 'Referrer-Policy', value: 'unrecognized-future-policy' },
+      ],
+    });
+    const findings = checkReferrer(hop);
+    expect(findings.map((f) => f.ruleId)).not.toContain('REF-001');
+  });
+
+  it('fires REF-001 when fallback list resolves to weak policy across multiple headers', () => {
+    const hop = makeHop({
+      headers: {},
+      rawHeaders: [
+        { name: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { name: 'Referrer-Policy', value: 'no-referrer-when-downgrade' },
+      ],
+    });
+    const findings = checkReferrer(hop);
+    expect(findings.map((f) => f.ruleId)).toContain('REF-001');
   });
 });
 

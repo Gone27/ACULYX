@@ -53,6 +53,31 @@ export function checkDuplicateHeaders(hop: Hop): Finding[] {
   return findings;
 }
 
+/**
+ * Safely extracts all raw header values for a given header name from Hop.
+ * Falls back to hop.headers if rawHeaders is absent or empty.
+ */
+export function getRawHeaderValues(hop: Hop, name: string): string[] {
+  const target = name.toLowerCase();
+  const values: string[] = [];
+  if (Array.isArray(hop.rawHeaders)) {
+    for (const h of hop.rawHeaders) {
+      if (typeof h === 'object' && h !== null && typeof h.name === 'string' && h.name.toLowerCase() === target) {
+        if (typeof h.value === 'string' && h.value.trim().length > 0) {
+          values.push(h.value.trim());
+        }
+      }
+    }
+  }
+  if (values.length === 0 && hop.headers[target] !== undefined) {
+    const val = hop.headers[target];
+    if (typeof val === 'string' && val.trim().length > 0) {
+      values.push(val.trim());
+    }
+  }
+  return values;
+}
+
 export interface CacheControlDirectives {
   directives: Map<string, string | null>;
   has(name: string): boolean;
@@ -188,7 +213,7 @@ export function redactHeaderValue(name: string, value: string): string {
 /**
  * Build a lowercase-keyed header map from the raw WebRequest header array.
  * Sensitive values (Set-Cookie, Cookie, Authorization) are automatically redacted.
- * For most headers last-value-wins.
+ * Repeated headers are joined with comma separation per RFC 9110 §5.3, except Set-Cookie.
  */
 export function normalizeHeaders(
   raw: chrome.webRequest.HttpHeader[]
@@ -196,7 +221,15 @@ export function normalizeHeaders(
   const map: Record<string, string> = {};
   for (const { name, value } of raw) {
     if (value != null) {
-      map[name.toLowerCase()] = redactHeaderValue(name, value);
+      const lower = name.toLowerCase();
+      const redacted = redactHeaderValue(name, value);
+      if (lower === 'set-cookie') {
+        map[lower] = redacted;
+      } else if (map[lower] !== undefined) {
+        map[lower] = `${map[lower]}, ${redacted}`;
+      } else {
+        map[lower] = redacted;
+      }
     }
   }
   return map;

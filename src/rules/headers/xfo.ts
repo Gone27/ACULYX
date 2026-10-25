@@ -9,7 +9,7 @@
  */
 
 import type { Finding, Hop } from '../../shared/types';
-import { sanitizeEvidence } from '../utils';
+import { sanitizeEvidence, getRawHeaderValues } from '../utils';
 
 const REFERENCE =
   'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options';
@@ -36,10 +36,10 @@ export function checkXfo(
     return [];
   }
 
-  const rawValue = finalHop.headers[XFO_HEADER];
+  const rawValues = getRawHeaderValues(finalHop, XFO_HEADER);
 
   // Header is absent.
-  if (rawValue === undefined) {
+  if (rawValues.length === 0) {
     return [
       {
         ruleId: 'XFO-001',
@@ -57,9 +57,17 @@ export function checkXfo(
     ];
   }
 
-  // Header is present but not a recognised value.
-  const normalised = rawValue.trim().toUpperCase();
-  if (!VALID_VALUES.has(normalised)) {
+  const tokens: string[] = [];
+  for (const raw of rawValues) {
+    for (const part of raw.split(',')) {
+      const trimmed = part.trim().toUpperCase();
+      if (trimmed.length > 0) {
+        tokens.push(trimmed);
+      }
+    }
+  }
+
+  if (tokens.length === 0) {
     return [
       {
         ruleId: 'XFO-001',
@@ -67,11 +75,47 @@ export function checkXfo(
         severity: 'medium',
         title: 'X-Frame-Options header has an unrecognised value',
         impact:
-          'Unrecognized values (such as deprecated ALLOW-FROM) are ignored by modern browsers, leaving the site vulnerable to iframe embedding and Clickjacking.',
-        evidence: sanitizeEvidence(rawValue),
+          'Empty values are ignored by modern browsers, leaving the site vulnerable to iframe embedding and Clickjacking.',
+        evidence: sanitizeEvidence(rawValues.join(', ')),
+        recommendation:
+          'Set X-Frame-Options to either "DENY" or "SAMEORIGIN".',
+        reference: REFERENCE,
+      },
+    ];
+  }
+
+  const invalidTokens = tokens.filter((t) => !VALID_VALUES.has(t));
+  if (invalidTokens.length > 0) {
+    return [
+      {
+        ruleId: 'XFO-001',
+        category: 'header',
+        severity: 'medium',
+        title: 'X-Frame-Options header has an unrecognised value',
+        impact:
+          'Unrecognized values (such as deprecated ALLOW-FROM or ALLOWALL) are ignored by modern browsers, leaving the site vulnerable to iframe embedding and Clickjacking.',
+        evidence: sanitizeEvidence(rawValues.join(', ')),
         recommendation:
           'Set X-Frame-Options to either "DENY" or "SAMEORIGIN". ' +
           'The value "ALLOW-FROM" is deprecated and not supported in most browsers.',
+        reference: REFERENCE,
+      },
+    ];
+  }
+
+  const uniqueTokens = new Set(tokens);
+  if (uniqueTokens.size > 1) {
+    return [
+      {
+        ruleId: 'XFO-001',
+        category: 'header',
+        severity: 'medium',
+        title: 'X-Frame-Options header has conflicting values',
+        impact:
+          'Conflicting values (such as DENY and SAMEORIGIN) are handled inconsistently across browsers and intermediaries.',
+        evidence: sanitizeEvidence(rawValues.join(', ')),
+        recommendation:
+          'Specify a single authoritative X-Frame-Options directive (either DENY or SAMEORIGIN).',
         reference: REFERENCE,
       },
     ];
