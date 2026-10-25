@@ -160,4 +160,35 @@ DatabaseError: connection to server at "10.0.1.15", port 5432 failed: FATAL: pas
 </body>
 </html>`);
   });
+
+  // 9. E2E DOM Collector Positive Fixture (AUTH-003, CLD-001)
+  app.get('/lead-lab/dom-positive', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(`<!DOCTYPE html>
+<html>
+<head><title>Positive Fixture</title></head>
+<body>
+  <h1>Insecure Login Form</h1>
+  <form action="http://insecure.example.com/login" method="POST">
+    <input type="text" name="username" value="admin">
+    <input type="password" name="super_secret_pwd">
+    <button type="submit">Log in</button>
+  </form>
+  <a href="https://test-prod-bucket.s3.amazonaws.com/data.tar.gz">Cloud Backup</a>
+</body>
+</html>`);
+  });
+
+  // 10. E2E DOM Collector Negative Fixture
+  app.get('/lead-lab/dom-negative', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(`<!DOCTYPE html>
+<html>
+<head><title>Negative Fixture</title></head>
+<body>
+  <h1>Clean Static Content</h1>
+  <p>This page contains zero passwords, zero forms, and zero cloud references.</p>
+</body>
+</html>`);
+  });
 }

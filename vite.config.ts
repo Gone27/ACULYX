@@ -12,7 +12,17 @@ function contentScriptBundlePlugin() {
         if (fileName.startsWith('content/') && chunk.type === 'chunk') {
           let code = chunk.code;
           // Strip export statements so executeScript never fails with SyntaxError: Unexpected token 'export'
+          code = code.replace(/^\s*export\s+[^;]+;?/gm, '');
           code = code.replace(/export\s*\{[^}]*\};?/g, '');
+
+          // Verify that no module import or export remains before wrapping
+          if (/^\s*import\s+/m.test(code)) {
+            throw new Error(`Content script "${fileName}" contains an ES module import statement. Injected content scripts must be standalone classic scripts.`);
+          }
+          if (/^\s*export\s+/m.test(code)) {
+            throw new Error(`Content script "${fileName}" contains an ES module export statement. Injected content scripts must be standalone classic scripts.`);
+          }
+
           chunk.code = `(() => {\n${code}\n})();\n`;
         }
       }

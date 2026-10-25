@@ -318,16 +318,35 @@ function sanitizeClientUrl(rawUrl: string): string {
   }
 }
 
-import {
-  S3_ALLOWED_SINKS,
-  S3_ALLOWED_SOURCE_CATEGORIES,
-  S3_ALLOWED_EVENT_TYPES,
-  type MainWorldLeadsEventMessage,
-} from '../shared/messaging';
+import type { MainWorldLeadsEventMessage } from '../shared/messaging';
 
-export const ALLOWED_SINKS = S3_ALLOWED_SINKS;
-export const ALLOWED_SOURCE_CATEGORIES = S3_ALLOWED_SOURCE_CATEGORIES;
-export const ALLOWED_EVENT_TYPES = S3_ALLOWED_EVENT_TYPES;
+export const ALLOWED_SINKS = new Set([
+  'Element.innerHTML',
+  'Element.outerHTML',
+  'Element.insertAdjacentHTML',
+  'document.write',
+  'document.writeln',
+  'window.eval',
+  'setTimeout(string)',
+  'location.assign',
+  'location.replace',
+]);
+
+export const ALLOWED_SOURCE_CATEGORIES = new Set([
+  'location.hash',
+  'location.search',
+  'document.referrer',
+  'window.name',
+  'window.postMessage',
+  'controlled input',
+]);
+
+export const ALLOWED_EVENT_TYPES = new Set([
+  'sink',
+  'postmessage_call',
+  'postmessage_listener',
+  'storage_write',
+]);
 
 let domCollectorInstalledInClosure = false;
 let triggerCollectionFn: (() => void) | null = null;

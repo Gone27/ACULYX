@@ -33,6 +33,9 @@ import {
 import { detectHeaderLeads } from '../leads/detectors/f6-headers';
 import { detectParamLeads } from '../leads/detectors/f5-params';
 import { getReconMemory, clearReconMemory, globalLeadStore, clearHunterLedger } from '../leads';
+if (typeof self !== 'undefined') {
+  (self as unknown as { __globalLeadStore: typeof globalLeadStore }).__globalLeadStore = globalLeadStore;
+}
 import { runRules, runApiRules } from '../rules/engine';
 import { ScopeEngine } from '../shared/scope/engine';
 import type { ScopeProfile } from '../shared/scope/contracts';
@@ -145,6 +148,9 @@ export const sensorInjectionFailures = {
   s2: 0,
   s3: 0,
 };
+if (typeof self !== 'undefined') {
+  (self as unknown as { __sensorInjectionFailures: typeof sensorInjectionFailures }).__sensorInjectionFailures = sensorInjectionFailures;
+}
 
 onEpochChange((newEpoch: number): void => {
   currentResetEpoch = newEpoch;
@@ -258,6 +264,9 @@ SettingsService.onSettingsChanged((s) => {
   currentSettings = s;
   void syncS3ScriptRegistration(s.deepModeEnabled === true && s.leadsEnabled === true && s.monitoringMode !== 'off');
 });
+if (typeof self !== 'undefined') {
+  (self as unknown as { __SettingsService: typeof SettingsService }).__SettingsService = SettingsService;
+}
 
 // Session hydration barrier (MV3 recovery)
 let resolveSessionHydration!: () => void;
