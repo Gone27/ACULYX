@@ -11,15 +11,33 @@ import { handleMainWorldEvent } from '../../src/background/leads-handler';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
 describe('Detector F1: Secrets', () => {
-  it('detects AWS access key with high confidence', () => {
+  it('detects AWS access key with calibrated confidence for unpaired key ID', () => {
     const awsKey = ['AKIA', '2345', '6789', 'BCDF', 'GHJK'].join('');
     const code = `const key = "${awsKey}";`;
     const leads = detectSecrets(code, 'https://example.com/main.js', 'in-scope');
     const awsLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('aws'));
     expect(awsLead).toBeDefined();
-    expect(awsLead?.potential).toBe('critical');
+    expect(awsLead?.potential).toBe('low');
+    expect(awsLead?.confidence).toBe(0.65);
+    expect(awsLead?.title).toContain('Unpaired');
     expect(awsLead?.tier).toBe('observed');
     expect(awsLead?.evidence.preview).toContain('AKIA...');
+  });
+
+  it('detects paired AWS access key and secret with critical potential', () => {
+    const awsKey = ['AKIA', '2345', '6789', 'BCDF', 'GHJK'].join('');
+    const code = `const key = "${awsKey}"; const aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";`;
+    const leads = detectSecrets(code, 'https://example.com/main.js', 'in-scope');
+    const awsLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('aws'));
+    expect(awsLead).toBeDefined();
+    expect(awsLead?.potential).toBe('critical');
+    expect(awsLead?.confidence).toBe(0.95);
+  });
+
+  it('does not suppress high-entropy API key containing environment marker word like staging', () => {
+    const code = 'const api_key = "sec_staging_4f9b8c2d1e0a7f3e8b4c1a9d0e2f4a6b";';
+    const leads = detectSecrets(code, 'https://example.com/config.js', 'in-scope');
+    expect(leads.length).toBeGreaterThan(0);
   });
 
   it('classifies Stripe publishable key as public info, never critical secret', () => {

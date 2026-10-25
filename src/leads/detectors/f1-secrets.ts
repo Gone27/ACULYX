@@ -49,9 +49,12 @@ export function isPlaceholder(val: string): boolean {
   }
 
   // If the value itself contains an obvious non-production marker word (standalone),
-  // classify as placeholder to reduce noise on dev/staging configs.
+  // classify as placeholder ONLY if entropy is low (< 3.5) or length is short (< 16).
+  // High-entropy secrets and keys with environment qualifiers (e.g. sec_staging_...) must be preserved!
   if (/(?:^|[-_.])(?:test|demo|fake|mock|dummy|staging|placeholder|sample)(?:[-_.]|$)/i.test(trimmed)) {
-    return true;
+    if (calculateEntropy(trimmed) < 3.5 || trimmed.length < 16) {
+      return true;
+    }
   }
 
   return false;
@@ -193,28 +196,37 @@ export function detectSecrets(
   if (awsMatches) {
     for (const match of awsMatches) {
       if (isPlaceholder(match)) continue;
+      const isPaired = /(?:aws_secret_access_key|aws_secret|secret_key|secretAccessKey|secret)\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})["']?/i.test(code);
       leads.push({
         id: nextLeadId('SEC-AWS'),
         ruleId: 'SEC-001',
         family: 'F1',
         tier: 'observed',
-        potential: 'critical',
-        confidence: 1.0,
-        title: 'AWS Access Key ID Exposure',
-        needs: ['verify if corresponding secret key is accessible or permissions active'],
-        doesNotProve: ['active AWS IAM permissions without secret access key'],
+        potential: isPaired ? 'critical' : 'low',
+        confidence: isPaired ? 0.95 : 0.65,
+        title: isPaired ? 'AWS Access Key ID with Paired Secret Key' : '[Candidate] AWS Access Key ID (Unpaired)',
+        needs: isPaired
+          ? ['verify if active IAM permissions allow unauthorized cloud access']
+          : ['locate corresponding AWS secret access key to establish credential validity'],
+        doesNotProve: isPaired
+          ? ['valid active permissions without making authenticated AWS call']
+          : ['active AWS IAM authentication or permissions without secret access key'],
         evidence: {
           preview: maskSecret(match),
           location: maskLocation(url),
-          context: `Found AWS Key ID ${match.slice(0, 4)}...`,
+          context: isPaired
+            ? `Found AWS Key ID ${match.slice(0, 4)}... with paired secret key`
+            : `Found unpaired AWS Key ID ${match.slice(0, 4)}...`,
         },
-        tags: ['aws', 'secret', 'credentials'],
+        tags: isPaired ? ['aws', 'secret', 'credentials', 'paired'] : ['aws', 'identifier', 'candidate', 'unpaired'],
         scopeStatus,
         timestamp: Date.now(),
         origin,
         url,
         sourceSensor: 'S2',
-        remediation: 'Immediately rotate this AWS credential in IAM and revoke exposed access keys.',
+        remediation: isPaired
+          ? 'Immediately rotate this AWS credential in IAM and revoke exposed access keys.'
+          : 'Audit whether this AWS Key ID is accompanied by a secret key in client-side bundles and rotate if exposed.',
       });
     }
   }
