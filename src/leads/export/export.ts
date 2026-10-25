@@ -2,6 +2,7 @@ import type { Lead } from '../types';
 import type { ScopeProfile, ScopeRule } from '../../shared/scope/contracts';
 import { maskSecret, maskLocation } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
+import { sanitizeFacts, sanitizeVerdict } from '../verify/sanitize';
 
 const VALID_FAMILIES = new Set<string>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
 const VALID_TIERS = new Set<string>(['observed', 'strong', 'weak', 'whisper']);
@@ -269,6 +270,9 @@ function sanitizeReportLead(lead: Lead): Lead {
     ? lead.triageState
     : undefined;
 
+  const verdict = sanitizeVerdict(lead.verdict);
+  const facts = sanitizeFacts(lead.facts);
+
   return {
     id,
     ruleId,
@@ -297,6 +301,8 @@ function sanitizeReportLead(lead: Lead): Lead {
     ...(typeof lead.pinned === 'boolean' ? { pinned: lead.pinned } : {}),
     ...(triageState !== undefined ? { triageState } : {}),
     ...(remediation !== undefined ? { remediation } : {}),
+    ...(verdict !== undefined ? { verdict } : {}),
+    ...(facts !== undefined ? { facts } : {}),
   };
 }
 
@@ -320,6 +326,15 @@ export function formatLeadsReportMarkdown(leads: Lead[]): string {
     lines.push(`## [${lead.potential.toUpperCase()} POTENTIAL (HYPOTHESIS)] ${lead.title} (${lead.ruleId})`);
     lines.push(`- **Status**: Lead Hypothesis (Not a verified exploit) | **Family**: ${lead.family} | **Tier**: ${lead.tier} | **Confidence**: ${lead.confidence}`);
     lines.push(`- **Scope Status**: ${lead.scopeStatus}`);
+    if (lead.verdict !== undefined) {
+      lines.push(`- **Self-check verdict**: ${lead.verdict.status.toUpperCase()} (${lead.verdict.method}) - ${lead.verdict.summary}`);
+      for (const c of lead.verdict.checks) {
+        lines.push(`  - [${c.outcome}] ${c.kind}/${c.id}: ${c.detail}`);
+      }
+      if (lead.verdict.missing.length > 0) {
+        lines.push(`- **Still needed**: ${lead.verdict.missing.join('; ')}`);
+      }
+    }
     lines.push(`- **Observed Location**: \`${lead.evidence.location}\``);
     lines.push(`- **Evidence Preview**: \`${lead.evidence.preview}\``);
     if (typeof lead.evidence.context === 'string' && lead.evidence.context.length > 0) {

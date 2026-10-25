@@ -28,6 +28,7 @@ import {
   handleLeadAction,
   getLeadsState,
   handleHunterProbe,
+  handleVerifyLead,
   resolveScopeStatus,
 } from './leads-handler';
 import { detectHeaderLeads } from '../leads/detectors/f6-headers';
@@ -2046,6 +2047,18 @@ chrome.runtime.onMessage.addListener(
       const confirmedByUser = message.confirmedByUser === true;
       void handleHunterProbe(probe, recomputedScope, currentSettings.hunterConfig, confirmedByUser).then((entry) => {
         sendResponse({ type: 'HUNTER_RUN_PROBE_RESPONSE', entry });
+      });
+      return true;
+    }
+
+    if (message.type === 'HUNTER_VERIFY_LEAD') {
+      if (!isExtensionInternalSender(_sender) || _sender.tab !== undefined) {
+        sendResponse({ type: 'HUNTER_VERIFY_LEAD_RESPONSE', leadId: String(message.leadId ?? ''), verdict: undefined });
+        return false;
+      }
+      const leadId = typeof message.leadId === 'string' ? message.leadId : '';
+      void handleVerifyLead(leadId, currentSettings, message.confirmedByUser === true).then((verdict) => {
+        sendResponse({ type: 'HUNTER_VERIFY_LEAD_RESPONSE', leadId, verdict });
       });
       return true;
     }

@@ -2,6 +2,8 @@ import type { Lead, LeadFamily, EvidenceTier, LeadPotential, LeadSensor } from '
 import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
 import { calculateLeadPriority } from '../ranking/ranking';
+import { sanitizeFacts, sanitizeVerdict } from '../verify/sanitize';
+import type { LeadVerdict } from '../types';
 
 const VALID_FAMILIES = new Set<LeadFamily>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
 const VALID_TIERS = new Set<EvidenceTier>(['observed', 'strong', 'weak', 'whisper']);
@@ -187,6 +189,9 @@ export class LeadStore {
       ? lead.triageState
       : undefined;
 
+    const facts = sanitizeFacts(lead.facts);
+    const verdict = sanitizeVerdict(lead.verdict);
+
     return {
       id,
       ruleId,
@@ -215,6 +220,8 @@ export class LeadStore {
       ...(typeof lead.pinned === 'boolean' ? { pinned: lead.pinned } : {}),
       ...(triageState !== undefined ? { triageState } : {}),
       ...(remediation !== undefined ? { remediation } : {}),
+      ...(facts !== undefined ? { facts } : {}),
+      ...(verdict !== undefined ? { verdict } : {}),
     };
   }
 
@@ -346,6 +353,18 @@ export class LeadStore {
     if (this.hasStorageSession()) {
       void chrome.storage.session.remove([SESSION_STORAGE_KEY]).catch(() => undefined);
     }
+  }
+
+  /** Stores a verification verdict (e.g. the result of an active check) on a lead. */
+  public setVerdict(id: string, verdict: LeadVerdict): boolean {
+    const lead = this.leadById.get(id);
+    if (!lead) return false;
+    const clean = sanitizeVerdict(verdict);
+    if (clean === undefined) return false;
+    lead.verdict = clean;
+    lead.priority = calculateLeadPriority(lead);
+    this.scheduleSave();
+    return true;
   }
 
   public updateLeadTriage(id: string, state?: Lead['triageState'], pinned?: boolean): void {

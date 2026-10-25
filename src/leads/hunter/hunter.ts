@@ -32,6 +32,37 @@ async function throttle(maxReqPerSec: number): Promise<void> {
   lastRequestTime = Date.now();
 }
 
+export interface HunterProbeOutcome {
+  /** Ledger entry (headers + status only; response bodies are never written to the ledger). */
+  entry: HunterLedgerEntry;
+  /** Bounded, in-memory-only body sample. Present only when the caller asked for one AND the probe actually ran. */
+  body?: string;
+}
+
+const MAX_BODY_SAMPLE_BYTES = 32 * 1024;
+
+async function readBodyCapped(res: Response, limit: number): Promise<string | undefined> {
+  try {
+    const cap = Math.max(0, Math.min(limit, MAX_BODY_SAMPLE_BYTES));
+    if (cap === 0 || res.body === null) return undefined;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    let out = '';
+    let bytesRead = 0;
+    while (bytesRead < cap) {
+      const { done, value } = await reader.read();
+      if (done || value === undefined) break;
+      const slice = value.subarray(0, Math.min(value.length, cap - bytesRead));
+      out += decoder.decode(slice, { stream: true });
+      bytesRead += slice.length;
+    }
+    out += decoder.decode();
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Executes a strictly gated hunter probe request.
  */
@@ -41,6 +72,17 @@ export async function executeHunterProbe(
   config: HunterConfig,
   confirmedByUser = false
 ): Promise<HunterLedgerEntry> {
+  const outcome = await executeHunterProbeWithBody(probe, scopeStatus, config, confirmedByUser, 0);
+  return outcome.entry;
+}
+
+export async function executeHunterProbeWithBody(
+  probe: HunterProbeRequest,
+  scopeStatus: Lead['scopeStatus'],
+  config: HunterConfig,
+  confirmedByUser = false,
+  bodyLimitBytes = 0
+): Promise<HunterProbeOutcome> {
   const entryId = nextHunterId();
   const timestamp = Date.now();
 
@@ -55,7 +97,7 @@ export async function executeHunterProbe(
       resultNotes: 'Blocked: Probe was not explicitly confirmed by the user.',
     };
     recordLedgerEntry(unconfirmedEntry);
-    return unconfirmedEntry;
+    return { entry: unconfirmedEntry };
   }
 
   // Scope Gating Check 1: strictly in-scope only
@@ -69,7 +111,7 @@ export async function executeHunterProbe(
       resultNotes: `Blocked: Target URL is ${scopeStatus}. Active validation is strictly forbidden outside declared scope.`,
     };
     recordLedgerEntry(blockedEntry);
-    return blockedEntry;
+    return { entry: blockedEntry };
   }
 
   // Active Tier Enabled Check
@@ -83,7 +125,7 @@ export async function executeHunterProbe(
       resultNotes: 'Blocked: Hunter active tier is disabled in configuration.',
     };
     recordLedgerEntry(disabledEntry);
-    return disabledEntry;
+    return { entry: disabledEntry };
   }
 
   // Method Safety Check: Only GET, HEAD, OPTIONS
@@ -99,7 +141,7 @@ export async function executeHunterProbe(
       resultNotes: `Prohibited method: Only GET, HEAD, and OPTIONS are allowed. Method '${method}' is disallowed for safe verification.`,
     };
     recordLedgerEntry(rejectedEntry);
-    return rejectedEntry;
+    return { entry: rejectedEntry };
   }
 
   // Rate Limiting
@@ -123,10 +165,12 @@ export async function executeHunterProbe(
       headers: reqHeaders,
       credentials: 'omit', // INVARIANT: zero cookies sent
       mode: 'cors',
+      redirect: 'manual', // Scope safety: never auto-follow a redirect to a host that was not scope-checked
     });
 
     const elapsedMs = Date.now() - startTime;
     const resHeaders: Record<string, string> = {};
+    const body = bodyLimitBytes > 0 ? await readBodyCapped(res, bodyLimitBytes) : undefined;
 
     res.headers.forEach((val, key) => {
       // Discard set-cookie from retained header ledger
@@ -146,11 +190,13 @@ export async function executeHunterProbe(
       },
       confirmedByUser: true,
       scopeStatus,
-      resultNotes: `Completed probe (${res.status} ${res.statusText}) in ${elapsedMs}ms`,
+      resultNotes: res.type === 'opaqueredirect'
+        ? `Probe answered with a redirect that was NOT followed (scope safety) in ${elapsedMs}ms`
+        : `Completed probe (${res.status} ${res.statusText}) in ${elapsedMs}ms`,
     };
 
     recordLedgerEntry(entry);
-    return entry;
+    return body !== undefined ? { entry, body } : { entry };
   } catch (err) {
     const elapsedMs = Date.now() - startTime;
     const msg = err instanceof Error ? err.message : String(err);
@@ -167,7 +213,7 @@ export async function executeHunterProbe(
       resultNotes: `Probe network error: ${msg}${hint} (${elapsedMs}ms)`,
     };
     recordLedgerEntry(errorEntry);
-    return errorEntry;
+    return { entry: errorEntry };
   }
 }
 

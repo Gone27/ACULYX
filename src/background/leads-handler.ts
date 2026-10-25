@@ -22,7 +22,12 @@ import { detectParamLeads, classifyParamName } from '../leads/detectors/f5-param
 import { detectReconLeads } from '../leads/detectors/f8-recon';
 import { evaluateChains } from '../leads/chains/chains';
 import { rankLeads } from '../leads/ranking/ranking';
-import { executeHunterProbe } from '../leads/hunter/hunter';
+import {
+  executeHunterProbe,
+  executeHunterProbeWithBody,
+  executeHunterCorsProbe,
+} from '../leads/hunter/hunter';
+import { applyPassiveVerdicts, verifyLeadActive } from '../leads/verify';
 import { maskSecret, maskLocation } from '../leads/sieve/mask';
 import { ScopeEngine } from '../shared/scope/engine';
 import { originFromUrl } from '../rules/utils';
@@ -33,6 +38,7 @@ import type {
   HunterLedgerEntry,
   HunterConfig,
   CloudBucketProvider,
+  LeadVerdict,
 } from '../leads/types';
 import {
   S3_ALLOWED_SINKS,
@@ -761,7 +767,9 @@ export function getLeadsState(
 
   // Correlate Chains
   const chainResult = evaluateChains(leads);
-  const ranked = rankLeads(chainResult.leads);
+  // Self-check: every lead gets an explicit verdict across evidence, scope, and security assessment
+  const verified = applyPassiveVerdicts(chainResult.leads);
+  const ranked = rankLeads(verified);
 
   // Compute summary stats
   const stats = {
@@ -801,4 +809,27 @@ export async function handleHunterProbe(
   confirmedByUser = false
 ): Promise<HunterLedgerEntry> {
   return executeHunterProbe(probe, scopeStatus, config, confirmedByUser);
+}
+
+/**
+ * Active self-check of a single lead. Runs ONLY when the researcher asked for it (confirmedByUser) and every
+ * Hunter gate passes per target URL (in-scope, Hunter tier enabled, read-only method, rate-limited, no cookies).
+ * The resulting verdict is stored on the lead; response bodies are inspected in memory and discarded.
+ */
+export async function handleVerifyLead(
+  leadId: string,
+  settings: SettingsV2,
+  confirmedByUser = false
+): Promise<LeadVerdict | undefined> {
+  const lead = globalLeadStore.getLead(leadId);
+  if (lead === undefined) return undefined;
+
+  const config: HunterConfig = settings.hunterConfig ?? { enabled: false, maxRequestsPerSecond: 1 };
+  const verdict = await verifyLeadActive(lead, {
+    resolveScope: (url: string) => resolveScopeStatus(url, settings),
+    probe: (req, scope, bodyLimit) => executeHunterProbeWithBody(req, scope, config, confirmedByUser, bodyLimit),
+    corsProbe: (url, scope) => executeHunterCorsProbe(url, scope, config, confirmedByUser),
+  });
+  globalLeadStore.setVerdict(leadId, verdict);
+  return verdict;
 }

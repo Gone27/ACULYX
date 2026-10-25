@@ -16,6 +16,63 @@ export interface LeadEvidence {
   extractedNames?: string[] | undefined;
 }
 
+/**
+ * Final judgement on a lead.
+ *  - confirmed:      the evidence itself demonstrates the issue on an in-scope asset (observed/reproduced, not a placeholder/hardening note)
+ *  - likely:         strong evidence, but one impact-defining condition or scope confirmation is still unproven
+ *  - uncertain:      cannot be decided from what ACULYX can safely observe; manual verification required
+ *  - informational:  the observation is real, but it is not a vulnerability by itself (recon / hardening note)
+ *  - false_positive: a check positively ruled the lead out (placeholder, public-by-design, researcher dismissed)
+ */
+export type VerdictStatus = 'confirmed' | 'likely' | 'uncertain' | 'informational' | 'false_positive';
+
+export type EvidenceStatus = 'observed' | 'reproduced' | 'inconclusive';
+
+export type SecurityAssessment = 'unreviewed' | 'likely' | 'confirmed' | 'informational' | 'false_positive';
+
+export type VerdictCheckOutcome = 'pass' | 'fail' | 'inconclusive';
+
+export interface VerdictCheck {
+  id: string;
+  /** passive = derived from data already observed; active = needed a gated Hunter request */
+  kind: 'passive' | 'active';
+  outcome: VerdictCheckOutcome;
+  detail: string;
+}
+
+export interface LeadVerdict {
+  status: VerdictStatus;
+  evidenceStatus: EvidenceStatus;
+  scopeStatus: 'in-scope' | 'out-of-scope' | 'unknown';
+  securityAssessment: SecurityAssessment;
+  method: 'passive' | 'active';
+  summary: string;
+  checks: VerdictCheck[];
+  /** What is still missing before this lead could be called confirmed. Never empty if scope is unknown or out-of-scope. */
+  missing: string[];
+  verifiedAt: number;
+}
+
+/**
+ * Non-sensitive facts computed at detection time, while the raw value is still in memory.
+ * Raw values are NEVER stored (see Behavior Contract invariant 1); only derived booleans/buckets are.
+ */
+export interface LeadFacts {
+  /** Offline integrity checksum of the token format: true = valid, false = invalid, undefined = format has none. */
+  checksumValid?: boolean | undefined;
+  entropyBits?: number | undefined;
+  length?: number | undefined;
+  /** Surrounding text looked like documentation / sample / placeholder / test fixture. */
+  exampleContext?: boolean | undefined;
+  /** Value appeared inside an HTML/JS comment. */
+  inComment?: boolean | undefined;
+  occurrences?: number | undefined;
+  /** JWT only */
+  jwtExpired?: boolean | undefined;
+  jwtHasExp?: boolean | undefined;
+  jwtAlg?: string | undefined;
+}
+
 export interface Lead {
   id: string;
   ruleId: string;
@@ -39,6 +96,8 @@ export interface Lead {
   pinned?: boolean | undefined;
   triageState?: 'open' | 'triaged' | 'false_positive' | 'resolved' | undefined;
   remediation?: string | undefined;
+  facts?: LeadFacts | undefined;
+  verdict?: LeadVerdict | undefined;
 }
 
 export interface ChainRule {

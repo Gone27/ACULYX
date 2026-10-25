@@ -248,6 +248,19 @@ export interface HunterRunProbeResponse {
   entry: import('../leads/types').HunterLedgerEntry;
 }
 
+/** Researcher-initiated active self-check of one lead (scope-gated; see leads/verify/active.ts). */
+export interface HunterVerifyLeadMessage {
+  type: 'HUNTER_VERIFY_LEAD';
+  leadId: string;
+  confirmedByUser?: boolean | undefined;
+}
+
+export interface HunterVerifyLeadResponse {
+  type: 'HUNTER_VERIFY_LEAD_RESPONSE';
+  leadId: string;
+  verdict?: import('../leads/types').LeadVerdict | undefined;
+}
+
 export interface DevToolsLeadsCollectedMessage {
   type: 'DEVTOOLS_LEADS_COLLECTED';
   tabId?: number;
@@ -295,6 +308,8 @@ export type ExtensionMessage =
   | ReconResetResponse
   | HunterRunProbeMessage
   | HunterRunProbeResponse
+  | HunterVerifyLeadMessage
+  | HunterVerifyLeadResponse
   | DevToolsLeadsCollectedMessage
   | TriggerLeadsScanMessage
   | TriggerLeadsScanResponse;

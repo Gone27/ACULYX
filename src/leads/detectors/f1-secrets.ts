@@ -1,5 +1,6 @@
 import type { Lead } from '../types';
 import { maskSecret, maskLocation } from '../sieve/mask';
+import { attachSecretFacts } from '../verify/facts';
 
 export function calculateEntropy(str: string): number {
   const len = str.length;
@@ -1116,6 +1117,9 @@ export function detectSecrets(
       });
     }
   }
+
+  // Derive non-sensitive facts (checksum, entropy, example-context, JWT expiry) while raw text is still in memory.
+  attachSecretFacts(leads, code);
 
   return leads;
 }

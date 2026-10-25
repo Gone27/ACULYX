@@ -13,4 +13,5 @@ export * from './detectors/f8-recon';
 export * from './chains/chains';
 export * from './ranking/ranking';
 export * from './hunter/hunter';
+export * from './verify';
 export * from './export/export';
