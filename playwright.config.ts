@@ -29,6 +29,9 @@ export default defineConfig({
   /** Output format: 'list' is compact and CI-friendly. */
   reporter: 'list',
 
+  /** Run tests sequentially to avoid local port contention across Express server test fixtures. */
+  workers: 1,
+
   use: {
     /** Run tests in headless Chromium by default. */
     headless: true,
