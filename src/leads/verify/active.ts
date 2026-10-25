@@ -231,11 +231,82 @@ export function interpretCorsProbes(results: HunterCorsProbeResult[]): ActiveRes
 
 export type ActiveCapability = 'sourcemap' | 'bucket' | 'cors' | 'none';
 
+export interface ProbePlan {
+  capability: ActiveCapability;
+  targetUrl: string;
+  maxRequests: number;
+  testOrigins?: string[] | undefined;
+  method: string;
+  credentials: 'omit';
+  redirect: 'manual';
+  description: string;
+}
+
 export function activeCapabilityOf(lead: Lead): ActiveCapability {
   if (lead.ruleId === 'MAP-001') return 'sourcemap';
   if (lead.ruleId === 'CLD-001' && (lead.tags.includes('aws') || lead.tags.includes('gcp'))) return 'bucket';
   if (lead.ruleId === 'COR-001' && lead.tags.includes('cors-reflection')) return 'cors';
   return 'none';
+}
+
+export function planActiveProbe(lead: Lead): ProbePlan | undefined {
+  const cap = activeCapabilityOf(lead);
+  if (cap === 'sourcemap') {
+    const url = planSourceMapUrl(lead);
+    if (url === undefined) return undefined;
+    return {
+      capability: 'sourcemap',
+      targetUrl: url,
+      maxRequests: 1,
+      method: 'GET',
+      credentials: 'omit',
+      redirect: 'manual',
+      description: `Send 1 read-only GET request (no cookies, redirects not followed) to inspect source map headers and validate version 3 JSON format.\nTarget: ${url}`,
+    };
+  }
+  if (cap === 'bucket') {
+    const plan = planBucketUrl(lead);
+    if (plan === undefined) return undefined;
+    return {
+      capability: 'bucket',
+      targetUrl: plan.url,
+      maxRequests: 1,
+      method: 'GET',
+      credentials: 'omit',
+      redirect: 'manual',
+      description: `Send 1 read-only GET request with max-keys=0 (no cookies, redirects not followed) to test anonymous ListBucket permission without reading object contents.\nTarget: ${plan.url}`,
+    };
+  }
+  if (cap === 'cors') {
+    let targetHost = '';
+    try {
+      targetHost = new URL(lead.url).hostname;
+    } catch {
+      targetHost = 'target';
+    }
+    const testOrigins = [
+      'null',
+      'https://evil.tld',
+      `https://${targetHost}.evil.tld`,
+      `https://evil${targetHost}`,
+    ];
+    return {
+      capability: 'cors',
+      targetUrl: lead.url,
+      maxRequests: testOrigins.length,
+      testOrigins,
+      method: 'GET',
+      credentials: 'omit',
+      redirect: 'manual',
+      description:
+        `Send up to ${testOrigins.length} read-only GET requests (no cookies, redirects not followed) to test whether arbitrary origins are reflected with credentials.\n` +
+        `Target URL: ${lead.url}\n` +
+        `Test Origins:\n` +
+        testOrigins.map((o) => ` - ${o}`).join('\n') +
+        `\nOnly reported if both ACAO reflects the test origin and ACAC is true.`,
+    };
+  }
+  return undefined;
 }
 
 export function planSourceMapUrl(lead: Lead): string | undefined {

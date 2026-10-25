@@ -33,6 +33,7 @@ import {
   formatLeadsReportSarif,
 } from '../leads/export/export';
 import { CHAINS } from '../leads/chains/chains';
+import { activeCapabilityOf, planActiveProbe } from '../leads/verify/active';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const WIDTH = 600;
@@ -850,6 +851,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const VERDICT_LABELS: Record<NonNullable<Lead['verdict']>['status'], string> = {
+    confirmed: '✔ Confirmed bug',
+    likely: 'Likely bug',
+    uncertain: '? Uncertain',
+    informational: 'Info only',
+    false_positive: '✘ False positive',
+  };
+
   function renderLeadsList(): void {
     const filtered = getFilteredLeads();
 
@@ -918,6 +927,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     header.appendChild(metaLeft);
 
+    if (lead.verdict !== undefined) {
+      const verdictBadge = document.createElement('span');
+      verdictBadge.className = `lead-verdict-badge verdict-${lead.verdict.status}`;
+      verdictBadge.textContent = VERDICT_LABELS[lead.verdict.status];
+      verdictBadge.title = lead.verdict.summary;
+      metaLeft.appendChild(verdictBadge);
+    }
+
     const potentialBadge = document.createElement('span');
     potentialBadge.className = `lead-tier-badge dot-${lead.potential}`;
     potentialBadge.textContent = lead.potential.toUpperCase();
@@ -961,7 +978,42 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(chainLine);
     }
 
-    if (lead.needs !== undefined && lead.needs.length > 0) {
+    if (lead.verdict !== undefined) {
+      const vLine = document.createElement('div');
+      vLine.className = 'lead-detail-line lead-verdict-line';
+      const vLabel = document.createElement('span');
+      vLabel.className = 'lead-detail-label';
+      vLabel.textContent = `Self-check (${lead.verdict.method}): `;
+      vLine.appendChild(vLabel);
+      vLine.appendChild(document.createTextNode(lead.verdict.summary));
+      card.appendChild(vLine);
+
+      const failed = lead.verdict.checks.filter((c) => c.outcome !== 'pass');
+      if (failed.length > 0) {
+        const det = document.createElement('details');
+        det.className = 'lead-verdict-checks';
+        const sum = document.createElement('summary');
+        sum.textContent = `Why? ${lead.verdict.checks.length} checks`;
+        det.appendChild(sum);
+        for (const c of lead.verdict.checks) {
+          const li = document.createElement('div');
+          li.className = `verdict-check check-${c.outcome}`;
+          li.textContent = `${c.outcome === 'pass' ? '✔' : c.outcome === 'fail' ? '✘' : '?'} ${c.detail}`;
+          det.appendChild(li);
+        }
+        card.appendChild(det);
+      }
+      if (lead.verdict.missing.length > 0) {
+        const mLine = document.createElement('div');
+        mLine.className = 'lead-detail-line';
+        const mLabel = document.createElement('span');
+        mLabel.className = 'lead-detail-label';
+        mLabel.textContent = 'Still needed: ';
+        mLine.appendChild(mLabel);
+        mLine.appendChild(document.createTextNode(lead.verdict.missing.join('; ')));
+        card.appendChild(mLine);
+      }
+    } else if (lead.needs !== undefined && lead.needs.length > 0) {
       const needsLine = document.createElement('div');
       needsLine.className = 'lead-detail-line';
       const needsLabel = document.createElement('span');
@@ -975,6 +1027,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const actions = document.createElement('div');
     actions.className = 'lead-card-actions';
+
+    // Active self-check (only for leads that have a safe, read-only test)
+    if (activeCapabilityOf(lead) !== 'none' && lead.verdict?.method !== 'active') {
+      const verifyBtn = document.createElement('button');
+      verifyBtn.className = 'lead-btn';
+      verifyBtn.textContent = '🔍 Verify';
+      verifyBtn.title = 'Send safe read-only requests (no cookies) to test this lead. Requires in-scope target and Hunter enabled.';
+      verifyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void verifyLeadActively(lead, verifyBtn);
+      });
+      actions.appendChild(verifyBtn);
+    }
 
     // Pin
     const pinBtn = document.createElement('button');
@@ -1047,6 +1112,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     return card;
+  }
+
+  async function verifyLeadActively(lead: Lead, btn: HTMLButtonElement): Promise<void> {
+    const plan = planActiveProbe(lead);
+    if (!plan) return;
+    const originsNotice = plan.testOrigins && plan.testOrigins.length > 0
+      ? `\nTest Origins (${plan.testOrigins.length}):\n${plan.testOrigins.map((o) => `  • ${o}`).join('\n')}\n`
+      : '';
+    const ok = window.confirm(
+      `Verify this lead actively?\n\n` +
+      `${plan.description}\n\n` +
+      `Target URL: ${plan.targetUrl}\n` +
+      `Method: ${plan.method} (credentials: ${plan.credentials}, redirect: ${plan.redirect})\n` +
+      `Requests: up to ${plan.maxRequests}\n` +
+      originsNotice +
+      `\nRequires target to be in declared scope and Hunter mode enabled. Proceed?`
+    );
+    if (!ok) return;
+    btn.disabled = true;
+    btn.textContent = '… verifying';
+    try {
+      const res = (await sendToBackground({
+        type: 'HUNTER_VERIFY_LEAD',
+        leadId: lead.id,
+        confirmedByUser: true,
+      })) as { verdict?: Lead['verdict'] } | undefined;
+      if (res?.verdict !== undefined) lead.verdict = res.verdict;
+    } finally {
+      void fetchLeads();
+      renderLeadsList();
+    }
   }
 
   async function togglePinLead(lead: Lead): Promise<void> {

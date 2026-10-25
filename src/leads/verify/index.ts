@@ -7,8 +7,10 @@ export {
   interpretCorsProbes,
   planSourceMapUrl,
   planBucketUrl,
+  planActiveProbe,
   type ActiveVerifyDeps,
   type ActiveCapability,
+  type ProbePlan,
 } from './active';
 export { attachSecretFacts, computeSecretFacts, locateRawFromPreview, shannonEntropy } from './facts';
 export { sanitizeVerdict, sanitizeFacts } from './sanitize';

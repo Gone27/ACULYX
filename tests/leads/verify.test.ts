@@ -11,6 +11,7 @@ import {
   planSourceMapUrl,
   planBucketUrl,
   activeCapabilityOf,
+  planActiveProbe,
   type ActiveVerifyDeps,
 } from '../../src/leads/verify/active';
 import { executeHunterProbeWithBody } from '../../src/leads/hunter/hunter';
@@ -484,5 +485,81 @@ describe('store, exports and canary safety', () => {
     expect(json).toContain('"verdict"');
     expect(sarif).toContain('"level": "warning"');
     for (const out of [md, json, sarif]) expect(out).not.toContain(tok);
+  });
+
+  describe('planActiveProbe', () => {
+    it('plans safe read-only sourcemap probe for MAP-001', () => {
+      const lead = makeLead({
+        ruleId: 'MAP-001',
+        url: 'https://app.example.com/bundle.js',
+        evidence: { preview: maskLocation('bundle.js.map'), location: maskLocation('https://app.example.com/bundle.js') },
+      });
+      const plan = planActiveProbe(lead);
+      expect(plan).toBeDefined();
+      expect(plan?.capability).toBe('sourcemap');
+      expect(plan?.targetUrl).toBe('https://app.example.com/bundle.js.map');
+      expect(plan?.maxRequests).toBe(1);
+      expect(plan?.method).toBe('GET');
+      expect(plan?.credentials).toBe('omit');
+      expect(plan?.redirect).toBe('manual');
+      expect(plan?.testOrigins).toBeUndefined();
+      expect(plan?.description).toContain('read-only GET request');
+    });
+
+    it('plans safe bucket probe with max-keys=0 for CLD-001', () => {
+      const lead = makeLead({
+        ruleId: 'CLD-001',
+        tags: ['cloud-bucket', 'aws'],
+        url: 'https://app.example.com/',
+        evidence: {
+          preview: maskSecret('https://my-bucket.s3.amazonaws.com/'),
+          location: maskLocation('https://app.example.com/'),
+          extractedNames: ['my-bucket'],
+        },
+      });
+      const plan = planActiveProbe(lead);
+      expect(plan).toBeDefined();
+      expect(plan?.capability).toBe('bucket');
+      expect(plan?.targetUrl).toBe('https://my-bucket.s3.amazonaws.com/?max-keys=0');
+      expect(plan?.maxRequests).toBe(1);
+      expect(plan?.method).toBe('GET');
+      expect(plan?.credentials).toBe('omit');
+      expect(plan?.redirect).toBe('manual');
+      expect(plan?.testOrigins).toBeUndefined();
+      expect(plan?.description).toContain('max-keys=0');
+    });
+
+    it('plans CORS probe explicitly disclosing all 4 origins, request count, and credentials omission', () => {
+      const lead = makeLead({
+        ruleId: 'COR-001',
+        tags: ['cors-reflection'],
+        url: 'https://api.target.com/user/profile',
+      });
+      const plan = planActiveProbe(lead);
+      expect(plan).toBeDefined();
+      expect(plan?.capability).toBe('cors');
+      expect(plan?.targetUrl).toBe('https://api.target.com/user/profile');
+      expect(plan?.maxRequests).toBe(4);
+      expect(plan?.method).toBe('GET');
+      expect(plan?.credentials).toBe('omit');
+      expect(plan?.redirect).toBe('manual');
+      expect(plan?.testOrigins).toEqual([
+        'null',
+        'https://evil.tld',
+        'https://api.target.com.evil.tld',
+        'https://evilapi.target.com',
+      ]);
+      expect(plan?.description).toContain('up to 4 read-only GET requests');
+      expect(plan?.description).toContain('null');
+      expect(plan?.description).toContain('https://evil.tld');
+      expect(plan?.description).toContain('https://api.target.com.evil.tld');
+      expect(plan?.description).toContain('https://evilapi.target.com');
+      expect(plan?.description).toContain('no cookies, redirects not followed');
+    });
+
+    it('returns undefined for non-actively probeable lead', () => {
+      const lead = makeLead({ ruleId: 'AUTH-003' });
+      expect(planActiveProbe(lead)).toBeUndefined();
+    });
   });
 });
