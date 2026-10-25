@@ -180,6 +180,35 @@ describe('Leads Boundary, Scope Isolation & Recon Store Gates', () => {
       expect(authLead).toBeDefined();
       expect(authLead?.potential).toBe('high');
     });
+
+    it('attributes Cloudflare R2 bucket provider accurately without defaulting to digitalocean', async () => {
+      const msg: DomLeadsCollectedMessage = {
+        type: 'DOM_LEADS_COLLECTED',
+        tabId: 103,
+        url: 'https://target.com/index',
+        origin: 'https://target.com',
+        data: {
+          forms: [],
+          iframes: [],
+          scripts: [],
+          links: [
+            { href: 'https://r2-archive.r2.cloudflarestorage.com/data.zip' },
+          ],
+          metaTags: [],
+          comments: [],
+          hydrationGlobals: {},
+          resourceTiming: [],
+          storageKeyNames: { localStorage: [], sessionStorage: [] },
+        },
+      };
+
+      await handleDomLeadsCollected(msg, mockSettings);
+      const mem = await getReconMemory();
+      const r2Bucket = mem.buckets.find((b) => b.bucket === 'r2-archive');
+      expect(r2Bucket).toBeDefined();
+      expect(r2Bucket?.provider).toBe('cloudflare-r2');
+      expect(r2Bucket?.provider).not.toBe('digitalocean');
+    });
   });
 
   describe('DevTools S4 Leads Validation', () => {

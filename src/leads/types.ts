@@ -75,9 +75,20 @@ export interface ReconEndpoint {
   scopeStatus?: 'in-scope' | 'out-of-scope' | 'unknown';
 }
 
+export type CloudBucketProvider =
+  | 'aws'
+  | 'gcp'
+  | 'azure'
+  | 'digitalocean'
+  | 'cloudflare-r2'
+  | 'alibaba-oss'
+  | 'oracle-oss'
+  | 'backblaze-b2'
+  | 'generic';
+
 export interface ReconBucket {
   bucket: string;
-  provider: 'aws' | 'gcp' | 'azure' | 'digitalocean';
+  provider: CloudBucketProvider;
   origin: string;
   scopeStatus?: 'in-scope' | 'out-of-scope' | 'unknown';
 }

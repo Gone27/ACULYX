@@ -32,6 +32,7 @@ import type {
   HunterProbeRequest,
   HunterLedgerEntry,
   HunterConfig,
+  CloudBucketProvider,
 } from '../leads/types';
 import {
   S3_ALLOWED_SINKS,
@@ -386,14 +387,20 @@ export async function handleDomLeadsCollected(
       for (const lead of reconLeads) {
         globalLeadStore.addLead(lead, tabId);
         if (lead.ruleId === 'CLD-001' && lead.evidence.extractedNames !== undefined) {
+          const KNOWN_PROVIDERS: CloudBucketProvider[] = [
+            'aws',
+            'gcp',
+            'azure',
+            'digitalocean',
+            'cloudflare-r2',
+            'alibaba-oss',
+            'oracle-oss',
+            'backblaze-b2',
+          ];
+          const matched = KNOWN_PROVIDERS.find(p => lead.tags.includes(p));
+          const prov: CloudBucketProvider = matched !== undefined ? matched : 'generic';
+
           for (const bucketName of lead.evidence.extractedNames) {
-            const prov = lead.tags.includes('aws')
-              ? 'aws'
-              : lead.tags.includes('gcp')
-              ? 'gcp'
-              : lead.tags.includes('azure')
-              ? 'azure'
-              : 'digitalocean';
             await recordBucket({
               bucket: bucketName,
               provider: prov,

@@ -362,6 +362,16 @@ describe('Detector F8: Third-Party & Recon Feed', () => {
     expect(cldLead).toBeDefined();
   });
 
+  it('correctly attributes Cloudflare R2 buckets without defaulting to DigitalOcean', () => {
+    const content = '<a href="https://assets-bucket.r2.cloudflarestorage.com/download.tar.gz">R2 Bucket</a>';
+    const leads = detectReconLeads(content, 'https://example.com', 'in-scope');
+    const cldLead = leads.find(l => l.ruleId === 'CLD-001');
+    expect(cldLead).toBeDefined();
+    expect(cldLead?.tags).toContain('cloudflare-r2');
+    expect(cldLead?.tags).not.toContain('digitalocean');
+    expect(cldLead?.title).toContain('CLOUDFLARE-R2');
+  });
+
   it('isolates bucket origin and determines bucket scope independently from page scope', () => {
     const pageUrl = 'https://target.com/index.html';
     const content = '<a href="https://privatebucket.s3.amazonaws.com/data.json">Data</a>';
