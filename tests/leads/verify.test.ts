@@ -537,6 +537,8 @@ describe('active verification honours every Hunter gate', () => {
         targetUrl: plan.targetUrl,
         maxRequests: plan.maxRequests,
         method: plan.method,
+        credentials: plan.credentials,
+        redirect: plan.redirect,
       },
     };
     const v = await verifyLeadActive(lead, deps);
@@ -558,6 +560,8 @@ describe('active verification honours every Hunter gate', () => {
         targetUrl: 'https://attacker.com/evil.js.map', // Tampered target
         maxRequests: 1,
         method: 'GET',
+        credentials: 'omit' as const,
+        redirect: 'manual' as const,
       },
     };
     const v = await verifyLeadActive(lead, deps);
@@ -593,12 +597,70 @@ describe('active verification honours every Hunter gate', () => {
         targetUrl: plan.targetUrl, // Old URL
         maxRequests: plan.maxRequests,
         method: plan.method,
+        credentials: plan.credentials,
+        redirect: plan.redirect,
       },
     };
     const v = await verifyLeadActive(changedLead, deps);
     expect(v.status).toBe('uncertain');
     expect(v.summary).toContain('does not match');
     expect(calls).toBe(0); // Protected from executing against wrong target
+  });
+
+  it('rejects execution without sending requests when approvedPlan credentials is not omit', async () => {
+    let calls = 0;
+    globalThis.fetch = () => {
+      calls++;
+      return Promise.resolve(new Response(''));
+    };
+    const lead = mapLead();
+    const plan = planActiveProbe(lead);
+    expect(plan).toBeDefined();
+    if (plan === undefined) throw new Error('plan is undefined');
+    const deps = {
+      ...depsFor('in-scope', true),
+      approvedPlan: {
+        capability: plan.capability,
+        targetUrl: plan.targetUrl,
+        maxRequests: plan.maxRequests,
+        method: plan.method,
+        credentials: 'include' as unknown as 'omit',
+        redirect: plan.redirect,
+      },
+    };
+    const v = await verifyLeadActive(lead, deps);
+    expect(v.status).toBe('uncertain');
+    expect(v.summary).toContain('does not match');
+    expect(v.checks.some((c) => c.id === 'plan-binding' && c.outcome === 'fail')).toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  it('rejects execution without sending requests when approvedPlan redirect is not manual', async () => {
+    let calls = 0;
+    globalThis.fetch = () => {
+      calls++;
+      return Promise.resolve(new Response(''));
+    };
+    const lead = mapLead();
+    const plan = planActiveProbe(lead);
+    expect(plan).toBeDefined();
+    if (plan === undefined) throw new Error('plan is undefined');
+    const deps = {
+      ...depsFor('in-scope', true),
+      approvedPlan: {
+        capability: plan.capability,
+        targetUrl: plan.targetUrl,
+        maxRequests: plan.maxRequests,
+        method: plan.method,
+        credentials: plan.credentials,
+        redirect: 'follow' as unknown as 'manual',
+      },
+    };
+    const v = await verifyLeadActive(lead, deps);
+    expect(v.status).toBe('uncertain');
+    expect(v.summary).toContain('does not match');
+    expect(v.checks.some((c) => c.id === 'plan-binding' && c.outcome === 'fail')).toBe(true);
+    expect(calls).toBe(0);
   });
 
   it('says plainly when no safe automated check exists', async () => {
@@ -770,6 +832,8 @@ describe('store, exports and canary safety', () => {
         targetUrl: plan.targetUrl,
         maxRequests: plan.maxRequests,
         method: plan.method,
+        credentials: plan.credentials,
+        redirect: plan.redirect,
       };
       expect(matchProbePlan(plan, approved)).toBe(true);
       expect(matchProbePlan(plan, undefined)).toBe(false);
@@ -778,6 +842,8 @@ describe('store, exports and canary safety', () => {
       expect(matchProbePlan(plan, { ...approved, maxRequests: 99 })).toBe(false);
       expect(matchProbePlan(plan, { ...approved, method: 'POST' })).toBe(false);
       expect(matchProbePlan(plan, { ...approved, capability: 'bucket' })).toBe(false);
+      expect(matchProbePlan(plan, { ...approved, credentials: 'include' as unknown as 'omit' })).toBe(false);
+      expect(matchProbePlan(plan, { ...approved, redirect: 'follow' as unknown as 'manual' })).toBe(false);
     });
   });
 
@@ -833,6 +899,8 @@ describe('store, exports and canary safety', () => {
         targetUrl: plan.targetUrl,
         maxRequests: plan.maxRequests,
         method: plan.method,
+        credentials: plan.credentials,
+        redirect: plan.redirect,
       });
 
       expect(verdict?.status).toBe('confirmed');
@@ -864,6 +932,8 @@ describe('store, exports and canary safety', () => {
         targetUrl: 'https://attacker.example.com/other.map',
         maxRequests: 1,
         method: 'GET',
+        credentials: 'omit',
+        redirect: 'manual',
       });
 
       expect(verdict?.status).toBe('uncertain');

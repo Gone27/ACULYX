@@ -1189,6 +1189,8 @@ document.addEventListener('DOMContentLoaded', () => {
           maxRequests: plan.maxRequests,
           method: plan.method,
           testOrigins: plan.testOrigins ? [...plan.testOrigins] : undefined,
+          credentials: plan.credentials,
+          redirect: plan.redirect,
         },
       })) as { verdict?: Lead['verdict'] } | undefined;
       if (res?.verdict !== undefined) lead.verdict = res.verdict;

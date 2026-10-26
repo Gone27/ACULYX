@@ -393,6 +393,8 @@ export interface ApprovedProbePlan {
   maxRequests: number;
   method: string;
   testOrigins?: string[] | undefined;
+  credentials: 'omit';
+  redirect: 'manual';
 }
 
 export function matchProbePlan(
@@ -404,6 +406,8 @@ export function matchProbePlan(
   if (current.targetUrl !== approved.targetUrl) return false;
   if (current.method !== approved.method) return false;
   if (current.maxRequests !== approved.maxRequests) return false;
+  if (current.credentials !== approved.credentials) return false;
+  if (current.redirect !== approved.redirect) return false;
   const curOrigins = current.testOrigins ?? [];
   const appOrigins = approved.testOrigins ?? [];
   if (curOrigins.length !== appOrigins.length) return false;
