@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Security, Accuracy & Lead Verification
+- **Probe Plan Mechanical Binding (P2)**:
+  - Bound the displayed probe plan in the confirmation UI to background verification execution.
+  - Verification handler strictly compares the approved plan against the recomputed target plan, rejecting altered, stale, or tampered plans with zero network probes.
+  - Added full test coverage for plan tampering and lead mutation rejection between display and execution.
+- **Rule Verification Registry & Unknown-Scope Boundary (P1 & B1)**:
+  - Enforced an explicit `PASSIVE_RULE_REGISTRY` in passive verification, ensuring only rules with verified condition predicates (such as `AUTH-003` and `AUTH-001`) can confirm passively. Unregistered or heuristic rules downgrade to `likely` + `unreviewed`.
+  - Unknown scope correctly preserves `uncertain` for weak heuristics, whisper signals, and example contexts rather than promoting them to `likely`.
+- **Source Map v3 Validation & CORS Probe Limits (P1 & B2, B3, B4)**:
+  - Enforced complete Source Map v3 schema validation (`version === 3`, `mappings` string, non-empty `sources` array). Added support for bounded truncated maps with v3 prefix.
+  - Clarified CORS probe details that browsers may ignore script-set Origin headers and advised verifying with `curl -H "Origin: https://evil.tld"`.
+  - Ensured `evidenceStatus` reflects `reproduced` for confirmed, likely, and informational active outcomes.
+- **CI Clean-Checkout Test Decoupling (P0)**:
+  - Decoupled source unit test runs on clean clones from built artifacts; added `test:artifacts` script and wired into CI after the build step.
 - **Classic Content Script Bundling Fix (P0)**:
   - Eliminated runtime ES module imports inside classic script IIFEs injected via `chrome.scripting.executeScript`.
   - Content script bundles now inline all required constants and enforce zero module import/export syntax during packaging.
