@@ -328,33 +328,73 @@ describe('active interpreters (pure)', () => {
   };
 
   it('source map: confirmed only for valid bounded JSON map; HTML fallback and 404 are false positives, 401/403 are uncertain', () => {
-    // Valid v3 map with mappings and non-empty sources
+    // 1. Fully valid map fixture
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"],"mappings":"AAAA","sourcesContent":["x"]}', { 'content-type': 'application/json' })).status).toBe('confirmed');
-    // Empty sources array must not confirm (no exposed source paths)
+
+    // 2. Empty sources array must not confirm (no exposed source paths)
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":[],"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
-    // Missing or invalid mappings string must not confirm
+
+    // 3. Missing or invalid mappings string must not confirm
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"]}', { 'content-type': 'application/json' })).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"],"mappings":123}', { 'content-type': 'application/json' })).status).toBe('uncertain');
-    // Malformed object / missing sources / wrong-type schemas
+
+    // 4. Malformed object / missing sources / wrong-type schemas
     expect(interpretSourceMapProbe(out(200, '{"version":3,"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(200, '{"version":"3","sources":["a.ts"],"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":"a.ts","mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":[123],"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
-    // Truncated / malformed JSON without truncation evidence must not confirm
-    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"] ...truncated', { 'content-type': 'application/json' })).status).toBe('uncertain');
-    // A real map is far larger than the bounded sample: a CUT prefix with v3 structure and truncation proof must confirm
-    const bigMap = JSON.stringify({ version: 3, sources: Array.from({ length: 400 }, (_, i) => `src/m${i}.ts`), sourcesContent: Array.from({ length: 400 }, () => 'x'.repeat(400)), mappings: 'AAAA;'.repeat(2000) });
-    const sample = bigMap.slice(0, 16 * 1024);
-    expect(interpretSourceMapProbe(out(206, sample, { 'content-type': 'application/json' })).status).toBe('confirmed');
-    expect(interpretSourceMapProbe(out(200, sample, { 'content-type': 'application/json', 'content-length': String(bigMap.length) })).status).toBe('confirmed');
-    // ...but a short malformed body that merely starts like a map is not evidence of truncation
+
+    // 5. Malformed partial bodies must NEVER produce confirmed:
+    // 5a. Malformed 206 with unclosed sources array padded to 16 KiB
+    const malformed206 = out(206, '{"version":3,"sources":[' + 'x'.repeat(16384), { 'content-type': 'application/json' });
+    expect(interpretSourceMapProbe(malformed206).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(malformed206).status).not.toBe('confirmed');
+
+    // 5b. Incomplete sources array with unclosed string token
+    const incompleteSources = out(206, '{"version":3,"sources":["unclosed-source-path' + 'x'.repeat(16384), { 'content-type': 'application/json' });
+    expect(interpretSourceMapProbe(incompleteSources).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(incompleteSources).status).not.toBe('confirmed');
+
+    // 5c. Arbitrary padded junk
+    const paddedJunk = out(206, '{"version":3,' + 'x'.repeat(16384), { 'content-type': 'application/json' });
+    expect(interpretSourceMapProbe(paddedJunk).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(paddedJunk).status).not.toBe('confirmed');
+
+    // 5d. Bogus sections prefix
+    const bogusSections = out(206, '{"version":3,"sections":[' + 'x'.repeat(16384), { 'content-type': 'application/json' });
+    expect(interpretSourceMapProbe(bogusSections).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(bogusSections).status).not.toBe('confirmed');
+
+    // 6. Valid truncated map fixtures:
+    // 6a. Valid truncated map with demonstrated source code content: confirmed
+    const bigMapWithContent = JSON.stringify({
+      version: 3,
+      sources: Array.from({ length: 400 }, (_, i) => `src/m${i}.ts`),
+      sourcesContent: Array.from({ length: 400 }, () => 'export const secret = "leak";'.repeat(20)),
+      mappings: 'AAAA;'.repeat(2000),
+    });
+    const sampleWithContent = bigMapWithContent.slice(0, 16 * 1024);
+    expect(interpretSourceMapProbe(out(206, sampleWithContent, { 'content-type': 'application/json' })).status).toBe('confirmed');
+
+    // 6b. Valid truncated map with valid sources array but truncated before sourcesContent/mappings:
+    // establish at least one valid source string and map structure, but never false-certain confirmed
+    const bigMapPathsOnly = '{"version":3,"sources":["app.ts","utils.ts"],"mappings":"' + 'AAAA;'.repeat(4000);
+    const samplePathsOnly = bigMapPathsOnly.slice(0, 16 * 1024);
+    const truncatedRes = interpretSourceMapProbe(out(206, samplePathsOnly, { 'content-type': 'application/json' }));
+    expect(truncatedRes.status).toBe('likely');
+    expect(truncatedRes.status).not.toBe('confirmed');
+    expect(truncatedRes.summary).toContain('truncated');
+
+    // Short malformed body that merely starts like a map is not evidence of truncation
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"] garbage', { 'content-type': 'application/json' })).status).toBe('uncertain');
+
     // Non-JSON regex-only matches in HTML fallback
     expect(interpretSourceMapProbe(out(200, '<!doctype html><html>"version": 3, "sources": []</html>', { 'content-type': 'text/html' })).status).toBe('false_positive');
     expect(interpretSourceMapProbe(out(404)).status).toBe('false_positive');
     expect(interpretSourceMapProbe(out(404)).summary).toContain('not found at this URL during this check');
     expect(interpretSourceMapProbe(out(410)).status).toBe('false_positive');
     expect(interpretSourceMapProbe(out(410)).summary).toContain('not found at this URL during this check');
+
     // 401/403: auth protected, not retrieved in this request, returns uncertain rather than false_positive
     expect(interpretSourceMapProbe(out(403)).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(401)).status).toBe('uncertain');

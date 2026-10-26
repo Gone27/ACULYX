@@ -10,6 +10,7 @@
  * access to someone else's account in most programs' rules; liveness of secrets stays a manual, program-approved step.
  */
 import type {
+  EvidenceStatus,
   HunterProbeRequest,
   Lead,
   LeadVerdict,
@@ -39,6 +40,7 @@ interface ActiveResult {
   missing: string[];
   /** false when every probe was blocked/failed before reaching the target. */
   ran: boolean;
+  evidenceStatus?: EvidenceStatus | undefined;
 }
 
 const check = (id: string, outcome: VerdictCheck['outcome'], detail: string): VerdictCheck => ({
@@ -55,6 +57,94 @@ function headerOf(h: Record<string, string> | undefined, name: string): string {
 // ---------------------------------------------------------------------------------------------------------------
 // Pure interpreters (unit-tested without any network)
 // ---------------------------------------------------------------------------------------------------------------
+
+interface ParsedPartialMap {
+  valid: boolean;
+  sources: string[];
+  hasSourcesContent: boolean;
+}
+
+function parsePartialSourceMap(prefix: string): ParsedPartialMap {
+  const trimmed = prefix.trimStart();
+  if (!trimmed.startsWith('{')) {
+    return { valid: false, sources: [], hasSourcesContent: false };
+  }
+
+  // Must declare v3 version
+  if (!/"version"\s*:\s*3\b/.test(trimmed)) {
+    return { valid: false, sources: [], hasSourcesContent: false };
+  }
+
+  // If mappings property appears in prefix, it must be a string
+  const mappingsMatch = trimmed.match(/"mappings"\s*:\s*([^\s,{}]+)/);
+  if (mappingsMatch !== null && mappingsMatch[1] !== undefined) {
+    if (!mappingsMatch[1].startsWith('"')) {
+      return { valid: false, sources: [], hasSourcesContent: false };
+    }
+  }
+
+  // Extract sources array: look for "sources" key followed by [
+  const sourcesMatch = trimmed.match(/"sources"\s*:\s*\[/);
+  if (sourcesMatch === null || sourcesMatch.index === undefined) {
+    return { valid: false, sources: [], hasSourcesContent: false };
+  }
+
+  const arrayStart = sourcesMatch.index + sourcesMatch[0].length;
+  const arrayEnd = trimmed.indexOf(']', arrayStart);
+  let sources: string[] = [];
+
+  if (arrayEnd !== -1) {
+    const rawArray = trimmed.slice(arrayStart - 1, arrayEnd + 1);
+    try {
+      const parsed: unknown = JSON.parse(rawArray);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((s): s is string => typeof s === 'string')) {
+        sources = parsed.filter((s) => s.trim().length > 0);
+      }
+    } catch {
+      sources = [];
+    }
+  } else {
+    // Array was cut off midway before closing ]: parse whatever complete quoted strings exist inside
+    const segment = trimmed.slice(arrayStart, Math.min(trimmed.length, arrayStart + 4096));
+    const stringTokens = [...segment.matchAll(/"((?:[^"\\]|\\.)+)"/g)];
+    sources = stringTokens.map((m) => m[1]?.trim() ?? '').filter((s) => s.length > 0);
+  }
+
+  if (sources.length === 0) {
+    return { valid: false, sources: [], hasSourcesContent: false };
+  }
+
+  // Check for demonstrated sourcesContent disclosure
+  let hasSourcesContent = false;
+  const scMatch = trimmed.match(/"sourcesContent"\s*:\s*\[/);
+  if (scMatch !== null && scMatch.index !== undefined) {
+    const scStart = scMatch.index + scMatch[0].length;
+    const scEnd = trimmed.indexOf(']', scStart);
+    if (scEnd !== -1) {
+      try {
+        const parsedSc: unknown = JSON.parse(trimmed.slice(scStart - 1, scEnd + 1));
+        if (Array.isArray(parsedSc) && (parsedSc as unknown[]).some((c) => typeof c === 'string' && c.trim().length > 0)) {
+          hasSourcesContent = true;
+        }
+      } catch {
+        // Fall back to token scan
+      }
+    }
+    if (!hasSourcesContent) {
+      const scSegment = trimmed.slice(scStart, Math.min(trimmed.length, scStart + 4096));
+      const firstStrMatch = scSegment.match(/^\s*"((?:[^"\\]|\\.)+)"/);
+      if (firstStrMatch !== null && firstStrMatch[1] !== undefined && firstStrMatch[1].trim().length > 0) {
+        hasSourcesContent = true;
+      }
+    }
+  }
+
+  return {
+    valid: true,
+    sources,
+    hasSourcesContent,
+  };
+}
 
 export function interpretSourceMapProbe(outcome: HunterProbeOutcome): ActiveResult {
   const res = outcome.entry.response;
@@ -141,45 +231,50 @@ export function interpretSourceMapProbe(outcome: HunterProbeOutcome): ActiveResu
       };
     }
 
-    // Real source maps are far larger than the bounded body sample, so the JSON is almost always TRUNCATED.
-    // Recognise a v3 map from its structural prefix instead of requiring a complete document.
-    const prefix = body.trimStart();
-    const looksLikeMapPrefix =
-      prefix.startsWith('{') &&
-      /"version"\s*:\s*3\b/.test(prefix) &&
-      (/"sources"\s*:\s*\[/.test(prefix) || /"sections"\s*:\s*\[/.test(prefix));
-    // Only trust the prefix when the body was demonstrably CUT (partial content, a larger declared size, or a
-    // sample that filled the cap). A short, malformed body is garbage, not a truncated map, and stays uncertain.
+    // Real source maps are far larger than the bounded body sample, so the JSON is often TRUNCATED.
+    // Use bounded incremental parsing to strictly verify v3 structure and source paths without false certainty.
     const declaredLength = Number(headerOf(res.headers, 'content-length'));
     const wasTruncated =
       st === 206 ||
       headerOf(res.headers, 'content-range') !== '' ||
       (Number.isFinite(declaredLength) && declaredLength > body.length + 64) ||
       body.length >= BODY_SAMPLE_BYTES - 256;
-    if (parsedMap === null && looksLikeMapPrefix && wasTruncated) {
-      const sawContent = /"sourcesContent"\s*:\s*\[\s*"/.test(prefix);
-      return {
-        status: 'confirmed',
-        summary: sawContent
-          ? 'Source map is publicly downloadable and embeds original source (sourcesContent).'
-          : 'Source map is publicly downloadable (original file paths exposed).',
-        checks: [
-          check('sourcemap-fetch', 'pass', `HTTP ${st}; the first ${Math.round(body.length / 1024)} KB match the source-map v3 structure (full file not downloaded).`),
-          check(
-            'sourcemap-content',
-            sawContent ? 'pass' : 'inconclusive',
-            sawContent
-              ? 'sourcesContent array present in the sampled bytes.'
-              : 'sourcesContent not visible in the sampled bytes; it may appear later in the file.',
-          ),
-        ],
-        missing: sawContent ? [] : ['Open the .map URL and check whether sourcesContent embeds original source.'],
-        ran: true,
-      };
+
+    if (parsedMap === null && wasTruncated) {
+      const partial = parsePartialSourceMap(body);
+      if (partial.valid) {
+        if (partial.hasSourcesContent) {
+          // Demonstrated source-content disclosure: original code found in sampled bytes
+          return {
+            status: 'confirmed',
+            summary: 'Source map is publicly downloadable and embeds original source (sourcesContent).',
+            checks: [
+              check('sourcemap-fetch', 'pass', `HTTP ${st}; verified source-map v3 prefix (${partial.sources.length} sources identified; response truncated).`),
+              check('sourcemap-content', 'pass', 'Embedded original source code verified in sourcesContent within sampled bytes.'),
+            ],
+            missing: [],
+            ran: true,
+          };
+        }
+        // Valid map structure and at least one source file path verified, but full map truncated and no source code embedded.
+        // Return 'likely' with inconclusive evidence, reserving 'confirmed' for parsed map or demonstrated code disclosure.
+        return {
+          status: 'likely',
+          summary: `Source map v3 prefix observed with ${partial.sources.length} source file path(s), but response was truncated before full map could be verified.`,
+          checks: [
+            check('sourcemap-fetch', 'pass', `HTTP ${st}; verified source-map v3 prefix with source paths (${partial.sources.slice(0, 3).join(', ')}).`),
+            check('sourcemap-content', 'inconclusive', 'sourcesContent not observed in sampled bytes; full map was truncated.'),
+          ],
+          missing: ['Download the full source map to confirm unminified source code retrieval.'],
+          ran: true,
+          evidenceStatus: 'inconclusive',
+        };
+      }
     }
+
     return {
       status: 'uncertain',
-      summary: 'URL answered HTTP 200 but body does not match source-map v3 format.',
+      summary: `URL answered HTTP ${st} but body does not match source-map v3 format.`,
       checks: [check('sourcemap-fetch', 'inconclusive', 'Neither HTML nor a standard source-map JSON was recognized.')],
       missing: ['Open the URL manually to confirm what it serves.'],
       ran: true,
@@ -441,9 +536,11 @@ function merge(base: LeadVerdict, active: ActiveResult, now: number): LeadVerdic
   return {
     status: finalStatus,
     evidenceStatus:
-      active.status === 'confirmed' || active.status === 'likely' || active.status === 'informational'
-        ? 'reproduced'
-        : 'inconclusive',
+      active.evidenceStatus !== undefined
+        ? active.evidenceStatus
+        : active.status === 'confirmed' || active.status === 'likely' || active.status === 'informational'
+          ? 'reproduced'
+          : 'inconclusive',
     scopeStatus: scope,
     securityAssessment: finalAssessment,
     method: 'active',
