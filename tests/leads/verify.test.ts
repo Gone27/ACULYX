@@ -286,12 +286,33 @@ describe('active interpreters (pure)', () => {
   };
 
   it('source map: confirmed only for valid bounded JSON map; HTML fallback and 404 are false positives, 401/403 are uncertain', () => {
-    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"],"sourcesContent":["x"]}', { 'content-type': 'application/json' })).status).toBe('confirmed');
-    // Truncated / malformed JSON must not confirm
+    // Valid v3 map with mappings and non-empty sources
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"],"mappings":"AAAA","sourcesContent":["x"]}', { 'content-type': 'application/json' })).status).toBe('confirmed');
+    // Empty sources array must not confirm (no exposed source paths)
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":[],"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    // Missing or invalid mappings string must not confirm
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"]}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"],"mappings":123}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    // Malformed object / missing sources / wrong-type schemas
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(out(200, '{"version":"3","sources":["a.ts"],"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":"a.ts","mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":[123],"mappings":""}', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    // Truncated / malformed JSON without truncation evidence must not confirm
     expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"] ...truncated', { 'content-type': 'application/json' })).status).toBe('uncertain');
+    // A real map is far larger than the bounded sample: a CUT prefix with v3 structure and truncation proof must confirm
+    const bigMap = JSON.stringify({ version: 3, sources: Array.from({ length: 400 }, (_, i) => `src/m${i}.ts`), sourcesContent: Array.from({ length: 400 }, () => 'x'.repeat(400)), mappings: 'AAAA;'.repeat(2000) });
+    const sample = bigMap.slice(0, 16 * 1024);
+    expect(interpretSourceMapProbe(out(206, sample, { 'content-type': 'application/json' })).status).toBe('confirmed');
+    expect(interpretSourceMapProbe(out(200, sample, { 'content-type': 'application/json', 'content-length': String(bigMap.length) })).status).toBe('confirmed');
+    // ...but a short malformed body that merely starts like a map is not evidence of truncation
+    expect(interpretSourceMapProbe(out(200, '{"version":3,"sources":["a.ts"] garbage', { 'content-type': 'application/json' })).status).toBe('uncertain');
     // Non-JSON regex-only matches in HTML fallback
     expect(interpretSourceMapProbe(out(200, '<!doctype html><html>"version": 3, "sources": []</html>', { 'content-type': 'text/html' })).status).toBe('false_positive');
     expect(interpretSourceMapProbe(out(404)).status).toBe('false_positive');
+    expect(interpretSourceMapProbe(out(404)).summary).toContain('not found at this URL during this check');
+    expect(interpretSourceMapProbe(out(410)).status).toBe('false_positive');
+    expect(interpretSourceMapProbe(out(410)).summary).toContain('not found at this URL during this check');
     // 401/403: auth protected, not retrieved in this request, returns uncertain rather than false_positive
     expect(interpretSourceMapProbe(out(403)).status).toBe('uncertain');
     expect(interpretSourceMapProbe(out(401)).status).toBe('uncertain');
@@ -321,6 +342,7 @@ describe('active interpreters (pure)', () => {
     const miss = { targetUrl: 'u', testedOrigin: 'null', confirmedVulnerable: false, details: 'd' };
     expect(interpretCorsProbes([hit]).status).toBe('likely');
     expect(interpretCorsProbes([miss]).status).toBe('uncertain');
+    expect(interpretCorsProbes([miss]).missing.some((m) => m.includes('curl -H "Origin: https://evil.tld"'))).toBe(true);
     expect(interpretCorsProbes([]).ran).toBe(false);
   });
 
@@ -381,7 +403,7 @@ describe('active verification honours every Hunter gate', () => {
     globalThis.fetch = (_u: string | URL | Request, init?: RequestInit) => {
       seen = init;
       return Promise.resolve(
-        new Response('{"version":3,"sources":["a.ts"],"sourcesContent":["secret code"]}', {
+        new Response('{"version":3,"sources":["a.ts"],"mappings":"AAAA","sourcesContent":["secret code"]}', {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),

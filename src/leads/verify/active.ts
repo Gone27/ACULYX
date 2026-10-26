@@ -79,7 +79,7 @@ export function interpretSourceMapProbe(outcome: HunterProbeOutcome): ActiveResu
   if (st === 404 || st === 410) {
     return {
       status: 'false_positive',
-      summary: `Source map not found at referenced URL (HTTP ${st}).`,
+      summary: `Source map not found at this URL during this check (HTTP ${st}).`,
       checks: [check('sourcemap-fetch', 'fail', `GET returned HTTP ${st}; resource not found at this location.`)],
       missing: [],
       ran: true,
@@ -111,22 +111,68 @@ export function interpretSourceMapProbe(outcome: HunterProbeOutcome): ActiveResu
       parsedMap = null;
     }
 
-    if (parsedMap !== null && parsedMap.version === 3 && Array.isArray(parsedMap.sources)) {
-      const hasContent = Array.isArray(parsedMap.sourcesContent) && parsedMap.sourcesContent.length > 0;
+    if (
+      parsedMap !== null &&
+      parsedMap.version === 3 &&
+      typeof parsedMap.mappings === 'string' &&
+      Array.isArray(parsedMap.sources) &&
+      parsedMap.sources.length > 0 &&
+      parsedMap.sources.some((s) => typeof s === 'string' && s.length > 0)
+    ) {
+      const hasContent =
+        Array.isArray(parsedMap.sourcesContent) &&
+        parsedMap.sourcesContent.some((c) => typeof c === 'string' && c.length > 0);
       return {
         status: 'confirmed',
         summary: hasContent
           ? 'Source map is publicly downloadable and embeds original source (sourcesContent).'
           : 'Source map is publicly downloadable (original file paths exposed).',
         checks: [
-          check('sourcemap-fetch', 'pass', `HTTP ${st}, valid source-map JSON structure (version 3, ${parsedMap.sources.length} sources).`),
+          check('sourcemap-fetch', 'pass', `HTTP ${st}, valid source-map v3 structure (${parsedMap.sources.length} sources, mappings string present).`),
           check(
             'sourcemap-content',
             hasContent ? 'pass' : 'inconclusive',
-            hasContent ? 'sourcesContent array present in source map.' : 'sourcesContent not present in parsed map.',
+            hasContent ? 'sourcesContent array present and embeds source.' : 'sourcesContent not present in parsed map.',
           ),
         ],
         missing: [],
+        ran: true,
+      };
+    }
+
+    // Real source maps are far larger than the bounded body sample, so the JSON is almost always TRUNCATED.
+    // Recognise a v3 map from its structural prefix instead of requiring a complete document.
+    const prefix = body.trimStart();
+    const looksLikeMapPrefix =
+      prefix.startsWith('{') &&
+      /"version"\s*:\s*3\b/.test(prefix) &&
+      (/"sources"\s*:\s*\[/.test(prefix) || /"sections"\s*:\s*\[/.test(prefix));
+    // Only trust the prefix when the body was demonstrably CUT (partial content, a larger declared size, or a
+    // sample that filled the cap). A short, malformed body is garbage, not a truncated map, and stays uncertain.
+    const declaredLength = Number(headerOf(res.headers, 'content-length'));
+    const wasTruncated =
+      st === 206 ||
+      headerOf(res.headers, 'content-range') !== '' ||
+      (Number.isFinite(declaredLength) && declaredLength > body.length + 64) ||
+      body.length >= BODY_SAMPLE_BYTES - 256;
+    if (parsedMap === null && looksLikeMapPrefix && wasTruncated) {
+      const sawContent = /"sourcesContent"\s*:\s*\[\s*"/.test(prefix);
+      return {
+        status: 'confirmed',
+        summary: sawContent
+          ? 'Source map is publicly downloadable and embeds original source (sourcesContent).'
+          : 'Source map is publicly downloadable (original file paths exposed).',
+        checks: [
+          check('sourcemap-fetch', 'pass', `HTTP ${st}; the first ${Math.round(body.length / 1024)} KB match the source-map v3 structure (full file not downloaded).`),
+          check(
+            'sourcemap-content',
+            sawContent ? 'pass' : 'inconclusive',
+            sawContent
+              ? 'sourcesContent array present in the sampled bytes.'
+              : 'sourcesContent not visible in the sampled bytes; it may appear later in the file.',
+          ),
+        ],
+        missing: sawContent ? [] : ['Open the .map URL and check whether sourcesContent embeds original source.'],
         ran: true,
       };
     }
@@ -220,7 +266,10 @@ export function interpretCorsProbes(results: HunterCorsProbeResult[]): ActiveRes
     status: 'uncertain',
     summary: 'Could not reproduce arbitrary-origin reflection with credentials; the original reflection may come from an allowlisted partner origin.',
     checks: [check('cors-reflect', 'inconclusive', `${results.length} test origins tried; none reflected with credentials.`)],
-    missing: ['Check whether the originally reflected origin is attacker-controllable (e.g. subdomain takeover, wildcard match).'],
+    missing: [
+      'Check whether the originally reflected origin is attacker-controllable (e.g. subdomain takeover, wildcard match).',
+      'Browsers may ignore an Origin header set from script, so a negative result is not proof: re-test with curl -H "Origin: https://evil.tld".',
+    ],
     ran: true,
   };
 }
@@ -364,7 +413,10 @@ function merge(base: LeadVerdict, active: ActiveResult, now: number): LeadVerdic
 
   return {
     status: finalStatus,
-    evidenceStatus: active.status === 'confirmed' ? 'reproduced' : 'inconclusive',
+    evidenceStatus:
+      active.status === 'confirmed' || active.status === 'likely' || active.status === 'informational'
+        ? 'reproduced'
+        : 'inconclusive',
     scopeStatus: scope,
     securityAssessment: finalAssessment,
     method: 'active',

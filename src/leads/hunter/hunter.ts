@@ -330,7 +330,7 @@ export async function executeHunterCorsProbe(
       lead,
       details: confirmedVulnerable
         ? `CRITICAL: Server reflected Origin "${testOrigin}" with Access-Control-Allow-Credentials: true`
-        : `Safe: Server did not reflect "${testOrigin}" with credentials (ACAO: ${acao ?? 'none'}, ACAC: ${String(acac)})`,
+        : `Not reproduced: Server did not reflect "${testOrigin}" with credentials (ACAO: ${acao ?? 'none'}, ACAC: ${String(acac)}). Not proof of safety: browsers may ignore a script-set Origin header.`,
     });
 
     if (confirmedVulnerable) {
