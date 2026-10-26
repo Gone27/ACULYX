@@ -328,6 +328,7 @@ export function formatLeadsReportMarkdown(leads: Lead[]): string {
     lines.push(`- **Scope Status**: ${lead.scopeStatus}`);
     if (lead.verdict !== undefined) {
       lines.push(`- **Self-check verdict**: ${lead.verdict.status.toUpperCase()} (${lead.verdict.method}) - ${lead.verdict.summary}`);
+      lines.push(`  - Security Assessment: ${lead.verdict.securityAssessment} | Evidence: ${lead.verdict.evidenceStatus} | Scope: ${lead.verdict.scopeStatus}`);
       for (const c of lead.verdict.checks) {
         lines.push(`  - [${c.outcome}] ${c.kind}/${c.id}: ${c.detail}`);
       }

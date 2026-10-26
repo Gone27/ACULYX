@@ -258,11 +258,12 @@ export function verifyLeadPassive(lead: Lead, now: number = Date.now()): LeadVer
   if (scope === 'unknown') {
     // Unknown scope may cap a verdict at 'likely' (never confirmed), but it must NOT promote weak evidence:
     // a whisper-tier, page-forgeable, example-context or half-credential lead stays 'uncertain'.
-    if (rank === 'uncertain') {
+    const isKnownRegistered = PASSIVE_RULE_REGISTRY[lead.ruleId] !== undefined || isSecretLead(lead) || lead.tags.includes('active-verified');
+    if (rank === 'uncertain' || !isKnownRegistered) {
       return finish(
         'uncertain',
         'unreviewed',
-        'Uncertain: evidence is not strong enough to call this a bug, and the asset scope is unknown.',
+        'Uncertain: evidence is not strong enough or rule is unreviewed, and the asset scope is unknown.',
       );
     }
     return finish(
@@ -300,17 +301,33 @@ export function verifyLeadPassive(lead: Lead, now: number = Date.now()): LeadVer
       );
       missing.push('Verify whether this observation constitutes an exploitable issue in this application context.');
       return finish(
-        'likely',
+        'uncertain',
         'unreviewed',
         `Observed: condition directly seen, but rule ${lead.ruleId} has no registered passive vulnerability proof (unreviewed).`,
       );
     }
-    case 'likely':
+    case 'likely': {
+      const verifier = PASSIVE_RULE_REGISTRY[lead.ruleId];
+      const isKnownRegistered = verifier !== undefined || isSecretLead(lead);
+      if (!isKnownRegistered) {
+        add(
+          'rule-predicate',
+          'inconclusive',
+          `No automated passive vulnerability proof registered for rule ${lead.ruleId}; observation is recorded but vulnerability assessment is unreviewed.`,
+        );
+        missing.push('Verify whether this observation constitutes an exploitable issue in this application context.');
+        return finish(
+          'uncertain',
+          'unreviewed',
+          `Observed: rule ${lead.ruleId} has no registered passive vulnerability proof (unreviewed).`,
+        );
+      }
       return finish(
         'likely',
         'likely',
         'Likely a real issue; at least one impact-defining condition is still unproven.',
       );
+    }
     default:
       return finish(
         'uncertain',

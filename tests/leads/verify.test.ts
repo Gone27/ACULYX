@@ -128,7 +128,7 @@ describe('passive verdicts and scope taxonomy', () => {
     expect(v.missing).toEqual([]);
   });
 
-  it('defaults unhandled or arbitrary rules to unreviewed/likely, never passively confirmed', () => {
+  it('defaults unhandled or arbitrary rules to unreviewed/uncertain, never passively confirmed or likely', () => {
     const lead = makeLead({
       ruleId: 'ARBITRARY-RULE',
       tier: 'observed',
@@ -137,14 +137,41 @@ describe('passive verdicts and scope taxonomy', () => {
       scopeStatus: 'in-scope',
     });
     const v = verifyLeadPassive(lead);
-    expect(v.status).toBe('likely');
+    expect(v.status).toBe('uncertain');
     expect(v.securityAssessment).toBe('unreviewed');
     expect(v.evidenceStatus).toBe('observed');
     expect(v.summary).toContain('unreviewed');
   });
 
-  it('says likely (not confirmed) while preconditions are outstanding', () => {
-    const v = verifyLeadPassive(makeLead({ needs: ['prove the page is sensitive'] }));
+  it('unhandled or arbitrary rule with outstanding preconditions stays uncertain and unreviewed, never likely', () => {
+    const lead = makeLead({
+      ruleId: 'ARBITRARY-RULE',
+      tier: 'observed',
+      confidence: 0.95,
+      needs: ['manual proof'],
+      scopeStatus: 'in-scope',
+    });
+    const v = verifyLeadPassive(lead);
+    expect(v.status).toBe('uncertain');
+    expect(v.securityAssessment).toBe('unreviewed');
+    expect(v.summary).toContain('unreviewed');
+  });
+
+  it('unhandled or arbitrary rule with unknown scope stays uncertain and unreviewed', () => {
+    const lead = makeLead({
+      ruleId: 'ARBITRARY-RULE',
+      tier: 'observed',
+      confidence: 0.95,
+      needs: [],
+      scopeStatus: 'unknown',
+    });
+    const v = verifyLeadPassive(lead);
+    expect(v.status).toBe('uncertain');
+    expect(v.securityAssessment).toBe('unreviewed');
+  });
+
+  it('says likely (not confirmed) while preconditions are outstanding for registered rule', () => {
+    const v = verifyLeadPassive(makeLead({ ruleId: 'AUTH-003', needs: ['prove the page is sensitive'] }));
     expect(v.status).toBe('likely');
     expect(v.securityAssessment).toBe('likely');
     expect(v.missing).toContain('prove the page is sensitive');

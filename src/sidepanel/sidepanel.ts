@@ -289,6 +289,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
+    if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'LEAD_STATE_UPDATE') {
+      handleLeadStateUpdate(msg as LeadStateUpdateMessage);
+      sendResponse({ received: true });
+    }
+  });
+
   void bootstrapAppearance();
 
   // ── Query Active Tab Initially ──────────────────────────────
@@ -987,6 +994,45 @@ document.addEventListener('DOMContentLoaded', () => {
       vLine.appendChild(vLabel);
       vLine.appendChild(document.createTextNode(lead.verdict.summary));
       card.appendChild(vLine);
+
+      const dimLine = document.createElement('div');
+      dimLine.className = 'lead-detail-line lead-dimensions-line';
+
+      const assessLabel = document.createElement('span');
+      assessLabel.className = 'lead-detail-label';
+      assessLabel.textContent = 'Assessment: ';
+      dimLine.appendChild(assessLabel);
+
+      const assessVal = document.createElement('span');
+      assessVal.className = `lead-dim-val dim-assessment-${lead.verdict.securityAssessment}`;
+      assessVal.textContent = lead.verdict.securityAssessment;
+      dimLine.appendChild(assessVal);
+
+      dimLine.appendChild(document.createTextNode(' · '));
+
+      const evidLabel = document.createElement('span');
+      evidLabel.className = 'lead-detail-label';
+      evidLabel.textContent = 'Evidence: ';
+      dimLine.appendChild(evidLabel);
+
+      const evidVal = document.createElement('span');
+      evidVal.className = `lead-dim-val dim-evidence-${lead.verdict.evidenceStatus}`;
+      evidVal.textContent = lead.verdict.evidenceStatus;
+      dimLine.appendChild(evidVal);
+
+      dimLine.appendChild(document.createTextNode(' · '));
+
+      const scopeLabel = document.createElement('span');
+      scopeLabel.className = 'lead-detail-label';
+      scopeLabel.textContent = 'Scope: ';
+      dimLine.appendChild(scopeLabel);
+
+      const scopeVal = document.createElement('span');
+      scopeVal.className = `lead-dim-val dim-scope-${lead.verdict.scopeStatus}`;
+      scopeVal.textContent = lead.verdict.scopeStatus;
+      dimLine.appendChild(scopeVal);
+
+      card.appendChild(dimLine);
 
       const failed = lead.verdict.checks.filter((c) => c.outcome !== 'pass');
       if (failed.length > 0) {

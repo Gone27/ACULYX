@@ -1300,4 +1300,11 @@ body {
 .verdict-check.check-pass { color: #3fb950; }
 .verdict-check.check-fail { color: #f85149; }
 .verdict-check.check-inconclusive { color: #d29922; }
+.lead-dimensions-line { font-size: 10px; color: var(--sc-text-muted); margin: 2px 0 3px; }
+.lead-dim-val { font-weight: 600; color: var(--sc-text); }
+.dim-assessment-confirmed { color: #3fb950; }
+.dim-assessment-likely { color: var(--sc-accent); }
+.dim-assessment-unreviewed { color: #d29922; }
+.dim-assessment-informational { color: var(--sc-info); }
+.dim-assessment-false_positive { color: #f85149; }
 
