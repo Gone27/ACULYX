@@ -104,13 +104,28 @@ describe('detection-time facts never leak the raw value', () => {
 });
 
 describe('passive verdicts and scope taxonomy', () => {
-  it('confirms an observed, precondition-free, in-scope condition', () => {
+  it('confirms an observed, precondition-free, in-scope condition for registered rule AUTH-003', () => {
     const v = verifyLeadPassive(makeLead());
     expect(v.status).toBe('confirmed');
     expect(v.evidenceStatus).toBe('observed');
     expect(v.scopeStatus).toBe('in-scope');
     expect(v.securityAssessment).toBe('confirmed');
     expect(v.missing).toEqual([]);
+  });
+
+  it('defaults unhandled or arbitrary rules to unreviewed/likely, never passively confirmed', () => {
+    const lead = makeLead({
+      ruleId: 'ARBITRARY-RULE',
+      tier: 'observed',
+      confidence: 0.95,
+      needs: [],
+      scopeStatus: 'in-scope',
+    });
+    const v = verifyLeadPassive(lead);
+    expect(v.status).toBe('likely');
+    expect(v.securityAssessment).toBe('unreviewed');
+    expect(v.evidenceStatus).toBe('observed');
+    expect(v.summary).toContain('unreviewed');
   });
 
   it('says likely (not confirmed) while preconditions are outstanding', () => {
@@ -560,6 +575,24 @@ describe('store, exports and canary safety', () => {
     it('returns undefined for non-actively probeable lead', () => {
       const lead = makeLead({ ruleId: 'AUTH-003' });
       expect(planActiveProbe(lead)).toBeUndefined();
+    });
+  });
+
+  describe('passive verdict with unknown scope (the default before a scope profile is set)', () => {
+    const lead = (o: Partial<Lead>): Lead => makeLead({ scopeStatus: 'unknown', ...o });
+    it('weak evidence stays uncertain, not likely', () => {
+      expect(verifyLeadPassive(lead({ tier: 'whisper', confidence: 0.3, needs: ['prove it'] })).status).toBe('uncertain');
+    });
+    it('page-forgeable signals stay uncertain', () => {
+      expect(verifyLeadPassive(lead({ tier: 'observed', confidence: 0.9, tags: ['page-reported'], needs: [] })).status).toBe('uncertain');
+    });
+    it('secret in example context stays uncertain', () => {
+      expect(verifyLeadPassive(lead({ ruleId: 'SEC-001', family: 'F1', facts: { exampleContext: true } })).status).toBe('uncertain');
+    });
+    it('strong evidence is capped at likely, never confirmed', () => {
+      const v = verifyLeadPassive(lead({ tier: 'observed', confidence: 0.95, needs: [] }));
+      expect(v.status).toBe('likely');
+      expect(v.securityAssessment).not.toBe('confirmed');
     });
   });
 });

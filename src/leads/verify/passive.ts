@@ -46,6 +46,22 @@ function isSecretLead(lead: Lead): boolean {
   return lead.family === 'F1' && (lead.ruleId.startsWith('SEC-') || lead.tags.includes('secret'));
 }
 
+export interface PassiveRuleVerifier {
+  canConfirm(lead: Lead): boolean;
+  summary(lead: Lead): string;
+}
+
+export const PASSIVE_RULE_REGISTRY: Record<string, PassiveRuleVerifier> = {
+  'AUTH-003': {
+    canConfirm: (lead) => lead.tier === 'observed' && lead.needs.length === 0,
+    summary: () => 'Confirmed: form action submits sensitive credentials over unencrypted HTTP.',
+  },
+  'AUTH-001': {
+    canConfirm: (lead) => lead.tier === 'observed' && lead.needs.length === 0,
+    summary: () => 'Confirmed: cleartext HTTP authentication exposure directly observed.',
+  },
+};
+
 export function verifyLeadPassive(lead: Lead, now: number = Date.now()): LeadVerdict {
   const checks: VerdictCheck[] = [];
   const missing: string[] = [...lead.needs];
@@ -240,6 +256,15 @@ export function verifyLeadPassive(lead: Lead, now: number = Date.now()): LeadVer
   }
 
   if (scope === 'unknown') {
+    // Unknown scope may cap a verdict at 'likely' (never confirmed), but it must NOT promote weak evidence:
+    // a whisper-tier, page-forgeable, example-context or half-credential lead stays 'uncertain'.
+    if (rank === 'uncertain') {
+      return finish(
+        'uncertain',
+        'unreviewed',
+        'Uncertain: evidence is not strong enough to call this a bug, and the asset scope is unknown.',
+      );
+    }
     return finish(
       'likely',
       'unreviewed',
@@ -249,12 +274,37 @@ export function verifyLeadPassive(lead: Lead, now: number = Date.now()): LeadVer
 
   // In-scope targets:
   switch (rank) {
-    case 'confirmed':
-      return finish(
-        'confirmed',
-        'confirmed',
-        'Confirmed: the observed condition is a real issue and no precondition is outstanding.',
+    case 'confirmed': {
+      const verifier = PASSIVE_RULE_REGISTRY[lead.ruleId];
+      if (verifier !== undefined && verifier.canConfirm(lead)) {
+        add('rule-predicate', 'pass', 'Rule verification predicate satisfied: observation directly demonstrates vulnerability.');
+        return finish(
+          'confirmed',
+          'confirmed',
+          verifier.summary(lead),
+        );
+      }
+      if (lead.tags.includes('active-verified')) {
+        add('rule-predicate', 'pass', 'Condition was reproduced by an active probe.');
+        return finish(
+          'confirmed',
+          'confirmed',
+          'Confirmed: condition was reproduced by a scope-gated active probe.',
+        );
+      }
+      // Unhandled/arbitrary rule without a registered passive vulnerability predicate
+      add(
+        'rule-predicate',
+        'inconclusive',
+        `No automated passive vulnerability proof registered for rule ${lead.ruleId}; observation is recorded but vulnerability assessment is unreviewed.`,
       );
+      missing.push('Verify whether this observation constitutes an exploitable issue in this application context.');
+      return finish(
+        'likely',
+        'unreviewed',
+        `Observed: condition directly seen, but rule ${lead.ruleId} has no registered passive vulnerability proof (unreviewed).`,
+      );
+    }
     case 'likely':
       return finish(
         'likely',
