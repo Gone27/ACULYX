@@ -49,6 +49,12 @@ jobs:
       - name: Build Firefox extension
         run: npm run build:firefox
 
+      - name: Build Hunter extension
+        run: npm run build:hunter
+
+      - name: Built artifacts syntax & integrity checks
+        run: npm run test:artifacts
+
       - name: Verify CLI & generate SARIF
         run: npx tsx src/cli.ts --input tests/fixtures/cli-sample.json --format sarif > aculyx.sarif
 

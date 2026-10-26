@@ -18,6 +18,7 @@
     "verify:pack": "node scripts/verify-release-zip.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:artifacts": "node scripts/test-artifacts.mjs",
     "test:watch": "vitest",
     "test:e2e": "vite build && playwright test",
     "aculyx": "tsx src/cli.ts",
