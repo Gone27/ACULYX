@@ -29,6 +29,7 @@ export interface ActiveVerifyDeps {
   probe: (req: HunterProbeRequest, scope: Lead['scopeStatus'], bodyLimitBytes: number) => Promise<HunterProbeOutcome>;
   corsProbe: (url: string, scope: Lead['scopeStatus']) => Promise<HunterCorsProbeResult[]>;
   now?: () => number;
+  approvedPlan?: ApprovedProbePlan | undefined;
 }
 
 interface ActiveResult {
@@ -291,6 +292,32 @@ export interface ProbePlan {
   description: string;
 }
 
+export interface ApprovedProbePlan {
+  capability: ActiveCapability;
+  targetUrl: string;
+  maxRequests: number;
+  method: string;
+  testOrigins?: string[] | undefined;
+}
+
+export function matchProbePlan(
+  current: ProbePlan | undefined,
+  approved: ApprovedProbePlan | undefined,
+): boolean {
+  if (current === undefined || approved === undefined) return false;
+  if (current.capability !== approved.capability) return false;
+  if (current.targetUrl !== approved.targetUrl) return false;
+  if (current.method !== approved.method) return false;
+  if (current.maxRequests !== approved.maxRequests) return false;
+  const curOrigins = current.testOrigins ?? [];
+  const appOrigins = approved.testOrigins ?? [];
+  if (curOrigins.length !== appOrigins.length) return false;
+  for (let i = 0; i < curOrigins.length; i++) {
+    if (curOrigins[i] !== appOrigins[i]) return false;
+  }
+  return true;
+}
+
 export function activeCapabilityOf(lead: Lead): ActiveCapability {
   if (lead.ruleId === 'MAP-001') return 'sourcemap';
   if (lead.ruleId === 'CLD-001' && (lead.tags.includes('aws') || lead.tags.includes('gcp'))) return 'bucket';
@@ -436,6 +463,26 @@ export async function verifyLeadActive(lead: Lead, deps: ActiveVerifyDeps): Prom
   const now = deps.now !== undefined ? deps.now() : Date.now();
   const base = verifyLeadPassive(lead, now);
   if (base.status === 'false_positive') return base;
+
+  if (deps.approvedPlan !== undefined) {
+    const planned = planActiveProbe(lead);
+    if (!matchProbePlan(planned, deps.approvedPlan)) {
+      return {
+        status: 'uncertain',
+        evidenceStatus: 'inconclusive',
+        scopeStatus: base.scopeStatus,
+        securityAssessment: 'unreviewed',
+        method: 'active',
+        summary: 'Rejected: approved probe plan does not match current target plan (stale or altered lead state).',
+        checks: [
+          ...base.checks,
+          check('plan-binding', 'fail', 'Approved plan does not match current plan computed from stored lead.'),
+        ],
+        missing: ['Re-open the lead verification dialog and review the updated target plan.'],
+        verifiedAt: now,
+      };
+    }
+  }
 
   const cap = activeCapabilityOf(lead);
   let result: ActiveResult;

@@ -12,13 +12,17 @@ import {
   planBucketUrl,
   activeCapabilityOf,
   planActiveProbe,
+  matchProbePlan,
   type ActiveVerifyDeps,
+  type ApprovedProbePlan,
 } from '../../src/leads/verify/active';
 import { executeHunterProbeWithBody } from '../../src/leads/hunter/hunter';
 import { calculateLeadPriority } from '../../src/leads/ranking/ranking';
 import { LeadStore } from '../../src/leads/store/lead-store';
 import { formatLeadsReportMarkdown, formatLeadsReportJson, formatLeadsReportSarif } from '../../src/leads/export/export';
 import { maskSecret, maskLocation } from '../../src/leads/sieve/mask';
+import { handleVerifyLead, globalLeadStore } from '../../src/background/leads-handler';
+import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
 function makeLead(over: Partial<Lead> = {}): Lead {
   return {
@@ -45,6 +49,17 @@ function makeLead(over: Partial<Lead> = {}): Lead {
 function ghToken(body = 'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC2'): string {
   return `ghp_${body}${base62Encode(crc32(body), 6)}`;
 }
+
+const mapLead = (): Lead =>
+  makeLead({
+    ruleId: 'MAP-001',
+    family: 'F3',
+    potential: 'low',
+    tags: ['sourcemap'],
+    needs: ['fetch map'],
+    evidence: { preview: maskLocation('app.js.map'), location: maskLocation('https://app.example.com/app.js') },
+    url: 'https://app.example.com/app.js',
+  });
 
 describe('offline checksums', () => {
   it('computes standard CRC32', () => {
@@ -366,12 +381,6 @@ describe('active verification honours every Hunter gate', () => {
     globalThis.fetch = realFetch;
   });
   const cfg: HunterConfig = { enabled: true, maxRequestsPerSecond: 100 };
-  const mapLead = (): Lead =>
-    makeLead({
-      ruleId: 'MAP-001', family: 'F3', potential: 'low', tags: ['sourcemap'], needs: ['fetch map'],
-      evidence: { preview: maskLocation('app.js.map'), location: maskLocation('https://app.example.com/app.js') },
-      url: 'https://app.example.com/app.js',
-    });
 
   function depsFor(scope: Lead['scopeStatus'], confirmed: boolean, config: HunterConfig = cfg): ActiveVerifyDeps {
     return {
@@ -437,6 +446,92 @@ describe('active verification honours every Hunter gate', () => {
     const v = await verifyLeadActive({ ...mapLead(), triageState: 'false_positive' }, depsFor('in-scope', true));
     expect(v.status).toBe('false_positive');
     expect(calls).toBe(0);
+  });
+
+  it('executes when approvedPlan matches the recomputed plan exactly', async () => {
+    let calls = 0;
+    globalThis.fetch = () => {
+      calls++;
+      return Promise.resolve(
+        new Response('{"version":3,"sources":["a.ts"],"mappings":"AAAA","sourcesContent":["ok"]}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    };
+    const lead = mapLead();
+    const plan = planActiveProbe(lead);
+    expect(plan).toBeDefined();
+    if (plan === undefined) throw new Error('plan is undefined');
+    const deps = {
+      ...depsFor('in-scope', true),
+      approvedPlan: {
+        capability: plan.capability,
+        targetUrl: plan.targetUrl,
+        maxRequests: plan.maxRequests,
+        method: plan.method,
+      },
+    };
+    const v = await verifyLeadActive(lead, deps);
+    expect(v.status).toBe('confirmed');
+    expect(calls).toBe(1);
+  });
+
+  it('rejects execution without sending requests when approvedPlan differs (tampered or stale)', async () => {
+    let calls = 0;
+    globalThis.fetch = () => {
+      calls++;
+      return Promise.resolve(new Response(''));
+    };
+    const lead = mapLead();
+    const deps = {
+      ...depsFor('in-scope', true),
+      approvedPlan: {
+        capability: 'sourcemap' as const,
+        targetUrl: 'https://attacker.com/evil.js.map', // Tampered target
+        maxRequests: 1,
+        method: 'GET',
+      },
+    };
+    const v = await verifyLeadActive(lead, deps);
+    expect(v.status).toBe('uncertain');
+    expect(v.securityAssessment).toBe('unreviewed');
+    expect(v.summary).toContain('does not match');
+    expect(v.checks.some((c) => c.id === 'plan-binding' && c.outcome === 'fail')).toBe(true);
+    expect(calls).toBe(0); // Zero network probes sent
+  });
+
+  it('rejects execution when lead changed between display and execution', async () => {
+    let calls = 0;
+    globalThis.fetch = () => {
+      calls++;
+      return Promise.resolve(new Response(''));
+    };
+    const originalLead = mapLead();
+    const plan = planActiveProbe(originalLead);
+    expect(plan).toBeDefined();
+    if (plan === undefined) throw new Error('plan is undefined');
+
+    // Simulate lead changing in store between display and click
+    const changedLead = {
+      ...originalLead,
+      url: 'https://app.example.com/other.js',
+      evidence: { preview: maskLocation('other.js.map'), location: maskLocation('https://app.example.com/other.js') },
+    };
+
+    const deps = {
+      ...depsFor('in-scope', true),
+      approvedPlan: {
+        capability: plan.capability,
+        targetUrl: plan.targetUrl, // Old URL
+        maxRequests: plan.maxRequests,
+        method: plan.method,
+      },
+    };
+    const v = await verifyLeadActive(changedLead, deps);
+    expect(v.status).toBe('uncertain');
+    expect(v.summary).toContain('does not match');
+    expect(calls).toBe(0); // Protected from executing against wrong target
   });
 
   it('says plainly when no safe automated check exists', async () => {
@@ -598,6 +693,25 @@ describe('store, exports and canary safety', () => {
       const lead = makeLead({ ruleId: 'AUTH-003' });
       expect(planActiveProbe(lead)).toBeUndefined();
     });
+
+    it('matchProbePlan validates matching and detects discrepancies', () => {
+      const plan = planActiveProbe(mapLead());
+      expect(plan).toBeDefined();
+      if (plan === undefined) throw new Error('plan is undefined');
+      const approved: ApprovedProbePlan = {
+        capability: plan.capability,
+        targetUrl: plan.targetUrl,
+        maxRequests: plan.maxRequests,
+        method: plan.method,
+      };
+      expect(matchProbePlan(plan, approved)).toBe(true);
+      expect(matchProbePlan(plan, undefined)).toBe(false);
+      expect(matchProbePlan(undefined, approved)).toBe(false);
+      expect(matchProbePlan(plan, { ...approved, targetUrl: 'https://evil.com' })).toBe(false);
+      expect(matchProbePlan(plan, { ...approved, maxRequests: 99 })).toBe(false);
+      expect(matchProbePlan(plan, { ...approved, method: 'POST' })).toBe(false);
+      expect(matchProbePlan(plan, { ...approved, capability: 'bucket' })).toBe(false);
+    });
   });
 
   describe('passive verdict with unknown scope (the default before a scope profile is set)', () => {
@@ -615,6 +729,79 @@ describe('store, exports and canary safety', () => {
       const v = verifyLeadPassive(lead({ tier: 'observed', confidence: 0.95, needs: [] }));
       expect(v.status).toBe('likely');
       expect(v.securityAssessment).not.toBe('confirmed');
+    });
+  });
+
+  describe('handleVerifyLead background binding', () => {
+    it('executes when approvedPlan matches stored lead and updates store verdict', async () => {
+      globalThis.fetch = () =>
+        Promise.resolve(
+          new Response('{"version":3,"sources":["app.ts"],"mappings":"AAAA","sourcesContent":["ok"]}', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      const lead = mapLead();
+      lead.id = 'LD-BG-TEST-1';
+      globalLeadStore.addLead(lead);
+
+      const plan = planActiveProbe(lead);
+      expect(plan).toBeDefined();
+      if (plan === undefined) throw new Error('plan is undefined');
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        hunterConfig: { enabled: true, maxRequestsPerSecond: 10 },
+        activeScopeProfileId: 'default',
+        scopeProfiles: [
+          {
+            id: 'default',
+            name: 'Default',
+            rules: [{ type: 'include' as const, pattern: 'app.example.com' }],
+          },
+        ],
+      };
+
+      const verdict = await handleVerifyLead(lead.id, settings, true, {
+        capability: plan.capability,
+        targetUrl: plan.targetUrl,
+        maxRequests: plan.maxRequests,
+        method: plan.method,
+      });
+
+      expect(verdict?.status).toBe('confirmed');
+      expect(globalLeadStore.getLead(lead.id)?.verdict?.status).toBe('confirmed');
+    });
+
+    it('rejects in background if approvedPlan was tampered', async () => {
+      let calls = 0;
+      globalThis.fetch = () => {
+        calls++;
+        return Promise.resolve(new Response(''));
+      };
+      const lead = mapLead();
+      lead.id = 'LD-BG-TEST-2';
+      lead.url = 'https://app.example.com/other.js';
+      lead.evidence = {
+        preview: maskLocation('other.js.map'),
+        location: maskLocation('https://app.example.com/other.js'),
+      };
+      globalLeadStore.addLead(lead);
+
+      const settings = {
+        ...DEFAULT_SETTINGS,
+        hunterConfig: { enabled: true, maxRequestsPerSecond: 10 },
+      };
+
+      const verdict = await handleVerifyLead(lead.id, settings, true, {
+        capability: 'sourcemap',
+        targetUrl: 'https://attacker.example.com/other.map',
+        maxRequests: 1,
+        method: 'GET',
+      });
+
+      expect(verdict?.status).toBe('uncertain');
+      expect(verdict?.summary).toContain('does not match');
+      expect(calls).toBe(0);
     });
   });
 });

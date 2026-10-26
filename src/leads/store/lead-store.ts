@@ -135,7 +135,10 @@ export class LeadStore {
     const rawPreview = lead.evidence?.preview;
     const rawLoc = lead.evidence?.location;
     const rawUrl = lead.url;
-    const preview = maskSecret(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '');
+    const preview =
+      lead.ruleId === 'MAP-001'
+        ? maskLocation(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '')
+        : maskSecret(typeof rawPreview === 'string' && rawPreview.length > 0 ? rawPreview : '');
     const location = maskLocation(typeof rawLoc === 'string' && rawLoc.length > 0 ? rawLoc : '');
     const url = (maskLocation(typeof rawUrl === 'string' && rawUrl.length > 0 ? rawUrl : '') as string) || lead.url;
 

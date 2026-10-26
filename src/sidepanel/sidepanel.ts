@@ -1137,6 +1137,13 @@ document.addEventListener('DOMContentLoaded', () => {
         type: 'HUNTER_VERIFY_LEAD',
         leadId: lead.id,
         confirmedByUser: true,
+        approvedPlan: {
+          capability: plan.capability,
+          targetUrl: plan.targetUrl,
+          maxRequests: plan.maxRequests,
+          method: plan.method,
+          testOrigins: plan.testOrigins ? [...plan.testOrigins] : undefined,
+        },
       })) as { verdict?: Lead['verdict'] } | undefined;
       if (res?.verdict !== undefined) lead.verdict = res.verdict;
     } finally {

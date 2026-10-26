@@ -253,6 +253,7 @@ export interface HunterVerifyLeadMessage {
   type: 'HUNTER_VERIFY_LEAD';
   leadId: string;
   confirmedByUser?: boolean | undefined;
+  approvedPlan?: import('../leads/verify/active').ApprovedProbePlan | undefined;
 }
 
 export interface HunterVerifyLeadResponse {

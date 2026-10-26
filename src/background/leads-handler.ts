@@ -27,7 +27,7 @@ import {
   executeHunterProbeWithBody,
   executeHunterCorsProbe,
 } from '../leads/hunter/hunter';
-import { applyPassiveVerdicts, verifyLeadActive } from '../leads/verify';
+import { applyPassiveVerdicts, verifyLeadActive, type ApprovedProbePlan } from '../leads/verify';
 import { maskSecret, maskLocation } from '../leads/sieve/mask';
 import { ScopeEngine } from '../shared/scope/engine';
 import { originFromUrl } from '../rules/utils';
@@ -819,7 +819,8 @@ export async function handleHunterProbe(
 export async function handleVerifyLead(
   leadId: string,
   settings: SettingsV2,
-  confirmedByUser = false
+  confirmedByUser = false,
+  approvedPlan?: ApprovedProbePlan,
 ): Promise<LeadVerdict | undefined> {
   const lead = globalLeadStore.getLead(leadId);
   if (lead === undefined) return undefined;
@@ -829,6 +830,7 @@ export async function handleVerifyLead(
     resolveScope: (url: string) => resolveScopeStatus(url, settings),
     probe: (req, scope, bodyLimit) => executeHunterProbeWithBody(req, scope, config, confirmedByUser, bodyLimit),
     corsProbe: (url, scope) => executeHunterCorsProbe(url, scope, config, confirmedByUser),
+    approvedPlan,
   });
   globalLeadStore.setVerdict(leadId, verdict);
   return verdict;

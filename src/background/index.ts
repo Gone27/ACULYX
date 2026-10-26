@@ -2057,7 +2057,7 @@ chrome.runtime.onMessage.addListener(
         return false;
       }
       const leadId = typeof message.leadId === 'string' ? message.leadId : '';
-      void handleVerifyLead(leadId, currentSettings, message.confirmedByUser === true).then((verdict) => {
+      void handleVerifyLead(leadId, currentSettings, message.confirmedByUser === true, message.approvedPlan).then((verdict) => {
         sendResponse({ type: 'HUNTER_VERIFY_LEAD_RESPONSE', leadId, verdict });
       });
       return true;

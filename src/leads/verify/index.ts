@@ -8,9 +8,11 @@ export {
   planSourceMapUrl,
   planBucketUrl,
   planActiveProbe,
+  matchProbePlan,
   type ActiveVerifyDeps,
   type ActiveCapability,
   type ProbePlan,
+  type ApprovedProbePlan,
 } from './active';
 export { attachSecretFacts, computeSecretFacts, locateRawFromPreview, shannonEntropy } from './facts';
 export { sanitizeVerdict, sanitizeFacts } from './sanitize';
