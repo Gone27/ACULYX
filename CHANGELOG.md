@@ -8,10 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Security, Accuracy & Lead Verification
-- **Probe Plan Mechanical Binding (P2)**:
-  - Bound the displayed probe plan in the confirmation UI to background verification execution.
-  - Verification handler strictly compares the approved plan against the recomputed target plan, rejecting altered, stale, or tampered plans with zero network probes.
-  - Added full test coverage for plan tampering and lead mutation rejection between display and execution.
+- **Unregistered Rule Uncertainty & Explicit Dimension UI Display (P1)**:
+  - Unregistered rules lacking an explicit condition predicate in `PASSIVE_RULE_REGISTRY` evaluate strictly to `status: 'uncertain'` with `securityAssessment: 'unreviewed'` rather than defaulting to `likely`.
+  - Sidepanel UI prominently displays the three distinct verdict dimensions (Assessment, Evidence, Scope) alongside the status badge, eliminating false impression of confirmed or likely bugs for unreviewed rules.
+  - SARIF and Markdown exports include Assessment, Evidence, and Scope dimension lines.
+  - Added Playwright UI regression tests asserting `? Uncertain` badge and dimension display for unregistered rules.
+- **Incremental Parser for Truncated Source Maps & Malformed Prefix Rejection (P1)**:
+  - Implemented bounded incremental parser (`parsePartialSourceMap`) for incomplete / 206 partial responses validating Source Map v3 schema (`version === 3`, string `mappings` prefix if present, and valid `sources` array containing non-empty strings).
+  - Explicitly rejects malformed partial bodies (such as unclosed arrays, arbitrary padded junk, or bogus sections) returning `uncertain`.
+  - Reserved `status: 'confirmed'` strictly for fully parsed maps or demonstrated `sourcesContent` disclosure; valid truncated maps return `status: 'likely'` with `evidenceStatus: 'inconclusive'`.
+  - Added unit test fixtures covering malformed 206, incomplete sources array, padded junk, bogus sections, valid truncated maps, and fully valid maps.
+- **Probe Plan Mechanical Binding & Typed Contract (P2)**:
+  - Expanded `ApprovedProbePlan` contract to include literal `credentials: 'omit'` and `redirect: 'manual'` fields.
+  - Background verification strictly compares the approved plan against the recomputed target plan, rejecting altered, stale, or tampered plans with zero network probes.
+  - Added full test coverage for plan tampering, credential/redirect deviation rejection, and lead mutation rejection between display and execution.
 - **Rule Verification Registry & Unknown-Scope Boundary (P1 & B1)**:
   - Enforced an explicit `PASSIVE_RULE_REGISTRY` in passive verification, ensuring only rules with verified condition predicates (such as `AUTH-003` and `AUTH-001`) can confirm passively. Unregistered or heuristic rules downgrade to `likely` + `unreviewed`.
   - Unknown scope correctly preserves `uncertain` for weak heuristics, whisper signals, and example contexts rather than promoting them to `likely`.
