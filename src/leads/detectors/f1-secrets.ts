@@ -1,6 +1,19 @@
 import type { Lead } from '../types';
 import { maskSecret, maskLocation } from '../sieve/mask';
 import { attachSecretFacts } from '../verify/facts';
+import type { CredentialProvider } from '../types';
+
+export interface SecretCandidateEmit {
+  leadId: string;
+  provider: CredentialProvider;
+  tokenFamily: string;
+  rawToken: string;
+}
+
+/** Optional callback emitted during detection for supported provider tokens.
+ * Raw token is passed ONLY here, while still in detection memory.
+ * It must NOT be stored in Lead, LeadFacts, evidence, messages, or test snapshots. */
+export type SecretCandidateCallback = (candidate: SecretCandidateEmit) => void;
 
 export function calculateEntropy(str: string): number {
   const len = str.length;
@@ -88,7 +101,8 @@ function nextLeadId(prefix: string): string {
 export function detectSecrets(
   code: string,
   rawUrl: string,
-  scopeStatus: Lead['scopeStatus'] = 'unknown'
+  scopeStatus: Lead['scopeStatus'] = 'unknown',
+  onCandidate?: SecretCandidateCallback
 ): Lead[] {
   const leads: Lead[] = [];
   if (!code || typeof code !== 'string') return leads;
@@ -298,8 +312,9 @@ export function detectSecrets(
   if (stripeSecretMatches) {
     for (const match of stripeSecretMatches) {
       if (isPlaceholder(match)) continue;
+      const leadId = nextLeadId('SEC-STRIPE');
       leads.push({
-        id: nextLeadId('SEC-STRIPE'),
+        id: leadId,
         ruleId: 'SEC-001',
         family: 'F1',
         tier: 'observed',
@@ -320,6 +335,8 @@ export function detectSecrets(
         url,
         sourceSensor: 'S2',
       });
+      const tokenFamily = match.startsWith('sk_') ? 'sk_live' : 'rk_live';
+      onCandidate?.({ leadId, provider: 'stripe', tokenFamily, rawToken: match });
     }
   }
 
@@ -328,8 +345,9 @@ export function detectSecrets(
   if (slackMatches) {
     for (const match of slackMatches) {
       if (isPlaceholder(match)) continue;
+      const leadId = nextLeadId('SEC-SLACK');
       leads.push({
-        id: nextLeadId('SEC-SLACK'),
+        id: leadId,
         ruleId: 'SEC-001',
         family: 'F1',
         tier: 'observed',
@@ -349,6 +367,11 @@ export function detectSecrets(
         url: maskLocation(url),
         sourceSensor: 'S2',
       });
+      // v1 liveness only for bot (xoxb-) and user (xoxp-) tokens per design plan
+      if (match.startsWith('xoxb-') || match.startsWith('xoxp-')) {
+        const tokenFamily = match.startsWith('xoxb-') ? 'xoxb' : 'xoxp';
+        onCandidate?.({ leadId, provider: 'slack', tokenFamily, rawToken: match });
+      }
     }
   }
 
@@ -385,8 +408,9 @@ export function detectSecrets(
   if (ghMatches) {
     for (const match of ghMatches) {
       if (isPlaceholder(match)) continue;
+      const leadId = nextLeadId('SEC-GITHUB');
       leads.push({
-        id: nextLeadId('SEC-GITHUB'),
+        id: leadId,
         ruleId: 'SEC-001',
         family: 'F1',
         tier: 'observed',
@@ -406,6 +430,11 @@ export function detectSecrets(
         url,
         sourceSensor: 'S2',
       });
+      // v1 liveness: classic PAT (ghp) and OAuth user-access (gho/ghu) supported at GET /user
+      const prefix = match.split('_')[0] ?? '';
+      if (prefix === 'ghp' || prefix === 'gho' || prefix === 'ghu') {
+        onCandidate?.({ leadId, provider: 'github', tokenFamily: prefix, rawToken: match });
+      }
     }
   }
 
@@ -413,8 +442,9 @@ export function detectSecrets(
   if (ghPatMatches) {
     for (const match of ghPatMatches) {
       if (isPlaceholder(match)) continue;
+      const leadId = nextLeadId('SEC-GH-PAT');
       leads.push({
-        id: nextLeadId('SEC-GH-PAT'),
+        id: leadId,
         ruleId: 'SEC-001',
         family: 'F1',
         tier: 'observed',
@@ -434,6 +464,8 @@ export function detectSecrets(
         url,
         sourceSensor: 'S2',
       });
+      // Fine-grained PATs supported at GET /user (no specific scope needed)
+      onCandidate?.({ leadId, provider: 'github', tokenFamily: 'github_pat', rawToken: match });
     }
   }
 

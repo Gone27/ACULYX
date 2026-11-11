@@ -1,9 +1,40 @@
-import type { Lead, LeadFamily, EvidenceTier, LeadPotential, LeadSensor } from '../types';
+import type { Lead, LeadFamily, EvidenceTier, LeadPotential, LeadSensor, CredentialCheckResult, CredentialCheckStatus, CredentialProvider } from '../types';
 import { maskSecret, maskLocation, sha256Hex } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
 import { calculateLeadPriority } from '../ranking/ranking';
 import { sanitizeFacts, sanitizeVerdict } from '../verify/sanitize';
 import type { LeadVerdict } from '../types';
+
+const VALID_CRED_STATUSES = new Set<CredentialCheckStatus>([
+  'not_checked', 'active_at_check', 'inactive_at_check',
+  'permission_limited', 'unknown', 'unsupported',
+]);
+const VALID_CRED_PROVIDERS = new Set<CredentialProvider>(['github', 'stripe', 'slack']);
+
+function sanitizeCredentialCheck(raw: unknown): CredentialCheckResult | undefined {
+  if (raw === undefined || raw === null || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const status = typeof r.status === 'string' && VALID_CRED_STATUSES.has(r.status as CredentialCheckStatus)
+    ? (r.status as CredentialCheckStatus)
+    : 'unknown';
+  const provider = typeof r.provider === 'string' && VALID_CRED_PROVIDERS.has(r.provider as CredentialProvider)
+    ? (r.provider as CredentialProvider)
+    : undefined;
+  if (!provider) return undefined;
+  const tokenFamily = typeof r.tokenFamily === 'string' ? r.tokenFamily.slice(0, 30) : '';
+  const checkedAt = typeof r.checkedAt === 'number' && Number.isFinite(r.checkedAt) ? r.checkedAt : 0;
+  const details = typeof r.details === 'string' ? r.details.slice(0, 500) : '';
+  const livemode = typeof r.livemode === 'boolean' ? r.livemode : undefined;
+  // Allowlist: never persist rawToken, login, workspace, account IDs, response text
+  return {
+    status,
+    provider,
+    tokenFamily,
+    checkedAt,
+    details,
+    ...(livemode !== undefined ? { livemode } : {}),
+  };
+}
 
 const VALID_FAMILIES = new Set<LeadFamily>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
 const VALID_TIERS = new Set<EvidenceTier>(['observed', 'strong', 'weak', 'whisper']);
@@ -35,6 +66,9 @@ export class LeadStore {
 
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private isInitialized = false;
+
+  public onLeadRemoved?: (leadId: string) => void;
+  public onCleared?: () => void;
 
   constructor() {
     void this.init();
@@ -194,6 +228,7 @@ export class LeadStore {
 
     const facts = sanitizeFacts(lead.facts);
     const verdict = sanitizeVerdict(lead.verdict);
+    const credentialCheck = sanitizeCredentialCheck(lead.credentialCheck);
 
     return {
       id,
@@ -225,15 +260,18 @@ export class LeadStore {
       ...(remediation !== undefined ? { remediation } : {}),
       ...(facts !== undefined ? { facts } : {}),
       ...(verdict !== undefined ? { verdict } : {}),
+      ...(credentialCheck !== undefined ? { credentialCheck } : {}),
     };
   }
 
   /**
    * Adds or updates a lead, enforcing LRU bounds and deduplication.
+   * Returns the ID of the surviving lead in the store (may differ from rawLead.id
+   * when the lead merges into an existing duplicate). Returns undefined if dropped.
    */
-  public addLead(rawLead: Lead, tabId?: number): void {
+  public addLead(rawLead: Lead, tabId?: number): string | undefined {
     if (rawLead.scopeStatus === 'out-of-scope') {
-      return;
+      return undefined;
     }
     const lead = this.sanitizeLeadEvidence(rawLead);
     const origin = lead.origin;
@@ -257,7 +295,8 @@ export class LeadStore {
         existing.priority = calculateLeadPriority(existing);
       }
       this.scheduleSave();
-      return;
+      // Return the surviving lead's ID, not the incoming (possibly discarded) ID
+      return existingLeadId;
     }
 
     // New lead
@@ -279,6 +318,7 @@ export class LeadStore {
         this.leadById.delete(removed.id);
         const oldKey = this.computeDedupKey(removed);
         this.dedupMap.delete(oldKey);
+        this.onLeadRemoved?.(removed.id);
       }
     }
 
@@ -286,6 +326,7 @@ export class LeadStore {
       this.associateTabLead(tabId, lead.id);
     }
     this.scheduleSave();
+    return lead.id;
   }
 
   public associateTabLead(tabId: number, leadId: string): void {
@@ -343,6 +384,7 @@ export class LeadStore {
     for (const lead of leads) {
       this.leadById.delete(lead.id);
       this.dedupMap.delete(this.computeDedupKey(lead));
+      this.onLeadRemoved?.(lead.id);
     }
     this.originLeads.delete(origin);
     this.scheduleSave();
@@ -353,6 +395,7 @@ export class LeadStore {
     this.leadById.clear();
     this.dedupMap.clear();
     this.tabToLeads.clear();
+    this.onCleared?.();
     if (this.hasStorageSession()) {
       void chrome.storage.session.remove([SESSION_STORAGE_KEY]).catch(() => undefined);
     }

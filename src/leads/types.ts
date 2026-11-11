@@ -98,6 +98,26 @@ export interface Lead {
   remediation?: string | undefined;
   facts?: LeadFacts | undefined;
   verdict?: LeadVerdict | undefined;
+  credentialCheck?: CredentialCheckResult | undefined;
+}
+
+export type CredentialCheckStatus =
+  | 'not_checked'
+  | 'active_at_check'
+  | 'inactive_at_check'
+  | 'permission_limited'
+  | 'unknown'
+  | 'unsupported';
+
+export type CredentialProvider = 'github' | 'stripe' | 'slack';
+
+export interface CredentialCheckResult {
+  status: CredentialCheckStatus;
+  provider: CredentialProvider;
+  tokenFamily: string;
+  checkedAt: number;
+  details: string;
+  livemode?: boolean | undefined;
 }
 
 export interface ChainRule {

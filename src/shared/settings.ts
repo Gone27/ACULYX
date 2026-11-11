@@ -314,6 +314,9 @@ export function migrateSettings(raw: unknown): SettingsV2 {
     leadsEnabled,
     deepModeEnabled,
     hunterConfig,
+    credentialLivenessEnabled: typeof obj.credentialLivenessEnabled === 'boolean'
+      ? obj.credentialLivenessEnabled
+      : false,
   };
 
   if (legacyAllowedOrigins !== undefined && legacyAllowedOrigins.length > 0) {

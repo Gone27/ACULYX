@@ -280,6 +280,13 @@ export interface SettingsV2 {
   alwaysIgnoreCookies?: string[];
   isEvaluation?: boolean;
   isPro?: boolean;
+  /**
+   * Credential Liveness feature gate. Default false (disabled).
+   * When true, eligible F1 leads show an explicit opt-in action
+   * that sends one authenticated request to the named provider's
+   * fixed endpoint to check whether the credential was accepted.
+   */
+  credentialLivenessEnabled?: boolean;
 }
 
 export type Settings = SettingsV2;

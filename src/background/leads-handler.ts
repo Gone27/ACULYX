@@ -14,7 +14,8 @@ import {
   recordBucket,
 } from '../leads';
 export { globalLeadStore };
-import { detectSecrets } from '../leads/detectors/f1-secrets';
+import { detectSecrets, type SecretCandidateEmit } from '../leads/detectors/f1-secrets';
+import { globalSecretCandidateStore } from './secret-candidate-store';
 import { detectEndpoints } from '../leads/detectors/f2-endpoints';
 import { detectSourceMaps } from '../leads/detectors/f3-sourcemaps';
 import { detectAuthLeads } from '../leads/detectors/f4-auth';
@@ -48,6 +49,42 @@ import {
   type LeadStateUpdateMessage,
 } from '../shared/messaging';
 import type { SettingsV2 } from '../shared/types';
+
+// Wire LeadStore eviction to background ephemeral candidate store
+globalLeadStore.onLeadRemoved = (leadId) => {
+  globalSecretCandidateStore.removeCandidate(leadId);
+};
+globalLeadStore.onCleared = () => {
+  globalSecretCandidateStore.clear();
+};
+
+function ingestSecretLeads(
+  leads: Lead[],
+  candidates: Map<string, SecretCandidateEmit>,
+  tabId: number | undefined,
+  settings: SettingsV2,
+  scopeStatus: Lead['scopeStatus']
+): void {
+  for (const lead of leads) {
+    const incomingId = lead.id;
+    const survivingId = globalLeadStore.addLead(lead, tabId);
+    const cand = candidates.get(incomingId);
+    if (
+      cand !== undefined &&
+      survivingId !== undefined &&
+      survivingId.length > 0 &&
+      settings.credentialLivenessEnabled === true &&
+      scopeStatus !== 'out-of-scope'
+    ) {
+      globalSecretCandidateStore.addCandidate(
+        survivingId,
+        cand.provider,
+        cand.tokenFamily,
+        cand.rawToken
+      );
+    }
+  }
+}
 
 
 let leadCounter = 0;
@@ -262,10 +299,11 @@ export async function handleDomLeadsCollected(
 
       if (typeof script.inlineContent === 'string' && script.inlineContent.length > 0) {
         // F1: Secrets evaluated with script's own scope
-        const secretLeads = detectSecrets(script.inlineContent, scriptUrl, scriptScope);
-        for (const lead of secretLeads) {
-          globalLeadStore.addLead(lead, tabId);
-        }
+        const secretCandidates = new Map<string, SecretCandidateEmit>();
+        const secretLeads = detectSecrets(script.inlineContent, scriptUrl, scriptScope, (c) => {
+          secretCandidates.set(c.leadId, c);
+        });
+        ingestSecretLeads(secretLeads, secretCandidates, tabId, settings, scriptScope);
 
         // F2: Endpoints evaluated with script's own scope
         const endpointLeads = detectEndpoints(script.inlineContent, scriptUrl, scriptScope);
@@ -449,11 +487,14 @@ export async function handleDomLeadsCollected(
       (b): b is string => typeof b === 'string' && b.length > 0
     );
     for (const blob of stateBlobs) {
-      const secrets = detectSecrets(blob, url, scopeStatus);
+      const candidates = new Map<string, SecretCandidateEmit>();
+      const secrets = detectSecrets(blob, url, scopeStatus, (c) => {
+        candidates.set(c.leadId, c);
+      });
       for (const s of secrets) {
         s.title = `[Hydration State] ${s.title}`;
-        globalLeadStore.addLead(s, tabId);
       }
+      ingestSecretLeads(secrets, candidates, tabId, settings, scopeStatus);
       const endpoints = detectEndpoints(blob, url, scopeStatus);
       for (const ep of endpoints) {
         globalLeadStore.addLead(ep, tabId);
@@ -464,11 +505,14 @@ export async function handleDomLeadsCollected(
   // 7. Analyze HTML Comments
   if (data.comments !== undefined && data.comments.length > 0) {
     for (const comment of data.comments) {
-      const secretLeads = detectSecrets(comment, url, scopeStatus);
+      const candidates = new Map<string, SecretCandidateEmit>();
+      const secretLeads = detectSecrets(comment, url, scopeStatus, (c) => {
+        candidates.set(c.leadId, c);
+      });
       for (const s of secretLeads) {
         s.title = `[HTML Comment] ${s.title}`;
-        globalLeadStore.addLead(s, tabId);
       }
+      ingestSecretLeads(secretLeads, candidates, tabId, settings, scopeStatus);
       const epLeads = detectEndpoints(comment, url, scopeStatus);
       for (const ep of epLeads) {
         ep.title = `[HTML Comment] ${ep.title}`;

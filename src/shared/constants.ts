@@ -110,4 +110,5 @@ export const DEFAULT_SETTINGS: SettingsV2 = {
     enabled: false,
     maxRequestsPerSecond: 1,
   },
+  credentialLivenessEnabled: false,
 };
