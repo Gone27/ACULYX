@@ -17,3 +17,11 @@ export {
 export { attachSecretFacts, computeSecretFacts, locateRawFromPreview, shannonEntropy } from './facts';
 export { sanitizeVerdict, sanitizeFacts } from './sanitize';
 export { crc32, validateCrc32Base62Token } from './checksums';
+export {
+  executeCredentialLivenessCheck,
+  getLivenessProbeTarget,
+  classifyGitHubResponse,
+  classifyStripeResponse,
+  classifySlackResponse,
+  type LivenessProbeTarget,
+} from './credential-liveness';
