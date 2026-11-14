@@ -47,7 +47,12 @@
     "scripting"
   ],
 
-  "optional_permissions": ["<all_urls>"],
+  "optional_permissions": [
+    "https://api.github.com/*",
+    "https://api.stripe.com/*",
+    "https://slack.com/*",
+    "<all_urls>"
+  ],
 
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"

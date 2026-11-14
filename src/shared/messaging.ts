@@ -280,6 +280,48 @@ export interface TriggerLeadsScanResponse {
   error?: string;
 }
 
+export interface ProposedCredentialPlan {
+  planId: string;
+  leadId: string;
+  provider: import('../leads/types').CredentialProvider;
+  endpointUrl: string;
+  method: 'GET' | 'POST';
+  maskedIdentity: string;
+  tokenFamily: string;
+  maxRequests: 1;
+  expiresAt: number;
+  requiredOrigin: string;
+}
+
+export interface PlanCredentialCheckMessage {
+  type: 'PLAN_CREDENTIAL_CHECK';
+  leadId: string;
+}
+
+export interface PlanCredentialCheckResponse {
+  type: 'PLAN_CREDENTIAL_CHECK_RESPONSE';
+  success: boolean;
+  leadId: string;
+  plan?: ProposedCredentialPlan | undefined;
+  error?: string | undefined;
+}
+
+export interface ConfirmCredentialCheckMessage {
+  type: 'CONFIRM_CREDENTIAL_CHECK';
+  leadId: string;
+  planId: string;
+  confirmedByUser: boolean;
+  affirmAuthorized: boolean;
+}
+
+export interface ConfirmCredentialCheckResponse {
+  type: 'CONFIRM_CREDENTIAL_CHECK_RESPONSE';
+  success: boolean;
+  leadId: string;
+  result?: import('../leads/types').CredentialCheckResult | undefined;
+  error?: string | undefined;
+}
+
 /** All messages that cross the service worker ↔ UI boundary. */
 export type ExtensionMessage =
   | TabStateUpdateMessage
@@ -313,7 +355,11 @@ export type ExtensionMessage =
   | HunterVerifyLeadResponse
   | DevToolsLeadsCollectedMessage
   | TriggerLeadsScanMessage
-  | TriggerLeadsScanResponse;
+  | TriggerLeadsScanResponse
+  | PlanCredentialCheckMessage
+  | PlanCredentialCheckResponse
+  | ConfirmCredentialCheckMessage
+  | ConfirmCredentialCheckResponse;
 
 // ─── Port registry ────────────────────────────────────────────────────────────
 

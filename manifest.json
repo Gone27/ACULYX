@@ -48,7 +48,12 @@
     "sidePanel"
   ],
 
-  "optional_host_permissions": ["<all_urls>"],
+  "optional_host_permissions": [
+    "https://api.github.com/*",
+    "https://api.stripe.com/*",
+    "https://slack.com/*",
+    "<all_urls>"
+  ],
 
 
   "content_security_policy": {

@@ -31,6 +31,10 @@ import {
   handleVerifyLead,
   resolveScopeStatus,
 } from './leads-handler';
+import {
+  handlePlanCredentialCheck,
+  handleConfirmCredentialCheck,
+} from './credential-flow';
 import { detectHeaderLeads } from '../leads/detectors/f6-headers';
 import { detectParamLeads } from '../leads/detectors/f5-params';
 import { getReconMemory, clearReconMemory, globalLeadStore, clearHunterLedger } from '../leads';
@@ -2059,6 +2063,21 @@ chrome.runtime.onMessage.addListener(
       const leadId = typeof message.leadId === 'string' ? message.leadId : '';
       void handleVerifyLead(leadId, currentSettings, message.confirmedByUser === true, message.approvedPlan).then((verdict) => {
         sendResponse({ type: 'HUNTER_VERIFY_LEAD_RESPONSE', leadId, verdict });
+      });
+      return true;
+    }
+
+    if (message.type === 'PLAN_CREDENTIAL_CHECK') {
+      const leadId = typeof message.leadId === 'string' ? message.leadId : '';
+      void handlePlanCredentialCheck(leadId, _sender).then((resp) => {
+        sendResponse(resp);
+      });
+      return true;
+    }
+
+    if (message.type === 'CONFIRM_CREDENTIAL_CHECK') {
+      void handleConfirmCredentialCheck(message, _sender, { settings: currentSettings }).then((resp) => {
+        sendResponse(resp);
       });
       return true;
     }
