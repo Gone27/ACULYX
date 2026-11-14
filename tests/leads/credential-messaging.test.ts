@@ -17,6 +17,8 @@ describe('Credential Liveness Phase 3: Permission & Human Gate Message Flow', ()
     globalLeadStore.clearAll();
   });
 
+  const enabledSettings = { ...DEFAULT_SETTINGS, credentialLivenessEnabled: true };
+
   const makeTestLead = (id: string, origin = 'https://example.com'): Lead => ({
     id,
     ruleId: 'SEC-001',
@@ -54,7 +56,7 @@ describe('Credential Liveness Phase 3: Permission & Human Gate Message Flow', ()
         url: 'chrome-extension://abcdef/src/sidepanel/sidepanel.html',
       };
 
-      const res = await handlePlanCredentialCheck('LD-PLAN-1', sender);
+      const res = await handlePlanCredentialCheck('LD-PLAN-1', sender, { settings: enabledSettings });
       expect(res.success).toBe(true);
       expect(res.plan).toBeDefined();
       expect(res.plan?.leadId).toBe('LD-PLAN-1');
@@ -73,7 +75,7 @@ describe('Credential Liveness Phase 3: Permission & Human Gate Message Flow', ()
       globalLeadStore.addLead(lead);
 
       const sender = { url: 'chrome-extension://abcdef/src/sidepanel/sidepanel.html' };
-      const res = await handlePlanCredentialCheck('LD-NOCAND', sender);
+      const res = await handlePlanCredentialCheck('LD-NOCAND', sender, { settings: enabledSettings });
       expect(res.success).toBe(false);
       expect(res.error).toMatch(/No active candidate/);
     });
@@ -105,7 +107,7 @@ describe('Credential Liveness Phase 3: Permission & Human Gate Message Flow', ()
         url: 'chrome-extension://abcdef/src/sidepanel/sidepanel.html',
       };
 
-      const planRes = await handlePlanCredentialCheck('LD-CONFIRM-1', sender);
+      const planRes = await handlePlanCredentialCheck('LD-CONFIRM-1', sender, { settings: enabledSettings });
       expect(planRes.plan).toBeDefined();
       const planId = planRes.plan?.planId ?? '';
 
@@ -146,7 +148,7 @@ describe('Credential Liveness Phase 3: Permission & Human Gate Message Flow', ()
       globalSecretCandidateStore.addCandidate('LD-DENIED', 'github', 'ghp', 'ghp_abc');
 
       const sender = { url: 'chrome-extension://abcdef/src/sidepanel/sidepanel.html' };
-      const planRes = await handlePlanCredentialCheck('LD-DENIED', sender);
+      const planRes = await handlePlanCredentialCheck('LD-DENIED', sender, { settings: enabledSettings });
       const planId = planRes.plan?.planId ?? '';
 
       const mockFetch = vi.fn();
@@ -179,7 +181,7 @@ describe('Credential Liveness Phase 3: Permission & Human Gate Message Flow', ()
       globalSecretCandidateStore.addCandidate('LD-REPLAY', 'github', 'ghp', 'ghp_abc');
 
       const sender = { url: 'chrome-extension://abcdef/src/sidepanel/sidepanel.html' };
-      const planRes = await handlePlanCredentialCheck('LD-REPLAY', sender);
+      const planRes = await handlePlanCredentialCheck('LD-REPLAY', sender, { settings: enabledSettings });
       const planId = planRes.plan?.planId ?? '';
 
       const mockFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));

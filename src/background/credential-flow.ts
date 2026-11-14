@@ -6,6 +6,7 @@ import type {
 } from '../shared/messaging';
 import type { CredentialProvider } from '../leads/types';
 import type { SettingsV2 } from '../shared/types';
+import { SettingsService } from '../shared/settings';
 import { globalSecretCandidateStore } from './secret-candidate-store';
 import { globalLeadStore } from './leads-handler';
 import {
@@ -19,6 +20,15 @@ const proposedPlans = new Map<string, ProposedCredentialPlan>();
 
 export function clearProposedPlans(): void {
   proposedPlans.clear();
+}
+
+export function onCredentialLivenessDisabled(): void {
+  globalSecretCandidateStore.clear();
+  clearProposedPlans();
+}
+
+export function getProposedPlanCount(): number {
+  return proposedPlans.size;
 }
 
 /**
@@ -55,6 +65,11 @@ export function isTrustedExtensionSender(sender?: chrome.runtime.MessageSender):
   return url.startsWith('chrome-extension://') || url.startsWith('moz-extension://');
 }
 
+export interface PlanDeps {
+  settings?: SettingsV2;
+  getSettings?: () => Promise<SettingsV2>;
+}
+
 /**
  * Handles PLAN_CREDENTIAL_CHECK.
  * Constructs an opaque, short-lived plan for eligible candidates.
@@ -62,15 +77,25 @@ export function isTrustedExtensionSender(sender?: chrome.runtime.MessageSender):
  */
 export async function handlePlanCredentialCheck(
   leadId: string,
-  sender?: chrome.runtime.MessageSender
+  sender?: chrome.runtime.MessageSender,
+  deps: PlanDeps = {}
 ): Promise<PlanCredentialCheckResponse> {
-  await Promise.resolve();
   if (!isTrustedExtensionSender(sender)) {
     return {
       type: 'PLAN_CREDENTIAL_CHECK_RESPONSE',
       success: false,
       leadId,
       error: 'Untrusted message sender: only extension UI can initiate credential checks.',
+    };
+  }
+
+  const settings = deps.settings ?? (deps.getSettings !== undefined ? await deps.getSettings() : await SettingsService.getSettings());
+  if (settings.credentialLivenessEnabled !== true) {
+    return {
+      type: 'PLAN_CREDENTIAL_CHECK_RESPONSE',
+      success: false,
+      leadId,
+      error: 'Credential liveness checking is disabled in settings. Enable it in settings first.',
     };
   }
 
@@ -143,6 +168,7 @@ export interface ConfirmDeps {
   fetchFn?: typeof fetch;
   checkPermission?: (origin: string) => Promise<boolean>;
   settings?: SettingsV2;
+  getSettings?: () => Promise<SettingsV2>;
 }
 
 /**
@@ -203,6 +229,18 @@ export async function handleConfirmCredentialCheck(
       success: false,
       leadId: req.leadId,
       error: 'Invalid or expired plan.',
+    };
+  }
+
+  // Opt-in gate: refuse execution if credential liveness is disabled in settings.
+  // Decide BEFORE consuming the plan or candidate.
+  const settings = deps.settings ?? (deps.getSettings !== undefined ? await deps.getSettings() : await SettingsService.getSettings());
+  if (settings.credentialLivenessEnabled !== true) {
+    return {
+      type: 'CONFIRM_CREDENTIAL_CHECK_RESPONSE',
+      success: false,
+      leadId: req.leadId,
+      error: 'Credential liveness checking is disabled in settings. Enable it in settings first.',
     };
   }
 

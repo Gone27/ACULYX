@@ -34,6 +34,7 @@ import {
 import {
   handlePlanCredentialCheck,
   handleConfirmCredentialCheck,
+  onCredentialLivenessDisabled,
 } from './credential-flow';
 import { detectHeaderLeads } from '../leads/detectors/f6-headers';
 import { detectParamLeads } from '../leads/detectors/f5-params';
@@ -651,6 +652,9 @@ export async function clearBadgesOnAllTabs(): Promise<void> {
 settingsTransitionPipeline.registerHooks({
   onRescoreTabs: (_prev, next) => {
     currentSettings = next;
+    if (next.credentialLivenessEnabled !== true) {
+      onCredentialLivenessDisabled();
+    }
     const epoch = currentResetEpoch;
     for (const [tabId, state] of Array.from(tabStates.entries())) {
       recomputeTabState(tabId, state, epoch, next);
@@ -661,6 +665,7 @@ settingsTransitionPipeline.registerHooks({
   onModeChange: async (_prevMode, newMode) => {
     if (newMode === 'off') {
       clearGraphDebounceTimers();
+      onCredentialLivenessDisabled();
       // 1. Immediately clear in-flight WebRequest captures (synchronous gate flip)
       clearInFlightCaptures();
 
@@ -2069,7 +2074,7 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === 'PLAN_CREDENTIAL_CHECK') {
       const leadId = typeof message.leadId === 'string' ? message.leadId : '';
-      void handlePlanCredentialCheck(leadId, _sender).then((resp) => {
+      void handlePlanCredentialCheck(leadId, _sender, { settings: currentSettings }).then((resp) => {
         sendResponse(resp);
       });
       return true;
