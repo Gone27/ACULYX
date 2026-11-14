@@ -35,16 +35,21 @@ describe('Artifact Scan', () => {
         expect(manifest.manifest_version).toBe(3);
       });
 
-      it('enforces secure CSP', () => {
+      it('enforces secure CSP with provider allowlist and no broad permissions', () => {
         const csp = manifest.content_security_policy?.extension_pages;
         expect(csp).toBeDefined();
 
         expect(csp).toContain("script-src 'self'");
         expect(csp).toContain("object-src 'none'");
-        expect(csp).toContain("connect-src 'none'");
+
+        // Explicit three-origin connect-src allowlist; never broad https: or wildcard
+        expect(csp).toContain("connect-src 'self' https://api.github.com https://api.stripe.com https://slack.com");
+        expect(csp).not.toContain("connect-src https:");
+        expect(csp).not.toContain("connect-src *");
+        expect(csp).not.toContain("http:");
 
         // Assert no remote code or CDN script references
-        expect(csp).not.toMatch(/https:\/\//);
+        expect(csp).not.toMatch(/script-src [^;]*https:\/\//);
         expect(csp).not.toContain("'unsafe-eval'");
       });
 

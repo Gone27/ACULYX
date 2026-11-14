@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Security, Accuracy & Lead Verification
+- **Credential Liveness Verification & In-Memory Candidate Store (Phases 1–5)**:
+  - Added opt-in, disabled-by-default (`credentialLivenessEnabled: false`) credential liveness checking for detected F1 secrets (GitHub, Stripe, Slack).
+  - Background ephemeral in-memory candidate store (`SecretCandidateStore`) with 5-minute TTL, 100-candidate LRU capacity bound, and single-use candidate consumption.
+  - Zero raw credential or provider payload persistence: raw tokens exist only transiently in detection memory, never written to `chrome.storage`, IndexedDB, DOM, logs, or reports.
+  - Fixed provider adapters (`GET https://api.github.com/user`, `GET https://api.stripe.com/v1/balance`, `POST https://slack.com/api/auth.test`) with pinned API versions and pure response classifiers.
+  - Request safety invariants: strictly 1 request per confirmation, `credentials: 'omit'`, `redirect: 'manual'`, `cache: 'no-store'`, `referrerPolicy: 'no-referrer'`, 5-second timeout, 8 KiB body reading cap, and zero account IDs or balance amounts retention.
+  - Two-step human gate and runtime permission consent: sidepanel prompts with full endpoint disclosure, masked identity, and explicit program authorization affirmation; requests optional host permissions at runtime.
+  - Strict UI and report wording: positive results report "provider accepted this credential at [time]", never "confirmed vulnerability". "Not checked" baseline never implies inactive or safe.
+  - Narrowly scoped CSP: explicit three-origin `connect-src` allowlist (`https://api.github.com https://api.stripe.com https://slack.com`) preventing arbitrary outbound connections.
+  - Sanitized export reporting in Markdown, JSON, and SARIF formats with "Not checked; no vendor API request was sent." baseline.
 - **Unregistered Rule Uncertainty & Explicit Dimension UI Display (P1)**:
   - Unregistered rules lacking an explicit condition predicate in `PASSIVE_RULE_REGISTRY` evaluate strictly to `status: 'uncertain'` with `securityAssessment: 'unreviewed'` rather than defaulting to `likely`.
   - Sidepanel UI prominently displays the three distinct verdict dimensions (Assessment, Evidence, Scope) alongside the status badge, eliminating false impression of confirmed or likely bugs for unreviewed rules.

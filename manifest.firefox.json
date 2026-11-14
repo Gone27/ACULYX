@@ -55,7 +55,7 @@
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' https://api.github.com https://api.stripe.com https://slack.com"
   },
 
   "icons": {
