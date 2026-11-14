@@ -15,6 +15,7 @@ import {
 } from '../leads/verify/credential-liveness';
 
 const PLAN_TTL_MS = 2 * 60 * 1000; // 2 minutes
+export const MAX_PROPOSED_PLANS = 50;
 
 const proposedPlans = new Map<string, ProposedCredentialPlan>();
 
@@ -129,12 +130,26 @@ export async function handlePlanCredentialCheck(
     };
   }
 
+  // Enforce single live plan per lead: delete any pre-existing plan for this lead
+  for (const [id, existing] of proposedPlans.entries()) {
+    if (existing.leadId === leadId) {
+      proposedPlans.delete(id);
+    }
+  }
+
   // Purge expired plans
   const now = Date.now();
   for (const [id, plan] of proposedPlans.entries()) {
     if (now > plan.expiresAt) {
       proposedPlans.delete(id);
     }
+  }
+
+  // Enforce capacity bounds (LRU eviction of oldest proposed plans)
+  while (proposedPlans.size >= MAX_PROPOSED_PLANS) {
+    const oldestKey = proposedPlans.keys().next().value;
+    if (oldestKey === undefined) break;
+    proposedPlans.delete(oldestKey);
   }
 
   const planId =

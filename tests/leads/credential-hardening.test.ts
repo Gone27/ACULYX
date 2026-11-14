@@ -5,6 +5,7 @@ import {
   clearProposedPlans,
   onCredentialLivenessDisabled,
   getProposedPlanCount,
+  MAX_PROPOSED_PLANS,
 } from '../../src/background/credential-flow';
 import { globalSecretCandidateStore } from '../../src/background/secret-candidate-store';
 import { globalLeadStore } from '../../src/background/leads-handler';
@@ -27,12 +28,12 @@ const lead = (id: string, scopeStatus: Lead['scopeStatus']): Lead => ({
   title: 'GitHub PAT Exposure',
   needs: ['verify scopes'],
   doesNotProve: [],
-  evidence: { preview: maskSecret(TOKEN), location: maskLocation('https://example.com/b.js') },
+  evidence: { preview: maskSecret(TOKEN), location: maskLocation(`https://${id}.example.com/b.js`) },
   tags: ['github', 'secret'],
   scopeStatus,
   timestamp: Date.now(),
-  origin: 'https://example.com',
-  url: 'https://example.com/b.js',
+  origin: `https://${id}.example.com`,
+  url: `https://${id}.example.com/b.js`,
   sourceSensor: 'S2',
 });
 
@@ -176,5 +177,94 @@ describe('credential liveness authorization gate', () => {
     globalSecretCandidateStore.addCandidate('L2', 'github', 'ghp', TOKEN);
     const a = await handlePlanCredentialCheck('L2', sender, { settings: ENABLED_SETTINGS });
     expect(a.plan?.planId).toMatch(/^plan-[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+
+  it('replaces any existing plan for the same lead so only the latest plan is valid', async () => {
+    globalLeadStore.addLead(lead('L-REPLACE', 'in-scope'));
+    globalSecretCandidateStore.addCandidate('L-REPLACE', 'github', 'ghp', TOKEN);
+
+    const first = await handlePlanCredentialCheck('L-REPLACE', sender, { settings: ENABLED_SETTINGS });
+    expect(first.success).toBe(true);
+    const firstPlanId = first.plan?.planId ?? '';
+
+    const second = await handlePlanCredentialCheck('L-REPLACE', sender, { settings: ENABLED_SETTINGS });
+    expect(second.success).toBe(true);
+    const secondPlanId = second.plan?.planId ?? '';
+
+    expect(firstPlanId).not.toBe(secondPlanId);
+    expect(getProposedPlanCount()).toBe(1);
+
+    // Attempting to confirm the superseded first plan must fail
+    const fetchFn = vi.fn();
+    const staleRes = await handleConfirmCredentialCheck(
+      {
+        type: 'CONFIRM_CREDENTIAL_CHECK',
+        leadId: 'L-REPLACE',
+        planId: firstPlanId,
+        confirmedByUser: true,
+        affirmAuthorized: true,
+      } as never,
+      sender,
+      { fetchFn: fetchFn as never, checkPermission: () => Promise.resolve(true), settings: ENABLED_SETTINGS }
+    );
+    expect(staleRes.success).toBe(false);
+    expect(staleRes.error).toContain('Invalid or expired plan');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('bounds pending plans capacity to MAX_PROPOSED_PLANS by evicting oldest plans', async () => {
+    expect(MAX_PROPOSED_PLANS).toBe(50);
+
+    const planIds: string[] = [];
+    for (let i = 0; i < 55; i++) {
+      const id = `L-CAP-${i}`;
+      globalLeadStore.addLead(lead(id, 'in-scope'));
+      globalSecretCandidateStore.addCandidate(id, 'github', 'ghp', TOKEN);
+      const res = await handlePlanCredentialCheck(id, sender, { settings: ENABLED_SETTINGS });
+      expect(res.success).toBe(true);
+      if (res.plan?.planId !== undefined && res.plan.planId.length > 0) {
+        planIds.push(res.plan.planId);
+      }
+    }
+
+    expect(getProposedPlanCount()).toBe(50);
+
+    // First 5 plans should have been evicted (oldest FIFO)
+    const fetchFn = vi.fn();
+    for (let i = 0; i < 5; i++) {
+      const evictedPlanId = planIds[i] ?? '';
+      const res = await handleConfirmCredentialCheck(
+        {
+          type: 'CONFIRM_CREDENTIAL_CHECK',
+          leadId: `L-CAP-${i}`,
+          planId: evictedPlanId,
+          confirmedByUser: true,
+          affirmAuthorized: true,
+        } as never,
+        sender,
+        { fetchFn: fetchFn as never, checkPermission: () => Promise.resolve(true), settings: ENABLED_SETTINGS }
+      );
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Invalid or expired plan');
+    }
+
+    // The 55th plan should still be present
+    const latestPlanId = planIds[54] ?? '';
+    const validRes = await handleConfirmCredentialCheck(
+      {
+        type: 'CONFIRM_CREDENTIAL_CHECK',
+        leadId: 'L-CAP-54',
+        planId: latestPlanId,
+        confirmedByUser: true,
+        affirmAuthorized: true,
+      } as never,
+      sender,
+      {
+        fetchFn: () => Promise.resolve(new Response('{}', { status: 200 })),
+        checkPermission: () => Promise.resolve(true),
+        settings: ENABLED_SETTINGS,
+      }
+    );
+    expect(validRes.success).toBe(true);
   });
 });
