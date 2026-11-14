@@ -9,7 +9,7 @@ export interface LivenessProbeTarget {
 }
 
 const GITHUB_SUPPORTED_FAMILIES = new Set(['ghp', 'gho', 'ghu', 'github_pat']);
-const STRIPE_SUPPORTED_FAMILIES = new Set(['sk_live', 'rk_live']);
+const STRIPE_SUPPORTED_FAMILIES = new Set(['sk_live', 'rk_live', 'sk_test', 'rk_test']);
 const SLACK_SUPPORTED_FAMILIES = new Set(['xoxb', 'xoxp']);
 
 const GITHUB_PINNED_API_VERSION = '2026-03-10';
@@ -93,17 +93,51 @@ export function classifyGitHubResponse(
 
 /**
  * Pure response classifier for Stripe GET /v1/balance.
+ * Validates the balance object structure, verifies livemode boolean,
+ * and checks key-prefix mode agreement against tokenFamily.
  */
 export function classifyStripeResponse(
   status: number,
-  bodyJson?: Record<string, unknown>
+  bodyJson?: Record<string, unknown>,
+  tokenFamily?: string
 ): { status: CredentialCheckStatus; details: string; livemode?: boolean } {
   if (status === 200) {
-    const livemode = typeof bodyJson?.livemode === 'boolean' ? bodyJson.livemode : undefined;
+    if (
+      !bodyJson ||
+      typeof bodyJson !== 'object' ||
+      bodyJson.object !== 'balance' ||
+      typeof bodyJson.livemode !== 'boolean'
+    ) {
+      return {
+        status: 'unknown',
+        details: 'Stripe responded with HTTP 200 but response body did not match expected balance object format.',
+      };
+    }
+
+    const livemode = bodyJson.livemode;
+
+    if (tokenFamily === 'sk_live' || tokenFamily === 'rk_live') {
+      if (!livemode) {
+        return {
+          status: 'unknown',
+          details: 'Stripe response livemode (false) does not match expected live key token family.',
+          livemode,
+        };
+      }
+    } else if (tokenFamily === 'sk_test' || tokenFamily === 'rk_test') {
+      if (livemode) {
+        return {
+          status: 'unknown',
+          details: 'Stripe response livemode (true) does not match expected test key token family.',
+          livemode,
+        };
+      }
+    }
+
     return {
       status: 'active_at_check',
       details: 'Stripe accepted this credential at check time.',
-      ...(livemode !== undefined ? { livemode } : {}),
+      livemode,
     };
   }
   if (status === 401) {
@@ -313,7 +347,7 @@ export async function executeCredentialLivenessCheck(
       classified = classifyGitHubResponse(res.status);
     } else if (candidate.provider === 'stripe') {
       const bodyJson = await readBoundedJson(res);
-      classified = classifyStripeResponse(res.status, bodyJson);
+      classified = classifyStripeResponse(res.status, bodyJson, candidate.tokenFamily);
     } else {
       const bodyJson = await readBoundedJson(res);
       classified = classifySlackResponse(res.status, bodyJson);

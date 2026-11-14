@@ -28,7 +28,7 @@ describe('Credential Liveness Phase 2: Provider Adapters & Pure Classifiers', ()
       expect(patTarget?.method).toBe('GET');
     });
 
-    it('defines fixed Stripe balance target for sk_live and rk_live', () => {
+    it('defines fixed Stripe balance target for sk_live, rk_live, sk_test, and rk_test', () => {
       const skTarget = getLivenessProbeTarget('stripe', 'sk_live');
       expect(skTarget).toBeDefined();
       expect(skTarget?.url).toBe('https://api.stripe.com/v1/balance');
@@ -37,6 +37,16 @@ describe('Credential Liveness Phase 2: Provider Adapters & Pure Classifiers', ()
       const rkTarget = getLivenessProbeTarget('stripe', 'rk_live');
       expect(rkTarget?.url).toBe('https://api.stripe.com/v1/balance');
       expect(rkTarget?.method).toBe('GET');
+
+      const skTestTarget = getLivenessProbeTarget('stripe', 'sk_test');
+      expect(skTestTarget).toBeDefined();
+      expect(skTestTarget?.url).toBe('https://api.stripe.com/v1/balance');
+      expect(skTestTarget?.method).toBe('GET');
+
+      const rkTestTarget = getLivenessProbeTarget('stripe', 'rk_test');
+      expect(rkTestTarget).toBeDefined();
+      expect(rkTestTarget?.url).toBe('https://api.stripe.com/v1/balance');
+      expect(rkTestTarget?.method).toBe('GET');
     });
 
     it('defines fixed Slack auth.test target for xoxb and xoxp', () => {
@@ -94,10 +104,43 @@ describe('Credential Liveness Phase 2: Provider Adapters & Pure Classifiers', ()
           object: 'balance',
           available: [{ amount: 100000, currency: 'usd' }], // must be ignored
           livemode: true,
-        });
+        }, 'sk_live');
         expect(res.status).toBe('active_at_check');
         expect(res.livemode).toBe(true);
         expect(res.details).toContain('Stripe accepted');
+      });
+
+      it('classifies 200 with test key and livemode false as active_at_check', () => {
+        const res = classifyStripeResponse(200, {
+          object: 'balance',
+          livemode: false,
+        }, 'sk_test');
+        expect(res.status).toBe('active_at_check');
+        expect(res.livemode).toBe(false);
+        expect(res.details).toContain('Stripe accepted');
+      });
+
+      it('rejects 200 when object is not balance or livemode is not boolean', () => {
+        expect(classifyStripeResponse(200, { object: 'account', livemode: true }, 'sk_live').status).toBe('unknown');
+        expect(classifyStripeResponse(200, { object: 'balance' }, 'sk_live').status).toBe('unknown');
+        expect(classifyStripeResponse(200, { object: 'balance', livemode: 'true' as unknown as boolean }, 'sk_live').status).toBe('unknown');
+        expect(classifyStripeResponse(200, undefined, 'sk_live').status).toBe('unknown');
+      });
+
+      it('rejects 200 when livemode does not agree with tokenFamily', () => {
+        const liveMismatch = classifyStripeResponse(200, { object: 'balance', livemode: false }, 'sk_live');
+        expect(liveMismatch.status).toBe('unknown');
+        expect(liveMismatch.details).toContain('livemode (false) does not match');
+
+        const testMismatch = classifyStripeResponse(200, { object: 'balance', livemode: true }, 'sk_test');
+        expect(testMismatch.status).toBe('unknown');
+        expect(testMismatch.details).toContain('livemode (true) does not match');
+
+        const rkLiveMismatch = classifyStripeResponse(200, { object: 'balance', livemode: false }, 'rk_live');
+        expect(rkLiveMismatch.status).toBe('unknown');
+
+        const rkTestMismatch = classifyStripeResponse(200, { object: 'balance', livemode: true }, 'rk_test');
+        expect(rkTestMismatch.status).toBe('unknown');
       });
 
       it('classifies 401 as inactive_at_check', () => {

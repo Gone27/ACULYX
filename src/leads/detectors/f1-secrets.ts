@@ -307,35 +307,39 @@ export function detectSecrets(
     }
   }
 
-  // Stripe Live Secret / Restricted Key
-  const stripeSecretMatches = code.match(/\b[rs]k_live_[0-9a-zA-Z]{24,}\b/g);
+  // Stripe Live / Test Secret / Restricted Key
+  const stripeSecretMatches = code.match(/\b[rs]k_(?:live|test)_[0-9a-zA-Z]{24,}\b/g);
   if (stripeSecretMatches) {
     for (const match of stripeSecretMatches) {
       if (isPlaceholder(match)) continue;
-      const leadId = nextLeadId('SEC-STRIPE');
+      const isLive = match.includes('_live_');
+      const isRestricted = match.startsWith('rk_');
+      const leadId = nextLeadId(isLive ? 'SEC-STRIPE' : 'SEC-STRIPE-TEST');
       leads.push({
         id: leadId,
         ruleId: 'SEC-001',
         family: 'F1',
         tier: 'observed',
-        potential: 'critical',
-        confidence: 1.0,
-        title: 'Stripe Live Secret Key Exposure',
+        potential: isLive ? 'critical' : 'medium',
+        confidence: isLive ? 1.0 : 0.9,
+        title: isLive ? 'Stripe Live Secret Key Exposure' : 'Stripe Test Secret Key Exposure',
         needs: ['test Stripe API balance/charges scope'],
         doesNotProve: ['active Stripe account access without verification'],
         evidence: {
           preview: maskSecret(match),
           location: maskLocation(url),
-          context: 'Stripe live secret key',
+          context: isLive ? 'Stripe live secret key' : 'Stripe test secret key',
         },
-        tags: ['stripe', 'secret', 'payment'],
+        tags: isLive ? ['stripe', 'secret', 'payment'] : ['stripe', 'secret', 'payment', 'test'],
         scopeStatus,
         timestamp: Date.now(),
         origin,
         url,
         sourceSensor: 'S2',
       });
-      const tokenFamily = match.startsWith('sk_') ? 'sk_live' : 'rk_live';
+      const tokenFamily = isRestricted
+        ? (isLive ? 'rk_live' : 'rk_test')
+        : (isLive ? 'sk_live' : 'sk_test');
       onCandidate?.({ leadId, provider: 'stripe', tokenFamily, rawToken: match });
     }
   }

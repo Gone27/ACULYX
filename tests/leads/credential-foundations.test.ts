@@ -112,6 +112,22 @@ describe('Credential Liveness Phase 1: Foundations & In-Memory Candidate Store',
       expect(first?.rawToken).toBe(rawToken);
     });
 
+    it('emits candidate for Stripe test secret key (sk_test_) and restricted test key (rk_test_)', () => {
+      const candidates: Array<{ leadId: string; provider: string; tokenFamily: string; rawToken: string }> = [];
+      const code = [
+        'const testKey = "sk_test_abcdefghijklmnopqrstuvwxyz12";',
+        'const rkKey = "rk_test_abcdefghijklmnopqrstuvwxyz12";',
+      ].join('\n');
+      const leads = detectSecrets(code, 'https://example.com/app.js', 'in-scope', (c) => {
+        candidates.push(c);
+      });
+      expect(candidates).toHaveLength(2);
+      expect(candidates[0]?.tokenFamily).toBe('sk_test');
+      expect(candidates[1]?.tokenFamily).toBe('rk_test');
+      expect(leads.some((l) => l.title === 'Stripe Test Secret Key Exposure')).toBe(true);
+      expect(leads.every((l) => l.potential === 'medium')).toBe(true);
+    });
+
     it('emits candidate for xoxb (bot) and xoxp (user) Slack tokens; not xoxs (app-level)', () => {
       const candidates: Array<{ leadId: string; provider: string; tokenFamily: string; rawToken: string }> = [];
       const code = [
