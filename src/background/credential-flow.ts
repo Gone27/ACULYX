@@ -176,12 +176,16 @@ export interface ConfirmDeps {
  */
 async function defaultCheckPermission(origin: string): Promise<boolean> {
   if (typeof chrome === 'undefined' || typeof chrome.permissions?.contains !== 'function') {
-    return true; // Test fallback
+    return false; // Fail closed if permissions API is unavailable
   }
   return new Promise<boolean>((resolve) => {
-    chrome.permissions.contains({ origins: [origin] }, (granted) => {
-      resolve(granted === true);
-    });
+    try {
+      chrome.permissions.contains({ origins: [origin] }, (granted) => {
+        resolve(granted === true);
+      });
+    } catch {
+      resolve(false);
+    }
   });
 }
 
@@ -261,9 +265,14 @@ export async function handleConfirmCredentialCheck(
   // Consume plan immediately (strictly one-use)
   proposedPlans.delete(req.planId);
 
-  // Check host permission for the exact provider origin
+  // Check host permission for the exact provider origin (fail closed on denial or error)
   const permissionChecker = deps.checkPermission ?? defaultCheckPermission;
-  const hasPermission = await permissionChecker(plan.requiredOrigin);
+  let hasPermission = false;
+  try {
+    hasPermission = await permissionChecker(plan.requiredOrigin);
+  } catch {
+    hasPermission = false;
+  }
   if (!hasPermission) {
     return {
       type: 'CONFIRM_CREDENTIAL_CHECK_RESPONSE',

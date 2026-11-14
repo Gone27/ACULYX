@@ -1295,17 +1295,23 @@ document.addEventListener('DOMContentLoaded', () => {
       const affirmed = window.confirm(promptText);
       if (!affirmed) return;
 
-      // Step 3: Request runtime host permission if not already granted
-      if (typeof chrome !== 'undefined' && typeof chrome.permissions?.request === 'function') {
-        const granted = await new Promise<boolean>((resolve) => {
+      // Step 3: Request runtime host permission if not already granted (fail closed if unavailable)
+      if (typeof chrome === 'undefined' || typeof chrome.permissions?.request !== 'function') {
+        alert('Browser permissions API is unavailable. Cannot request host permission.');
+        return;
+      }
+      const granted = await new Promise<boolean>((resolve) => {
+        try {
           chrome.permissions.request({ origins: [plan.requiredOrigin] }, (ok) => {
             resolve(ok === true);
           });
-        });
-        if (!granted) {
-          alert(`Host permission for "${plan.requiredOrigin}" was denied. Cannot contact provider.`);
-          return;
+        } catch {
+          resolve(false);
         }
+      });
+      if (!granted) {
+        alert(`Host permission for "${plan.requiredOrigin}" was denied. Cannot contact provider.`);
+        return;
       }
 
       btn.textContent = '… checking';

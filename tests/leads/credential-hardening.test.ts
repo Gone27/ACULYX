@@ -89,6 +89,58 @@ describe('credential liveness authorization gate', () => {
     expect(getProposedPlanCount()).toBe(0);
   });
 
+  it('fails closed when chrome.permissions API is missing or unavailable', async () => {
+    globalLeadStore.addLead(lead('L-NOPERM', 'in-scope'));
+    globalSecretCandidateStore.addCandidate('L-NOPERM', 'github', 'ghp', TOKEN);
+    const plan = await handlePlanCredentialCheck('L-NOPERM', sender, { settings: ENABLED_SETTINGS });
+    expect(plan.success).toBe(true);
+
+    const fetchFn = vi.fn();
+    // Do not provide a checkPermission override; exercises defaultCheckPermission with no chrome.permissions
+    const res = await handleConfirmCredentialCheck(
+      {
+        type: 'CONFIRM_CREDENTIAL_CHECK',
+        leadId: 'L-NOPERM',
+        planId: plan.plan?.planId ?? '',
+        confirmedByUser: true,
+        affirmAuthorized: true,
+      } as never,
+      sender,
+      { fetchFn: fetchFn as never, settings: ENABLED_SETTINGS }
+    );
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Host permission .* was denied or not granted/i);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(globalSecretCandidateStore.getCandidate('L-NOPERM')).toBeDefined();
+  });
+
+  it('fails closed when permissions check throws an exception or returns false', async () => {
+    globalLeadStore.addLead(lead('L-THROWS', 'in-scope'));
+    globalSecretCandidateStore.addCandidate('L-THROWS', 'github', 'ghp', TOKEN);
+    const plan = await handlePlanCredentialCheck('L-THROWS', sender, { settings: ENABLED_SETTINGS });
+    expect(plan.success).toBe(true);
+
+    const fetchFn = vi.fn();
+    const res = await handleConfirmCredentialCheck(
+      {
+        type: 'CONFIRM_CREDENTIAL_CHECK',
+        leadId: 'L-THROWS',
+        planId: plan.plan?.planId ?? '',
+        confirmedByUser: true,
+        affirmAuthorized: true,
+      } as never,
+      sender,
+      {
+        fetchFn: fetchFn as never,
+        checkPermission: () => Promise.reject(new Error('API error')),
+        settings: ENABLED_SETTINGS,
+      }
+    );
+    expect(res.success).toBe(false);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(globalSecretCandidateStore.getCandidate('L-THROWS')).toBeDefined();
+  });
+
   it('refuses unknown scope without sending anything or consuming the candidate', async () => {
     globalLeadStore.addLead(lead('L1', 'unknown'));
     globalSecretCandidateStore.addCandidate('L1', 'github', 'ghp', TOKEN);
