@@ -179,7 +179,7 @@
           <div class="home-card home-card--privacy">
             <div class="home-card-label">Data handling</div>
             <div class="home-card-value home-card-value--accent">100% local</div>
-            <div class="home-card-sub"><code>connect-src 'none'</code></div>
+            <div class="home-card-sub">No telemetry · opt-in vendor checks only</div>
           </div>
         </div>
 
@@ -240,7 +240,7 @@
         <!-- Version / privacy badge -->
         <div class="home-footer-row">
           <span class="home-version-badge" id="home-version-badge">ACULYX v—</span>
-          <span class="home-privacy-badge">Analysis is local — nothing leaves your device</span>
+          <span class="home-privacy-badge">Analysis is local — nothing leaves your device unless you approve a credential check</span>
         </div>
       </section>
 
@@ -714,7 +714,7 @@
           <div class="about-row">
             <span class="about-label">Network policy</span>
             <span class="about-value">
-              Extension pages enforce <code>connect-src 'none'</code> &mdash; the extension UI cannot initiate any outbound network requests.
+              Extension pages enforce a strict <code>connect-src</code>: only the extension itself plus three vendor APIs (GitHub, Stripe, Slack) that are used solely by the optional, off-by-default credential check you confirm yourself. No telemetry.
             </span>
           </div>
           <div class="about-row">

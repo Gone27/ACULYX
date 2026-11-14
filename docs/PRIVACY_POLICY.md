@@ -12,7 +12,7 @@ All security analysis and evaluation is executed **100% locally inside your web 
 ---
 
 ## 2. Information We Do NOT Collect
-- **Zero Remote Telemetry:** ACULYX does not have external tracking servers, analytics endpoints, or cloud backends. Extension pages enforce `connect-src 'none'`. Content scripts make zero network requests and communicate solely through local extension runtime messaging.
+- **Zero Remote Telemetry:** ACULYX does not have external tracking servers, analytics endpoints, or cloud backends. Extension pages enforce a strict `connect-src` that allows only the extension itself and, for the optional credential liveness check (section 5.1), three vendor APIs. Content scripts make zero network requests and communicate solely through local extension runtime messaging.
 - **Never Retains or Exfiltrates Cookie Values:** ACULYX inspects cookie metadata attributes (such as `Secure`, `HttpOnly`, `SameSite`, and prefix naming) for compliance. Cookie objects returned by browser APIs are accessed for metadata only (never `cookie.value`). Raw in-flight headers are automatically sanitized and query strings and fragments are stripped prior to storage.
 - **No Personal Identifiers:** We do not collect names, email addresses, IP addresses, search queries, or browsing history.
 - **Strict Incognito / Private Window Isolation:** Private and incognito browsing sessions are strictly isolated. Lead Radar findings, S1 query parameter harvesting, reconnaissance memory, and persistent history are never recorded or persisted for incognito tabs. All ephemeral session caches and in-memory triage annotations associated with incognito tabs are immediately wiped when tabs close.
@@ -77,7 +77,7 @@ ACULYX can optionally check whether a credential it found on a page is still acc
 ---
 
 ## 6. Open Source Verification
-ACULYX is open source under the Apache 2.0 license. You can audit the codebase directly on GitHub to verify all privacy assertions and ensure that no network exfiltration code exists.
+ACULYX is open source under the Apache 2.0 license. You can audit the codebase directly on GitHub to verify all privacy assertions. There is no telemetry or analytics code; the only outbound requests are the optional, user-confirmed credential checks described in section 5.1.
 
 ---
 

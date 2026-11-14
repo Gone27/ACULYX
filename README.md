@@ -60,7 +60,7 @@ Because ACULYX evaluates traffic within the browser's own authenticated network 
 ACULYX is built on strict fail-closed privacy invariants:
 
 1. **No Sensitive Value Storage**: Extension code never reads `cookie.value`, authorization credentials, bearer tokens, or URL query parameters. All query parameters (`?`) and fragments (`#`) are stripped before URLs enter session state, storage, or exports.
-2. **Strict Network Isolation**: Extension pages declare `connect-src 'none'` in their Content Security Policy. The extension runtime cannot make outbound HTTP/WebSocket requests.
+2. **Strict Network Isolation**: Extension pages declare a Content Security Policy whose `connect-src` allows only `'self'` and three vendor APIs (`api.github.com`, `api.stripe.com`, `slack.com`). Those are used only by the optional, off-by-default credential liveness check after explicit user confirmation. There is no telemetry and no other outbound destination.
 3. **100% Local Processing**: All evaluation, scoring, D3 graphing, and report generation execute locally on your device.
 4. **Isolated Incognito Handling**: Incognito and private browsing events never touch persistent storage (`localStorage`), history records, or the attack-surface graph.
 5. **No Telemetry**: Zero analytics, zero crash reporting, zero tracking pixels, zero remote script loading.
