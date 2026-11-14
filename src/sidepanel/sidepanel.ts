@@ -1276,6 +1276,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const plan = planRes.plan;
 
+      const stripeWarning =
+        plan.provider === 'stripe'
+          ? '\n\nIMPORTANT (STRIPE): This check queries the Stripe balance endpoint. ACULYX discards all financial balance amounts and the full response body immediately, retaining only the validity status and live/test mode.'
+          : '';
+
       // Step 2: Show two-step confirmation with exact request parameters and safety warnings
       const promptText =
         `Perform authenticated credential liveness check?\n\n` +
@@ -1284,7 +1289,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `Target Secret: ${plan.maskedIdentity}\n` +
         `Token Family: ${plan.tokenFamily}\n` +
         `Requests: 1 request (credentials: omit, redirects: manual, 5s timeout)\n\n` +
-        `WARNING: An authenticated request will be sent to ${plan.endpointUrl}. ACULYX discards all account IDs, response text, and raw secrets, persisting only the normalized provider status.\n\n` +
+        `WARNING: An authenticated request will be sent to ${plan.endpointUrl}. ACULYX discards all account IDs, response text, and raw secrets, persisting only the normalized provider status.${stripeWarning}\n\n` +
         `Do you affirm that you are authorized to check this credential under applicable program rules and wish to proceed?`;
 
       const affirmed = window.confirm(promptText);

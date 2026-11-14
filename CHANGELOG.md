@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [2.0.4] - 2026-11-14
 
 ### Security, Accuracy & Lead Verification
 - **Credential Liveness Verification & In-Memory Candidate Store (Phases 1–5)**:
@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed provider adapters (`GET https://api.github.com/user`, `GET https://api.stripe.com/v1/balance`, `POST https://slack.com/api/auth.test`) with pinned API versions and pure response classifiers.
   - Request safety invariants: strictly 1 request per confirmation, `credentials: 'omit'`, `redirect: 'manual'`, `cache: 'no-store'`, `referrerPolicy: 'no-referrer'`, 5-second timeout, 8 KiB body reading cap, and zero account IDs or balance amounts retention.
   - Two-step human gate and runtime permission consent: sidepanel prompts with full endpoint disclosure, masked identity, and explicit program authorization affirmation; requests optional host permissions at runtime.
+  - Strict in-scope authorization boundary: requires `in-scope` status before allowing credential checks; refuses unknown and out-of-scope targets prior to plan or candidate consumption.
+  - Cryptographic plan IDs via `crypto.randomUUID()` and strict extension-base origin matching in message sender validation.
+  - Explicit provider-specific balance read warning in confirm dialog for Stripe checks.
   - Strict UI and report wording: positive results report "provider accepted this credential at [time]", never "confirmed vulnerability". "Not checked" baseline never implies inactive or safe.
   - Narrowly scoped CSP: explicit three-origin `connect-src` allowlist (`https://api.github.com https://api.stripe.com https://slack.com`) preventing arbitrary outbound connections.
   - Sanitized export reporting in Markdown, JSON, and SARIF formats with "Not checked; no vendor API request was sent." baseline.

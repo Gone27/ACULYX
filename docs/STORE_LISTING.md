@@ -5,7 +5,7 @@
 ## 1. Title & Short Name
 - **Extension Name:** ACULYX: Header & Cookie Security Checker
 - **Short Name:** ACULYX
-- **Version:** 2.0.3
+- **Version:** 2.0.4
 - **Author:** Dhyan Patel
 
 ---
@@ -44,9 +44,10 @@ Because ACULYX observes responses in the browser you are already using, it can a
 - **⚡ Subdomain→Main-Domain Trust Escalation Analysis:**
   - Unique attack-surface analysis inspecting whether a compromise on a low-security subdomain (e.g. blog, staging, dev) can jump over to compromise the apex domain via broad cookie scoping, missing `__Host-` prefixes, or wildcard CSP sources.
 
-- **🔒 Zero-Telemetry Guarantee:**
-  - ACULYX operates under `connect-src 'none'`. No outbound network requests are made from the extension pages.
-  - Cookie values, auth tokens, passwords, and URL query strings are never stored, displayed, or exported.
+- **🔒 Zero-Telemetry Guarantee & Controlled Probes:**
+  - Standard operation runs 100% locally with zero analytics, telemetry, or remote reporting.
+  - If the optional credential liveness check is turned on by the user, outbound requests are strictly limited to the specific official provider API (`api.github.com`, `api.stripe.com`, `slack.com`), protected by explicit runtime user confirmation, restricted CSP, and optional host permissions.
+  - Cookie values, auth tokens, passwords, and sensitive bodies are never stored, displayed in plain text, or exported.
 
 - **📊 Modern Cyber-Inspired UI:**
   - Dark, Cyberpunk, and Solar theme modes with comfortable and compact density settings.
@@ -69,16 +70,16 @@ Because ACULYX observes responses in the browser you are already using, it can a
 - **`scripting`**: Injects client-side DOM inspection sensors (S2/S3) on user-monitored tabs to analyze DOM sinks and subresource integrity.
 - **`storage`**: Saves local user preferences, scope profiles, researcher triage notes, and bounded score history entirely on the user's device.
 - **`alarms`**: Triggers periodic local cache pruning and data retention cleanup without running background threads.
-- **`optional_permissions` (`<all_urls>`)**: Only requested upon explicit user consent per-site or when all-sites monitoring is deliberately activated.
+- **`optional_permissions` / `optional_host_permissions` (`https://api.github.com/*`, `https://api.stripe.com/*`, `https://slack.com/*`, `<all_urls>`)**: Only requested upon explicit user consent per-site, when all-sites monitoring is activated, or when the user manually initiates an authenticated credential liveness check for a supported provider.
 
 ---
 
 ## 7. Reviewer Notes (Chrome Web Store & Mozilla AMO)
 
 - **Use of `eval` in `main-world-hooks.ts`**:
-  ACULYX wraps `window.eval` in the page's MAIN execution world strictly as a passive taint-tracking sensor (Sensor 3). It observes calls made by the web page to detect unvalidated string execution. ACULYX **never** generates, compiles, or executes dynamic code via `eval()`. The original function is invoked with unmodified arguments, and only a sanitized event type is relayed to the extension.
+  ACULYX wraps `window.eval` in the page's MAIN execution world strictly as a passive taint-tracking sensor. It observes calls made by the web page to detect unvalidated string execution. ACULYX **never** generates, compiles, or executes dynamic code via `eval()`. The original function is invoked with unmodified arguments, and only a sanitized event type is relayed to the extension.
 - **Gated Passive Reconnaissance**:
   Query parameter harvesting (S1) is strictly gated by the user's capture policy and defined scope. Unmonitored, unknown, or out-of-scope hosts are completely ignored and never stored in memory or persistence.
-- **Zero-Telemetry Guarantee**:
-  All extension pages enforce `connect-src 'none'`. No remote servers, analytics, or third-party tracking scripts exist.
+- **Zero-Telemetry Guarantee & Strict Host Boundaries**:
+  All extension pages enforce strict CSP and connect to no external analytics or telemetry services. Outbound connections are prohibited except for the optional, user-confirmed credential check which targets only the three declared provider APIs.
 

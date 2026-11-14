@@ -43,19 +43,16 @@ export function isTrustedExtensionSender(sender?: chrome.runtime.MessageSender):
   if (!sender || typeof sender.url !== 'string') return false;
   const url = sender.url;
 
-  // Extension pages match chrome-extension:// or moz-extension://
-  if (url.startsWith('chrome-extension://') || url.startsWith('moz-extension://')) {
-    return true;
-  }
-
+  // Prefer an exact match on this extension's own base URL (rejects pages of any other extension).
   if (typeof chrome !== 'undefined' && typeof chrome.runtime?.getURL === 'function') {
     const extBase = chrome.runtime.getURL('');
-    if (extBase.length > 0 && url.startsWith(extBase)) {
-      return true;
+    if (extBase.length > 0) {
+      return url.startsWith(extBase);
     }
   }
 
-  return false;
+  // No runtime available (unit tests): fall back to the extension-page URL schemes.
+  return url.startsWith('chrome-extension://') || url.startsWith('moz-extension://');
 }
 
 /**
@@ -115,7 +112,10 @@ export async function handlePlanCredentialCheck(
     }
   }
 
-  const planId = `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const planId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `plan-${crypto.randomUUID()}`
+      : `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const plan: ProposedCredentialPlan = {
     planId,
     leadId,
@@ -203,6 +203,20 @@ export async function handleConfirmCredentialCheck(
       success: false,
       leadId: req.leadId,
       error: 'Invalid or expired plan.',
+    };
+  }
+
+  // Authorization gate: sending a found credential to a vendor needs the same in-scope proof as an
+  // active probe. 'unknown' is not enough. Decide BEFORE consuming the plan or the one-shot candidate,
+  // so a refusal does not destroy the credential candidate.
+  const scopedLead = globalLeadStore.getLead(req.leadId);
+  if (!scopedLead || scopedLead.scopeStatus !== 'in-scope') {
+    return {
+      type: 'CONFIRM_CREDENTIAL_CHECK_RESPONSE',
+      success: false,
+      leadId: req.leadId,
+      error:
+        'Credential checks require the lead to be in scope. Add the target to your program scope first; unknown or out-of-scope targets are refused.',
     };
   }
 

@@ -65,6 +65,15 @@ ACULYX operates under a strict principle of least privilege:
 ## 5. Third-Party Sharing
 We do not sell, rent, trade, or transfer any user data to outside parties. There are no third-party SDKs, tracking pixels, or advertisement networks in ACULYX.
 
+### 5.1 Optional credential liveness check (off by default)
+ACULYX can optionally check whether a credential it found on a page is still accepted by its vendor. This feature is **disabled by default** (`credentialLivenessEnabled: false`) and does nothing until you turn it on and approve each check yourself.
+
+- **What is sent:** one request to one fixed vendor endpoint (`https://api.github.com/user`, `https://api.stripe.com/v1/balance` or `https://slack.com/api/auth.test`), carrying the found credential in the `Authorization` header. This is the only case where a credential leaves your browser, and it goes only to the vendor that issued it.
+- **When:** only after you (1) open the plan, (2) confirm the exact endpoint, (3) state that you are authorized to test this target under its program rules, and (4) grant the vendor host permission. The lead must be **in scope**. Unknown or out-of-scope leads are refused.
+- **How:** one request per confirmation, no cookies, redirects not followed, no cache, no referrer, 5 second timeout, response read capped at 8 KiB.
+- **What is kept:** the raw credential lives only in memory for at most 5 minutes and is used once. It is never written to storage, logs, reports or exports. Only the result ("accepted", "rejected", "not checked") and a masked identity are kept.
+- **Your responsibility:** use a found credential only where the program's rules allow it. Many programs forbid it.
+
 ---
 
 ## 6. Open Source Verification
