@@ -279,4 +279,65 @@ describe('Credential Liveness Phase 2: Provider Adapters & Pure Classifiers', ()
       expect(result.details).toContain('Network error');
     });
   });
+
+  describe('readBoundedJson streaming reader bounds and error reflection safety', () => {
+    it('cancels reader and caps stream accumulation at 8 KiB on oversized responses', async () => {
+      const { readBoundedJson } = await import('../../src/leads/verify/credential-liveness');
+      let cancelled = false;
+      const totalChunks = 10;
+      const chunkSize = 2048; // 20 KiB total
+      let chunkIdx = 0;
+
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (chunkIdx < totalChunks) {
+            const chunk = new Uint8Array(chunkSize);
+            chunk.fill(65); // 'A'
+            controller.enqueue(chunk);
+            chunkIdx++;
+          } else {
+            controller.close();
+          }
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+
+      const response = new Response(stream);
+      const parsed = await readBoundedJson(response);
+
+      // Oversized stream of 'A's is not valid JSON
+      expect(parsed).toBeUndefined();
+      // Must have invoked cancel() once the 8 KiB threshold was reached
+      expect(cancelled).toBe(true);
+      expect(chunkIdx).toBeLessThanOrEqual(5); // At most 5 chunks of 2048 bytes (capped at 8192)
+    });
+
+    it('rejects incomplete truncated JSON and non-object responses safely', async () => {
+      const { readBoundedJson } = await import('../../src/leads/verify/credential-liveness');
+      // Incomplete JSON cut off
+      const res1 = new Response('{"ok": true, "user":');
+      expect(await readBoundedJson(res1)).toBeUndefined();
+
+      // Array instead of object
+      const res2 = new Response('[1, 2, 3]');
+      expect(await readBoundedJson(res2)).toBeUndefined();
+
+      // Primitive instead of object
+      const res3 = new Response('"string"');
+      expect(await readBoundedJson(res3)).toBeUndefined();
+    });
+
+    it('never reflects unexpected Slack error text or synthetic secrets into details or storage', () => {
+      const adversarialError = 'ghp_adversarial_token_12345678901234567890 <script>alert(1)</script> \x00\x1f';
+      const classified = classifySlackResponse(200, { ok: false, error: adversarialError });
+
+      expect(classified.status).toBe('unknown');
+      expect(classified.details).toBe('Slack returned an unrecognized response.');
+      expect(classified.details).not.toContain('ghp_');
+      expect(classified.details).not.toContain('<script>');
+      expect(classified.details).not.toContain('\x00');
+    });
+  });
 });

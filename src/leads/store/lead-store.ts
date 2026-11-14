@@ -23,7 +23,8 @@ export function sanitizeCredentialCheck(raw: unknown): CredentialCheckResult | u
   if (!provider) return undefined;
   const tokenFamily = typeof r.tokenFamily === 'string' ? r.tokenFamily.slice(0, 30) : '';
   const checkedAt = typeof r.checkedAt === 'number' && Number.isFinite(r.checkedAt) ? r.checkedAt : 0;
-  const details = typeof r.details === 'string' ? r.details.slice(0, 500) : '';
+  const rawDetails = typeof r.details === 'string' ? r.details.slice(0, 500) : '';
+  const cleanDetails = redactAllSecrets(rawDetails.replace(/[\x00-\x1F\x7F]/g, ''));
   const livemode = typeof r.livemode === 'boolean' ? r.livemode : undefined;
   // Allowlist: never persist rawToken, login, workspace, account IDs, response text
   return {
@@ -31,7 +32,7 @@ export function sanitizeCredentialCheck(raw: unknown): CredentialCheckResult | u
     provider,
     tokenFamily,
     checkedAt,
-    details,
+    details: cleanDetails,
     ...(livemode !== undefined ? { livemode } : {}),
   };
 }

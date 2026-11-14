@@ -167,10 +167,24 @@ export function classifySlackResponse(
     };
   }
 
-  if (error === 'missing_scope' || error === 'not_allowed_token_type' || error === 'account_inactive') {
+  if (error === 'missing_scope') {
     return {
       status: 'permission_limited',
-      details: `Slack reported credential check is limited: ${error}.`,
+      details: 'Slack reported credential check is limited: missing scope.',
+    };
+  }
+
+  if (error === 'not_allowed_token_type') {
+    return {
+      status: 'permission_limited',
+      details: 'Slack reported token type is not permitted for this check.',
+    };
+  }
+
+  if (error === 'account_inactive') {
+    return {
+      status: 'permission_limited',
+      details: 'Slack reported the associated account is inactive.',
     };
   }
 
@@ -181,20 +195,57 @@ export function classifySlackResponse(
     };
   }
 
+  // Any unrecognized or missing error value maps strictly to fixed string — NEVER interpolate vendor response text
   return {
     status: 'unknown',
-    details: error.length > 0 ? `Slack returned error: ${error}` : 'Slack returned unknown response.',
+    details: 'Slack returned an unrecognized response.',
   };
 }
 
 /**
- * Bounded JSON response reader that reads up to MAX_RESPONSE_BYTES and parses safely.
+ * Bounded JSON response reader that streams up to MAX_RESPONSE_BYTES (8 KiB),
+ * promptly cancels the stream reader upon reaching the cap, and parses safely.
  */
-async function readBoundedJson(response: Response): Promise<Record<string, unknown> | undefined> {
+export async function readBoundedJson(response: Response): Promise<Record<string, unknown> | undefined> {
   try {
-    const text = await response.text();
-    const boundedText = text.slice(0, MAX_RESPONSE_BYTES);
-    return JSON.parse(boundedText) as Record<string, unknown>;
+    let rawText = '';
+    const body = response.body;
+
+    if (body !== null && typeof body === 'object' && typeof body.getReader === 'function') {
+      const reader = body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let bytesAccumulated = 0;
+      try {
+        while (bytesAccumulated < MAX_RESPONSE_BYTES) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value !== undefined && value.byteLength > 0) {
+            const needed = MAX_RESPONSE_BYTES - bytesAccumulated;
+            const slice = value.byteLength > needed ? value.subarray(0, needed) : value;
+            rawText += decoder.decode(slice, { stream: true });
+            bytesAccumulated += slice.byteLength;
+            if (bytesAccumulated >= MAX_RESPONSE_BYTES) {
+              await reader.cancel().catch(() => undefined);
+              break;
+            }
+          }
+        }
+        rawText += decoder.decode();
+      } finally {
+        reader.releaseLock?.();
+      }
+    } else {
+      // Fallback for mock environments lacking ReadableStream getReader
+      const text = await response.text();
+      rawText = text.slice(0, MAX_RESPONSE_BYTES);
+    }
+
+    if (rawText.length === 0) return undefined;
+    const parsed = JSON.parse(rawText) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return undefined;
+    }
+    return parsed as Record<string, unknown>;
   } catch {
     return undefined;
   }
