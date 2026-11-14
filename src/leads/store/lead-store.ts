@@ -11,7 +11,7 @@ const VALID_CRED_STATUSES = new Set<CredentialCheckStatus>([
 ]);
 const VALID_CRED_PROVIDERS = new Set<CredentialProvider>(['github', 'stripe', 'slack']);
 
-function sanitizeCredentialCheck(raw: unknown): CredentialCheckResult | undefined {
+export function sanitizeCredentialCheck(raw: unknown): CredentialCheckResult | undefined {
   if (raw === undefined || raw === null || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const status = typeof r.status === 'string' && VALID_CRED_STATUSES.has(r.status as CredentialCheckStatus)

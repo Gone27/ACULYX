@@ -861,6 +861,38 @@ body {
   color: var(--text);
 }
 
+.cred-status-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.cred-status-badge.cred-active_at_check {
+  background: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(39, 174, 96, 0.3);
+}
+.cred-status-badge.cred-inactive_at_check {
+  background: rgba(192, 57, 43, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(192, 57, 43, 0.3);
+}
+.cred-status-badge.cred-permission_limited,
+.cred-status-badge.cred-unknown,
+.cred-status-badge.cred-unsupported {
+  background: rgba(243, 156, 18, 0.15);
+  color: #f39c12;
+  border: 1px solid rgba(243, 156, 18, 0.3);
+}
+.cred-disclaimer-text {
+  font-size: 9px;
+  font-style: italic;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 .lead-card-actions {
   display: flex;
   gap: 5px;

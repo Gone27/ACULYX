@@ -19,11 +19,12 @@ import {
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force';
-import type { GraphNode, GraphEdge, AttackSurfaceGraph, TabState } from '../shared/types';
+import type { GraphNode, GraphEdge, AttackSurfaceGraph, TabState, SettingsV2 } from '../shared/types';
 import type { Lead, ChainRule, ReconMemory } from '../leads/types';
 import { sendToBackground } from '../shared/messaging';
 import type { LeadStateUpdateMessage } from '../shared/messaging';
-import { SIDEPANEL_PORT_NAME } from '../shared/constants';
+import { SIDEPANEL_PORT_NAME, DEFAULT_SETTINGS } from '../shared/constants';
+import { SettingsService } from '../shared/settings';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { bootstrapAppearance, applyAppearance } from '../shared/appearance';
 import {
@@ -65,6 +66,7 @@ function getSvgEl<T extends SVGElement>(id: string): T {
 let activeSimulation: Simulation<SimNode, undefined> | null = null;
 const nodePositions = new Map<string, { x: number; y: number }>();
 let lastGraphKey = '';
+let currentSettings: SettingsV2 = { ...DEFAULT_SETTINGS };
 
 function graphTopologyKey(nodes: GraphNode[], edges: GraphEdge[]): string {
   const nodeIds = nodes.map(n => n.hostname).sort().join(',');
@@ -270,9 +272,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const port = chrome.runtime.connect({ name: SIDEPANEL_PORT_NAME });
   port.onMessage.addListener((msg: unknown) => {
     if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'SETTINGS_CHANGED') {
-      const newSettings = (msg as { settings?: { theme?: 'system' | 'dark' | 'light'; density?: 'comfortable' | 'compact'; reducedMotion?: 'system' | 'always' | 'never' } }).settings;
+      const newSettings = (msg as { settings?: SettingsV2 }).settings;
       if (newSettings !== undefined) {
+        currentSettings = newSettings;
         applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+        renderLeadsList();
       }
       return;
     }
@@ -295,6 +299,15 @@ document.addEventListener('DOMContentLoaded', () => {
       sendResponse({ received: true });
     }
   });
+
+  void SettingsService.getSettings()
+    .then((s) => {
+      currentSettings = s;
+      renderLeadsList();
+    })
+    .catch(() => {
+      // fallback to DEFAULT_SETTINGS
+    });
 
   void bootstrapAppearance();
 
@@ -1071,8 +1084,53 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(needsLine);
     }
 
+    if (lead.credentialCheck !== undefined) {
+      const credLine = document.createElement('div');
+      credLine.className = 'lead-detail-line lead-credential-check-line';
+
+      const credLabel = document.createElement('span');
+      credLabel.className = 'lead-detail-label';
+      credLabel.textContent = 'Credential Liveness: ';
+      credLine.appendChild(credLabel);
+
+      const statusBadge = document.createElement('span');
+      statusBadge.className = `cred-status-badge cred-${lead.credentialCheck.status}`;
+      statusBadge.textContent = lead.credentialCheck.status;
+      credLine.appendChild(statusBadge);
+
+      const detailsSpan = document.createElement('span');
+      detailsSpan.className = 'cred-details-text';
+      detailsSpan.textContent = ` — ${lead.credentialCheck.details} (${new Date(lead.credentialCheck.checkedAt).toLocaleTimeString()})`;
+      credLine.appendChild(detailsSpan);
+
+      const disclaimerDiv = document.createElement('div');
+      disclaimerDiv.className = 'cred-disclaimer-text';
+      disclaimerDiv.textContent = 'Notice: This reports only what the provider accepted at the time of the check. It does not establish the credential\'s full permissions, exploitability, or authorization to use it.';
+      credLine.appendChild(disclaimerDiv);
+
+      card.appendChild(credLine);
+    }
+
     const actions = document.createElement('div');
     actions.className = 'lead-card-actions';
+
+    // Credential Liveness Check action for F1 secrets (opt-in)
+    if (
+      lead.family === 'F1' &&
+      currentSettings.credentialLivenessEnabled === true &&
+      lead.scopeStatus === 'in-scope' &&
+      lead.credentialCheck === undefined
+    ) {
+      const checkBtn = document.createElement('button');
+      checkBtn.className = 'lead-btn';
+      checkBtn.textContent = '🔑 Check Liveness';
+      checkBtn.title = 'Send a 1-request authenticated check to the provider (GitHub, Stripe, Slack). Never runs automatically.';
+      checkBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void performCredentialCheckFlow(lead, checkBtn);
+      });
+      actions.appendChild(checkBtn);
+    }
 
     // Active self-check (only for leads that have a safe, read-only test)
     if (activeCapabilityOf(lead) !== 'none' && lead.verdict?.method !== 'active') {
@@ -1195,6 +1253,76 @@ document.addEventListener('DOMContentLoaded', () => {
       })) as { verdict?: Lead['verdict'] } | undefined;
       if (res?.verdict !== undefined) lead.verdict = res.verdict;
     } finally {
+      void fetchLeads();
+      renderLeadsList();
+    }
+  }
+
+  async function performCredentialCheckFlow(lead: Lead, btn: HTMLButtonElement): Promise<void> {
+    btn.disabled = true;
+    btn.textContent = '… planning';
+
+    try {
+      // Step 1: Request an opaque proposed plan from background
+      const planRes = (await sendToBackground({
+        type: 'PLAN_CREDENTIAL_CHECK',
+        leadId: lead.id,
+      })) as import('../shared/messaging').PlanCredentialCheckResponse | undefined;
+
+      if (!planRes || !planRes.success || !planRes.plan) {
+        alert(`Cannot check credential: ${planRes?.error ?? 'No plan available'}`);
+        return;
+      }
+
+      const plan = planRes.plan;
+
+      // Step 2: Show two-step confirmation with exact request parameters and safety warnings
+      const promptText =
+        `Perform authenticated credential liveness check?\n\n` +
+        `Provider: ${plan.provider.toUpperCase()}\n` +
+        `Endpoint: ${plan.method} ${plan.endpointUrl}\n` +
+        `Target Secret: ${plan.maskedIdentity}\n` +
+        `Token Family: ${plan.tokenFamily}\n` +
+        `Requests: 1 request (credentials: omit, redirects: manual, 5s timeout)\n\n` +
+        `WARNING: An authenticated request will be sent to ${plan.endpointUrl}. ACULYX discards all account IDs, response text, and raw secrets, persisting only the normalized provider status.\n\n` +
+        `Do you affirm that you are authorized to check this credential under applicable program rules and wish to proceed?`;
+
+      const affirmed = window.confirm(promptText);
+      if (!affirmed) return;
+
+      // Step 3: Request runtime host permission if not already granted
+      if (typeof chrome !== 'undefined' && typeof chrome.permissions?.request === 'function') {
+        const granted = await new Promise<boolean>((resolve) => {
+          chrome.permissions.request({ origins: [plan.requiredOrigin] }, (ok) => {
+            resolve(ok === true);
+          });
+        });
+        if (!granted) {
+          alert(`Host permission for "${plan.requiredOrigin}" was denied. Cannot contact provider.`);
+          return;
+        }
+      }
+
+      btn.textContent = '… checking';
+
+      // Step 4: Confirm and execute single check
+      const confirmRes = (await sendToBackground({
+        type: 'CONFIRM_CREDENTIAL_CHECK',
+        leadId: lead.id,
+        planId: plan.planId,
+        confirmedByUser: true,
+        affirmAuthorized: true,
+      })) as import('../shared/messaging').ConfirmCredentialCheckResponse | undefined;
+
+      if (!confirmRes || !confirmRes.success || !confirmRes.result) {
+        alert(`Credential check failed: ${confirmRes?.error ?? 'Unknown error'}`);
+        return;
+      }
+
+      lead.credentialCheck = confirmRes.result;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔑 Check Liveness';
       void fetchLeads();
       renderLeadsList();
     }

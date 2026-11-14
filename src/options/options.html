@@ -568,6 +568,21 @@
             </div>
           </div>
         </div>
+
+        <!-- Credential Liveness (Opt-in Provider Checks) -->
+        <div class="field-row" style="margin-top: 24px;">
+          <h3 class="subsection-title">Credential Liveness Checks</h3>
+          <p class="field-hint">
+            Disabled by default. When enabled, allows user-initiated 1-request liveness checks on detected secrets against vendor endpoints (GitHub, Stripe, Slack). Never runs automatically.
+          </p>
+
+          <div style="margin-top: 8px;">
+            <label class="checkbox-label" for="credential-liveness-toggle">
+              <input type="checkbox" id="credential-liveness-toggle" name="credentialLiveness">
+              <span>Enable Credential Liveness Checks (Manual / Opt-in)</span>
+            </label>
+          </div>
+        </div>
       </section>
 
       <!-- ════════════════════════════════════════════════════════════

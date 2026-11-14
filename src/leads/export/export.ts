@@ -3,6 +3,7 @@ import type { ScopeProfile, ScopeRule } from '../../shared/scope/contracts';
 import { maskSecret, maskLocation } from '../sieve/mask';
 import { redactAllSecrets } from '../../shared/reporting/report-builder';
 import { sanitizeFacts, sanitizeVerdict } from '../verify/sanitize';
+import { sanitizeCredentialCheck } from '../store/lead-store';
 
 const VALID_FAMILIES = new Set<string>(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
 const VALID_TIERS = new Set<string>(['observed', 'strong', 'weak', 'whisper']);
@@ -272,6 +273,7 @@ function sanitizeReportLead(lead: Lead): Lead {
 
   const verdict = sanitizeVerdict(lead.verdict);
   const facts = sanitizeFacts(lead.facts);
+  const credentialCheck = sanitizeCredentialCheck(lead.credentialCheck);
 
   return {
     id,
@@ -303,6 +305,7 @@ function sanitizeReportLead(lead: Lead): Lead {
     ...(remediation !== undefined ? { remediation } : {}),
     ...(verdict !== undefined ? { verdict } : {}),
     ...(facts !== undefined ? { facts } : {}),
+    ...(credentialCheck !== undefined ? { credentialCheck } : {}),
   };
 }
 
@@ -334,6 +337,14 @@ export function formatLeadsReportMarkdown(leads: Lead[]): string {
       }
       if (lead.verdict.missing.length > 0) {
         lines.push(`- **Still needed**: ${lead.verdict.missing.join('; ')}`);
+      }
+    }
+    if (lead.family === 'F1') {
+      if (lead.credentialCheck !== undefined) {
+        lines.push(`- **Credential Liveness Check**: [${lead.credentialCheck.status}] ${lead.credentialCheck.details} (checked at: ${new Date(lead.credentialCheck.checkedAt).toISOString()})`);
+        lines.push(`  - Notice: This reports only what the provider accepted at the time of the check. It does not establish the credential's full permissions, exploitability, or authorization to use it.`);
+      } else {
+        lines.push(`- **Credential Liveness Check**: Not checked; no vendor API request was sent.`);
       }
     }
     lines.push(`- **Observed Location**: \`${lead.evidence.location}\``);
@@ -433,6 +444,7 @@ export function formatLeadsReportSarif(leads: Lead[]): string {
             needs: lead.needs ?? [],
             doesNotProve: lead.doesNotProve ?? [],
             corroborationStatus: 'unconfirmed',
+            ...(lead.credentialCheck !== undefined ? { credentialCheck: lead.credentialCheck } : {}),
           },
         })),
       },

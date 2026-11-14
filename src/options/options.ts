@@ -56,6 +56,7 @@ let hunterEnabledToggle: HTMLInputElement;
 let hunterUserAgent: HTMLInputElement;
 let hunterMaxRps: HTMLInputElement;
 let hunterCustomHeaders: HTMLTextAreaElement;
+let credentialLivenessToggle: HTMLInputElement;
 let currentMode: Settings['monitoringMode'] = 'per-site';
 let pendingNavSection: string | null = null;
 
@@ -107,6 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
   hunterUserAgent            = getEl<HTMLInputElement>('hunter-user-agent');
   hunterMaxRps               = getEl<HTMLInputElement>('hunter-max-rps');
   hunterCustomHeaders        = getEl<HTMLTextAreaElement>('hunter-custom-headers');
+  credentialLivenessToggle   = getEl<HTMLInputElement>('credential-liveness-toggle');
 
   wireNav();
   wireNavCards();
@@ -378,6 +380,7 @@ async function loadAndPopulate(): Promise<void> {
   leadsEnabledToggle.checked = Boolean(settings.leadsEnabled);
   deepModeToggle.checked = Boolean(settings.deepModeEnabled);
   hunterEnabledToggle.checked = Boolean(settings.hunterConfig?.enabled);
+  credentialLivenessToggle.checked = Boolean(settings.credentialLivenessEnabled);
   hunterUserAgent.value = settings.hunterConfig?.customUserAgent ?? '';
   hunterMaxRps.value = String(settings.hunterConfig?.maxRequestsPerSecond ?? 1);
   if (settings.hunterConfig?.customHeaders) {
@@ -568,6 +571,7 @@ function readFormValues(): Settings {
     activeScopeProfileId: workingActiveScopeProfileId,
     leadsEnabled: leadsEnabledToggle.checked,
     deepModeEnabled: deepModeToggle.checked,
+    credentialLivenessEnabled: credentialLivenessToggle.checked,
     hunterConfig: {
       enabled: hunterEnabledToggle.checked,
       customUserAgent: hunterUserAgent.value.trim() || undefined,
@@ -868,6 +872,7 @@ function wireDirtyTracking(): void {
   leadsEnabledToggle.addEventListener('change', updateDirtyState);
   deepModeToggle.addEventListener('change', updateDirtyState);
   hunterEnabledToggle.addEventListener('change', updateDirtyState);
+  credentialLivenessToggle.addEventListener('change', updateDirtyState);
   hunterUserAgent.addEventListener('input', updateDirtyState);
   hunterMaxRps.addEventListener('input', updateDirtyState);
   hunterCustomHeaders.addEventListener('input', updateDirtyState);
