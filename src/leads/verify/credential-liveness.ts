@@ -245,33 +245,32 @@ export async function readBoundedJson(response: Response): Promise<Record<string
     let rawText = '';
     const body = response.body;
 
-    if (body !== null && typeof body === 'object' && typeof body.getReader === 'function') {
-      const reader = body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let bytesAccumulated = 0;
-      try {
-        while (bytesAccumulated < MAX_RESPONSE_BYTES) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value !== undefined && value.byteLength > 0) {
-            const needed = MAX_RESPONSE_BYTES - bytesAccumulated;
-            const slice = value.byteLength > needed ? value.subarray(0, needed) : value;
-            rawText += decoder.decode(slice, { stream: true });
-            bytesAccumulated += slice.byteLength;
-            if (bytesAccumulated >= MAX_RESPONSE_BYTES) {
-              await reader.cancel().catch(() => undefined);
-              break;
-            }
+    // Fail closed if response body is null, not an object, or lacks a standard ReadableStream reader
+    if (body === null || typeof body !== 'object' || typeof body.getReader !== 'function') {
+      return undefined;
+    }
+
+    const reader = body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let bytesAccumulated = 0;
+    try {
+      while (bytesAccumulated < MAX_RESPONSE_BYTES) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value !== undefined && value.byteLength > 0) {
+          const needed = MAX_RESPONSE_BYTES - bytesAccumulated;
+          const slice = value.byteLength > needed ? value.subarray(0, needed) : value;
+          rawText += decoder.decode(slice, { stream: true });
+          bytesAccumulated += slice.byteLength;
+          if (bytesAccumulated >= MAX_RESPONSE_BYTES) {
+            await reader.cancel().catch(() => undefined);
+            break;
           }
         }
-        rawText += decoder.decode();
-      } finally {
-        reader.releaseLock?.();
       }
-    } else {
-      // Fallback for mock environments lacking ReadableStream getReader
-      const text = await response.text();
-      rawText = text.slice(0, MAX_RESPONSE_BYTES);
+      rawText += decoder.decode();
+    } finally {
+      reader.releaseLock?.();
     }
 
     if (rawText.length === 0) return undefined;
@@ -363,16 +362,16 @@ export async function executeCredentialLivenessCheck(
     };
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
-    const message = isAbort
+    const details = isAbort
       ? 'Request timed out after 5 seconds.'
-      : (err instanceof Error ? err.message : 'Unknown network failure');
+      : 'Provider check failed due to a network error.';
 
     return {
       status: 'unknown',
       provider: candidate.provider,
       tokenFamily: candidate.tokenFamily,
       checkedAt: Date.now(),
-      details: `Provider check could not be completed: ${message}`,
+      details,
     };
   } finally {
     clearTimeout(timeoutId);

@@ -319,7 +319,29 @@ describe('Credential Liveness Phase 2: Provider Adapters & Pure Classifiers', ()
 
       const result = await executeCredentialLivenessCheck(candidate, { fetchFn: mockFetch });
       expect(result.status).toBe('unknown');
-      expect(result.details).toContain('Network error');
+      expect(result.details).toBe('Provider check failed due to a network error.');
+    });
+
+    it('never interpolates raw exception messages or tokens into failure details', async () => {
+      const syntheticToken = 'ghp_synthetic_token_12345678901234567890';
+      const mockFetch = vi.fn().mockRejectedValue(
+        new Error(`network failed for Authorization Bearer ${syntheticToken}`)
+      );
+      const candidate: SecretCandidate = {
+        leadId: 'LD-LEAK-PROBE',
+        provider: 'github',
+        tokenFamily: 'ghp',
+        rawToken: syntheticToken,
+        expiresAt: Date.now() + 60000,
+        attempted: false,
+      };
+
+      const result = await executeCredentialLivenessCheck(candidate, { fetchFn: mockFetch });
+      expect(result.status).toBe('unknown');
+      expect(result.details).toBe('Provider check failed due to a network error.');
+      expect(result.details).not.toContain(syntheticToken);
+      expect(result.details).not.toContain('Authorization');
+      expect(result.details).not.toContain('Bearer');
     });
   });
 

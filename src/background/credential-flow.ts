@@ -4,9 +4,10 @@ import type {
   ConfirmCredentialCheckMessage,
   ConfirmCredentialCheckResponse,
 } from '../shared/messaging';
-import type { CredentialProvider } from '../leads/types';
+import type { CredentialProvider, CredentialCheckResult } from '../leads/types';
 import type { SettingsV2 } from '../shared/types';
 import { SettingsService } from '../shared/settings';
+import { sanitizeCredentialCheck } from '../leads/store/lead-store';
 import { globalSecretCandidateStore } from './secret-candidate-store';
 import { globalLeadStore } from './leads-handler';
 import {
@@ -320,7 +321,19 @@ export async function handleConfirmCredentialCheck(
 
   // Execute the single provider check
   const checkDeps = deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {};
-  const result = await executeCredentialLivenessCheck(candidate, checkDeps);
+  let rawResult: CredentialCheckResult;
+  try {
+    rawResult = await executeCredentialLivenessCheck(candidate, checkDeps);
+  } catch {
+    rawResult = {
+      status: 'unknown',
+      provider: candidate.provider,
+      tokenFamily: candidate.tokenFamily,
+      checkedAt: Date.now(),
+      details: 'Provider check failed due to a network error.',
+    };
+  }
+  const result = sanitizeCredentialCheck(rawResult) ?? rawResult;
 
   // Update lead in store
   lead.credentialCheck = result;

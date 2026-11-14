@@ -12,6 +12,11 @@ import { globalLeadStore } from '../../src/background/leads-handler';
 import type { Lead } from '../../src/leads/types';
 import { maskSecret, maskLocation } from '../../src/leads/sieve/mask';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
+import {
+  formatLeadsReportMarkdown,
+  formatLeadsReportJson,
+  formatLeadsReportSarif,
+} from '../../src/leads/export/export';
 
 const sender = { url: 'chrome-extension://abcdef/src/sidepanel/sidepanel.html' };
 const TOKEN = 'ghp_012345678901234567890123456789012345';
@@ -266,5 +271,65 @@ describe('credential liveness authorization gate', () => {
       }
     );
     expect(validRes.success).toBe(true);
+  });
+
+  it('raw fetch exception containing synthetic token appears nowhere in returned result, stored lead, or exports', async () => {
+    const leakLeadId = 'L-LEAK-TEST';
+    const syntheticToken = 'ghp_leakedtokenstring123456789012345678';
+    globalLeadStore.addLead(lead(leakLeadId, 'in-scope'));
+    globalSecretCandidateStore.addCandidate(leakLeadId, 'github', 'ghp', syntheticToken);
+
+    const planRes = await handlePlanCredentialCheck(leakLeadId, sender, { settings: ENABLED_SETTINGS });
+    expect(planRes.success).toBe(true);
+
+    const mockFetch = vi.fn().mockRejectedValue(
+      new Error(`network failed for Authorization Bearer ${syntheticToken}`)
+    );
+
+    const confirmRes = await handleConfirmCredentialCheck(
+      {
+        type: 'CONFIRM_CREDENTIAL_CHECK',
+        leadId: leakLeadId,
+        planId: planRes.plan?.planId ?? '',
+        confirmedByUser: true,
+        affirmAuthorized: true,
+      } as never,
+      sender,
+      {
+        fetchFn: mockFetch as never,
+        checkPermission: () => Promise.resolve(true),
+        settings: ENABLED_SETTINGS,
+      }
+    );
+
+    // 1. Returned immediate result must be successful response with 'unknown' check status and fixed details
+    expect(confirmRes.success).toBe(true);
+    expect(confirmRes.result?.status).toBe('unknown');
+    expect(confirmRes.result?.details).toBe('Provider check failed due to a network error.');
+    expect(confirmRes.result?.details).not.toContain(syntheticToken);
+    expect(confirmRes.result?.details).not.toContain('Authorization');
+    expect(confirmRes.result?.details).not.toContain('Bearer');
+
+    // 2. Stored lead in background lead store
+    const stored = globalLeadStore.getLead(leakLeadId);
+    expect(stored).toBeDefined();
+    expect(stored?.credentialCheck?.details).toBe('Provider check failed due to a network error.');
+    expect(stored?.credentialCheck?.details).not.toContain(syntheticToken);
+
+    // 3. User-facing export outputs (Markdown, JSON, SARIF)
+    expect(stored).toBeDefined();
+    if (stored !== undefined) {
+      const mdReport = formatLeadsReportMarkdown([stored]);
+      expect(mdReport).not.toContain(syntheticToken);
+      expect(mdReport).not.toContain('Authorization Bearer');
+
+      const jsonReport = formatLeadsReportJson([stored]);
+      expect(jsonReport).not.toContain(syntheticToken);
+      expect(jsonReport).not.toContain('Authorization Bearer');
+
+      const sarifReport = formatLeadsReportSarif([stored]);
+      expect(sarifReport).not.toContain(syntheticToken);
+      expect(sarifReport).not.toContain('Authorization Bearer');
+    }
   });
 });
