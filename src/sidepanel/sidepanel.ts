@@ -1278,7 +1278,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const stripeWarning =
         plan.provider === 'stripe'
-          ? '\n\nIMPORTANT (STRIPE): This check queries the Stripe balance endpoint. ACULYX discards all financial balance amounts and the full response body immediately, retaining only the validity status and live/test mode.'
+          ? '\n\nIMPORTANT (STRIPE): This check queries the Stripe balance endpoint. ACULYX discards all financial balance amounts and the full response body immediately, retaining only the validity status and live/test mode.' +
+            (plan.tokenFamily.startsWith('rk_')
+              ? ' Restricted keys (rk_) lacking balance permissions may return HTTP 403 (permission limited / validity unresolved).'
+              : '')
           : '';
 
       // Step 2: Show two-step confirmation with exact request parameters and safety warnings

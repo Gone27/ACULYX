@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ACULYX: Header & Cookie Security Checker",
   "short_name": "ACULYX",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Passive HTTP security header and cookie analysis with live grading, CSP evaluation, and privacy-preserving audit capabilities.",
 
   "browser_specific_settings": {

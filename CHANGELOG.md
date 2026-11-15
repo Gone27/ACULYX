@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2026-11-15
+
+### Security, Error Hardening & Lifecycle Bounds
+- **Raw Fetch Exception Redaction & Fixed Error Messages**:
+  - Eliminated arbitrary `err.message` interpolation in `executeCredentialLivenessCheck`, replacing runtime error string reflection with deterministic fixed status messages (`Request timed out after 5 seconds.` or `Provider check failed due to a network error.`).
+  - Wrapped `handleConfirmCredentialCheck` in immediate `sanitizeCredentialCheck` filtering prior to returning `CONFIRM_CREDENTIAL_CHECK_RESPONSE` to the sidepanel UI, preventing unsanitized provider or network errors from reaching the caller.
+  - Added end-to-end regression tests asserting that synthetic tokens embedded in thrown network error messages appear nowhere in immediate responses, stored leads, or exported Markdown, JSON, and SARIF reports.
+- **Fail-Closed Streamed Body Reading**:
+  - Enforced fail-closed behavior in `readBoundedJson` by removing unbounded `response.text()` fallback, rejecting responses lacking standard `ReadableStreamDefaultReader` interfaces.
+- **Stripe Warning & Balance Validation Synchronization**:
+  - Synchronized Stripe warning disclosure in sidepanel confirmation dialog with active key capabilities, explicitly advising that restricted keys (`rk_`) lacking balance permissions return HTTP 403 (permission limited / validity unresolved).
+  - Enforced strict Stripe HTTP 200 response validation requiring `object === 'balance'` and boolean `livemode`.
+  - Added detection, probe planning, and pure classification for Stripe test-mode keys (`sk_test`, `rk_test`) with key-prefix-to-livemode agreement verification.
+- **Pending Plans Lifecycle & Capacity Bounding**:
+  - Bound pending plans to at most one active plan per lead, automatically invalidating stale plans upon re-planning.
+  - Enforced a hard capacity limit of 50 proposed plans (`MAX_PROPOSED_PLANS = 50`) using FIFO/LRU eviction of the oldest pending plans.
+- **Credential Check Opt-In Gate & State Clearing (P0)**:
+  - Enforced `credentialLivenessEnabled` verification in both background plan and execution handlers before plan creation or candidate consumption.
+  - Hooked `onCredentialLivenessDisabled()` into settings and monitoring mode transitions to immediately wipe all transient candidate tokens and pending plans upon feature disablement.
+- **Fail-Closed Runtime Permissions Gate (P1)**:
+  - Ensured runtime permissions checks fail closed in both background (`defaultCheckPermission`) and sidepanel confirmation UI when `chrome.permissions` is missing, throws, or denies access.
+- **Dependency Vulnerability Remediation (P2)**:
+  - Overrode `minimatch: "^11.0.8"` under `@typescript-eslint/typescript-estree` to remediate GHSA-g3hv-75wg-m249 (globparts amplification DoS), achieving 0 vulnerabilities across both `npm audit` and `npm audit --omit=dev`.
+
 ## [2.0.4] - 2026-11-14
 
 ### Security, Accuracy & Lead Verification
