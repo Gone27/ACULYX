@@ -38,7 +38,7 @@ test.describe('P0 DOM Collector Content Script E2E Verification', () => {
       optional_host_permissions?: string[];
       [key: string]: unknown;
     };
-    manifestJson.host_permissions = ['<all_urls>'];
+    manifestJson.host_permissions = ['http://127.0.0.1/*'];
     delete manifestJson.optional_host_permissions;
     fs.writeFileSync(testManifestPath, JSON.stringify(manifestJson, null, 2));
 
@@ -62,13 +62,13 @@ test.describe('P0 DOM Collector Content Script E2E Verification', () => {
       }
       expect(background).toBeDefined();
 
-      // Configure extension settings in service worker: set monitoringMode to 'all-sites' and enable leads
+      // Configure per-site monitoring for the localhost fixture and enable leads.
       await background.evaluate(async () => {
         const bg = self as unknown as BackgroundWindow;
         const service = bg.__SettingsService;
         if (service !== undefined) {
           const current = await service.getSettings();
-          current.monitoringMode = 'all-sites';
+          current.monitoringMode = 'per-site';
           current.leadsEnabled = true;
           await service.updateSettings(current);
         }

@@ -191,4 +191,17 @@ DatabaseError: connection to server at "10.0.1.15", port 5432 failed: FATAL: pas
 </body>
 </html>`);
   });
+
+  // 11. Credential-liveness settings regression. This token is fabricated,
+  // used only to test masking and ephemeral candidate cleanup; never validate it.
+  app.get('/lead-lab/credential-setting', (_req: Request, res: Response) => {
+    const fakeGithubToken = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(`<!DOCTYPE html>
+<html><head><title>Local Credential Settings Fixture</title></head>
+<body><h1>Local-only synthetic fixture</h1>
+<script>window.syntheticCredential = "${fakeGithubToken}";</script>
+</body></html>`);
+  });
 }

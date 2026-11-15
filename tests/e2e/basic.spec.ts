@@ -388,6 +388,8 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
           headers: Record<string, string>;
           rawHeaders: Array<{ name: string; value: string }>;
         }>;
+        findings: Array<{ ruleId: string }>;
+        cookies: Array<{ name: string }>;
       }>)[tabStateKey];
 
       expect(tabState).toBeDefined();
@@ -403,6 +405,13 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       expect(capturedHop.headers['set-cookie']).toContain('[REDACTED]');
       expect(capturedHop.headers['set-cookie']).not.toContain('REDACTED_IN_TEST');
       expect(capturedHop.headers['set-cookie']).not.toContain('V2_SYNTHETIC_CANARY');
+
+      // The actual captured response must feed both response-header rules and
+      // the cookie metadata pipeline, not merely preserve a sanitized header.
+      const findingIds = tabState.findings.map((finding) => finding.ruleId);
+      expect(findingIds).toContain('CSP-001');
+      expect(findingIds).toContain('CACHE-001');
+      expect(tabState.cookies.some((cookie) => cookie.name === 'test_session')).toBe(true);
 
       // Verify zero canary or secret values anywhere in serialized session storage
       expect(serialized).not.toContain('V2_SYNTHETIC_CANARY');

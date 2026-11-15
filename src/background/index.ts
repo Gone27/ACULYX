@@ -650,11 +650,11 @@ export async function clearBadgesOnAllTabs(): Promise<void> {
 
 // WS1 1C & 1D: Wire atomic settings transition side effects
 settingsTransitionPipeline.registerHooks({
+  onCredentialLivenessDisabled: () => {
+    onCredentialLivenessDisabled();
+  },
   onRescoreTabs: (_prev, next) => {
     currentSettings = next;
-    if (next.credentialLivenessEnabled !== true) {
-      onCredentialLivenessDisabled();
-    }
     const epoch = currentResetEpoch;
     for (const [tabId, state] of Array.from(tabStates.entries())) {
       recomputeTabState(tabId, state, epoch, next);

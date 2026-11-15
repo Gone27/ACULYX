@@ -333,6 +333,7 @@ export function migrateSettings(raw: unknown): SettingsV2 {
 export interface SettingsTransitionHooks {
   onRescoreTabs?: (previous: SettingsV2, next: SettingsV2) => Promise<void> | void;
   onModeChange?: (previousMode: SettingsV2['monitoringMode'], newMode: SettingsV2['monitoringMode']) => Promise<void> | void;
+  onCredentialLivenessDisabled?: (previous: SettingsV2, next: SettingsV2) => Promise<void> | void;
   onSettingsApplied?: (settings: SettingsV2) => Promise<void> | void;
 }
 
@@ -353,32 +354,20 @@ export class SettingsTransitionPipeline {
   }
 
   public areEqual(a: SettingsV2, b: SettingsV2): boolean {
-    if (a.schemaVersion !== b.schemaVersion) return false;
-    if (a.monitoringMode !== b.monitoringMode) return false;
-    if (a.evaluationMode !== b.evaluationMode) return false;
-    if (a.retainHistoryDays !== b.retainHistoryDays) return false;
-    if (a.maxHistoryPerOrigin !== b.maxHistoryPerOrigin) return false;
-
-    if (a.severityFilter.length !== b.severityFilter.length) return false;
-    const aSev = new Set(a.severityFilter);
-    if (b.severityFilter.some((s) => !aSev.has(s))) return false;
-
-    if (a.sensitiveCookieNames.length !== b.sensitiveCookieNames.length) return false;
-    const aSens = new Set(a.sensitiveCookieNames);
-    if (b.sensitiveCookieNames.some((s) => !aSens.has(s))) return false;
-
-    if (a.ignoredCookieNames.length !== b.ignoredCookieNames.length) return false;
-    const aIgn = new Set(a.ignoredCookieNames);
-    if (b.ignoredCookieNames.some((s) => !aIgn.has(s))) return false;
-
-    if (a.theme !== b.theme) return false;
-    if (a.density !== b.density) return false;
-    if (a.reducedMotion !== b.reducedMotion) return false;
-
-    if ((a.activeScopeProfileId ?? null) !== (b.activeScopeProfileId ?? null)) return false;
-    if (JSON.stringify(a.scopeProfiles ?? []) !== JSON.stringify(b.scopeProfiles ?? [])) return false;
-
-    return true;
+    // Canonicalize both inputs first so omitted legacy/default fields cannot
+    // create false differences. Compare the complete normalized schema, not a
+    // hand-maintained list that can silently omit new security-sensitive flags.
+    const canonical = (settings: SettingsV2): string => {
+      const normalized = migrateSettings(settings);
+      return JSON.stringify({
+        ...normalized,
+        severityFilter: [...normalized.severityFilter].sort(),
+        sensitiveCookieNames: [...normalized.sensitiveCookieNames].sort(),
+        ignoredCookieNames: [...normalized.ignoredCookieNames].sort(),
+        legacyAllowedOrigins: [...(normalized.legacyAllowedOrigins ?? [])].sort(),
+      });
+    };
+    return canonical(a) === canonical(b);
   }
 
   public async transition(
@@ -425,6 +414,14 @@ export class SettingsTransitionPipeline {
     }
 
     // 5. Execution of Side Effects
+    if (
+      previous.credentialLivenessEnabled === true &&
+      validated.credentialLivenessEnabled !== true &&
+      this.hooks.onCredentialLivenessDisabled
+    ) {
+      await this.hooks.onCredentialLivenessDisabled(previous, validated);
+    }
+
     if (modeChanged && this.hooks.onModeChange) {
       await this.hooks.onModeChange(previous.monitoringMode, validated.monitoringMode);
     }

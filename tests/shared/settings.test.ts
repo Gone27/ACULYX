@@ -421,6 +421,38 @@ describe('SettingsTransitionPipeline and atomic transitions (WS1 1C)', () => {
     }
   });
 
+  it.each([
+    ['credential liveness', { credentialLivenessEnabled: true }],
+    ['lead scanning', { leadsEnabled: false }],
+    ['deep scanning', { deepModeEnabled: true }],
+    ['Hunter enablement', { hunterConfig: { enabled: true, maxRequestsPerSecond: 2 } }],
+  ] as const)('does not deduplicate a single-field %s update', async (_label, patch) => {
+    const pipeline = new SettingsTransitionPipeline();
+    const initial = migrateSettings(DEFAULT_SETTINGS);
+    const updated = migrateSettings({ ...initial, ...patch });
+    await pipeline.transition(initial, 'storage');
+
+    expect(pipeline.areEqual(initial, updated)).toBe(false);
+    const result = await pipeline.transition(updated, 'storage');
+    expect(result).toEqual(updated);
+    expect(pipeline.getLastAppliedSettings()).toEqual(updated);
+  });
+
+  it('runs credential cleanup hook on true-to-false even when no other setting changes', async () => {
+    const pipeline = new SettingsTransitionPipeline();
+    const cleanup = vi.fn();
+    pipeline.registerHooks({ onCredentialLivenessDisabled: cleanup });
+    const enabled = migrateSettings({ ...DEFAULT_SETTINGS, credentialLivenessEnabled: true });
+    const disabled = migrateSettings({ ...DEFAULT_SETTINGS, credentialLivenessEnabled: false });
+
+    await pipeline.transition(enabled, 'storage');
+    await pipeline.transition(disabled, 'storage');
+    await pipeline.transition(disabled, 'storage');
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledWith(enabled, disabled);
+  });
+
   it('migration sanitizes malformed scope profiles with description: null', () => {
     const raw = {
       ...DEFAULT_SETTINGS,
