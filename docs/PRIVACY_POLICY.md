@@ -74,10 +74,17 @@ ACULYX can optionally check whether a credential it found on a page is still acc
 - **What is kept:** the raw credential lives only in memory for at most 5 minutes and is used once. It is never written to storage, logs, reports or exports. Only the result ("accepted", "rejected", "not checked") and a masked identity are kept.
 - **Your responsibility:** use a found credential only where the program's rules allow it. Many programs forbid it.
 
+### 5.2 Standalone Developer CLI Outbound Audits (`--url`)
+When developers or CI pipelines invoke the standalone ACULYX CLI (`npm run aculyx` / `src/cli.ts`) with the explicit `--url <destination>` parameter, the CLI executes an outbound HTTP/HTTPS request directly to that user-specified destination:
+- **Purpose**: Fetches HTTP response headers (such as HSTS, Content-Security-Policy, X-Frame-Options, Cache-Control, and Set-Cookie attributes) to evaluate security posture from the terminal or generate SARIF reports.
+- **SSRF & Address Filtering**: The CLI enforces fail-closed server-side request forgery (SSRF) protections. By default, it denies requests targeting private IP ranges (RFC 1918), link-local addresses, loopback hosts (`127.0.0.1`, `localhost`), and cloud instance metadata services (`169.254.169.254`), and pins DNS resolution to mitigate rebinding attacks.
+- **Data Boundaries**: Responses and evaluation scores are processed strictly within the local CLI process. No audit data, scanned URLs, or findings are transmitted to external servers, cloud services, or telemetry endpoints.
+- **Offline Inspection Alternative**: For air-gapped or zero-network environments, the CLI supports offline inspection (`--input <file.json|file.har>`) which performs no outbound network requests whatsoever.
+
 ---
 
 ## 6. Open Source Verification
-ACULYX is open source under the Apache 2.0 license. You can audit the codebase directly on GitHub to verify all privacy assertions. There is no telemetry or analytics code; the only outbound requests are the optional, user-confirmed credential checks described in section 5.1.
+ACULYX is open source under the Apache 2.0 license. You can audit the codebase directly on GitHub to verify all privacy assertions. There is no telemetry, tracking, or analytics code; the only outbound network communications from ACULYX are the optional, user-confirmed credential checks described in Section 5.1 and explicit developer CLI scans described in Section 5.2.
 
 ---
 

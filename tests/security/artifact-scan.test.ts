@@ -80,37 +80,45 @@ describe('Artifact Scan', () => {
     });
   });
 
-  describe('dist/ chunks security', () => {
-    it('scans built dist/ JS chunks ensuring no unredacted canaries or remote script URLs are embedded', () => {
-      const distPath = path.join(__dirname, '../../dist');
-      const requireBuild = process.env.REQUIRE_BUILD_ARTIFACTS === 'true';
-      if (!fs.existsSync(distPath)) {
-        if (requireBuild) {
-          throw new Error('Required build directory dist/ is missing. Run "npm run build" first.');
+  const targetBuilds = [
+    { name: 'Chrome (dist/)', relPath: '../../dist' },
+    { name: 'Firefox (dist-firefox/)', relPath: '../../dist-firefox' },
+    { name: 'Hunter (dist-hunter/)', relPath: '../../dist-hunter' },
+  ];
+
+  targetBuilds.forEach(({ name, relPath }) => {
+    describe(`${name} compiled chunks security`, () => {
+      it(`scans built ${name} JS chunks ensuring no unredacted canaries or remote script URLs are embedded`, () => {
+        const targetPath = path.join(__dirname, relPath);
+        const requireBuild = process.env.REQUIRE_BUILD_ARTIFACTS === 'true';
+        if (!fs.existsSync(targetPath)) {
+          if (requireBuild) {
+            throw new Error(`Required build directory ${name} is missing. Run "npm run build:all" first.`);
+          }
+          return; // skip if target not found
         }
-        return; // skip if dist/ not found
-      }
 
-      const files = fs.readdirSync(distPath, { recursive: true }) as string[];
-      const jsFiles = files.filter(f => f.endsWith('.js')).map(f => path.join(distPath, f));
-      if (requireBuild && jsFiles.length === 0) {
-        throw new Error('Required build directory dist/ contains no compiled .js chunks.');
-      }
+        const files = fs.readdirSync(targetPath, { recursive: true }) as string[];
+        const jsFiles = files.filter(f => f.endsWith('.js')).map(f => path.join(targetPath, f));
+        if (requireBuild && jsFiles.length === 0) {
+          throw new Error(`Required build directory ${name} contains no compiled .js chunks.`);
+        }
 
-      for (const file of jsFiles) {
-        const content = fs.readFileSync(file, 'utf-8');
+        for (const file of jsFiles) {
+          const content = fs.readFileSync(file, 'utf-8');
 
-        // Ensure no unredacted cookie canaries (common dummy canary strings from tests/code)
-        // Also ensure no <script src="http(s)://..."> injected by bundler or third party
+          // Ensure no unredacted cookie canaries (common dummy canary strings from tests/code)
+          // Also ensure no <script src="http(s)://..."> injected by bundler or third party
 
-        // This regex looks for literal script tags with remote HTTP/HTTPS src
-        const remoteScriptPattern = /<script[^>]+src=["']https?:\/\/[^"']+["']/i;
-        expect(content).not.toMatch(remoteScriptPattern);
+          // This regex looks for literal script tags with remote HTTP/HTTPS src
+          const remoteScriptPattern = /<script[^>]+src=["']https?:\/\/[^"']+["']/i;
+          expect(content).not.toMatch(remoteScriptPattern);
 
-        // Check for specific dummy secrets from tests leaking into production build
-        expect(content).not.toContain('SECRET_CANARY_12345');
-        expect(content).not.toContain('SECRET_CANARY_67890');
-      }
+          // Check for specific dummy secrets from tests leaking into production build
+          expect(content).not.toContain('SECRET_CANARY_12345');
+          expect(content).not.toContain('SECRET_CANARY_67890');
+        }
+      });
     });
   });
 

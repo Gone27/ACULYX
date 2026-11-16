@@ -30,21 +30,26 @@ The master visual identity assets were created by Dhyan Patel and recorded with 
 
 ---
 
-## 3. Official Release Verification & Integrity
+## 3. Release Verification & Publication Standards
 
-Official binary builds of ACULYX for Chrome and Firefox are published from tagged commits on GitHub:
-- **Repository**: `https://github.com/Gone27/ACULYX`
-- **Releases**: `https://github.com/Gone27/ACULYX/releases`
+ACULYX enforces a reproducible, verifiable release pipeline to guarantee artifact provenance.
 
-Every official release artifact includes:
-1. Git release tag signed by the author.
-2. Source tree commit SHA matching the release tag.
-3. Published SHA-256 checksums for the compiled `.zip` distribution packages.
-4. Clean reproducible build passing all automated quality and security gates:
-   - TypeScript compilation (`tsc --noEmit`)
-   - Strict ESLint checks (`eslint src tests --max-warnings=0`)
-   - Full automated test suite across rules, leads, detectors, scope, and storage (`npm test`)
-   - Post-build artifact security & syntax validation (`npm run test:artifacts`)
-   - Chromium extension end-to-end integration (`npm run test:e2e`)
-   - Zero-vulnerability dependency audit (`npm audit --audit-level=low`)
-   - Aggregate release package verification across all 4 targets (`npm run verify:pack`)
+### 3.1 Automated CI & Local Release Verification
+Every release package (`source`, `full`, `chrome`, `firefox`) built locally or in CI is verified by [`scripts/verify-release-zip.mjs`](../scripts/verify-release-zip.mjs) against deterministic integrity rules:
+- RFC 1951 forward-slash entry naming and CRC-32 validation.
+- Clean smoke extraction into isolated temporary workspaces.
+- Strict exclusion of sensitive files (`.env*`, `*.local`, `ORIGINAL_REQUEST.md`), development caches, and OS metadata.
+- Pre-release passage through all automated quality gates:
+  - TypeScript strict compilation (`tsc --noEmit`)
+  - Strict ESLint checks (`eslint src tests --max-warnings=0`)
+  - Unit, scope, fuzz, and integration suites (`npm test`)
+  - Post-build artifact security & syntax validation across all targets (`npm run test:artifacts`)
+  - Chromium browser extension end-to-end integration (`npm run test:e2e`)
+  - Zero-vulnerability dependency audit (`npm audit --audit-level=low`)
+  - Aggregate release package verification across all 4 targets (`npm run verify:pack`)
+
+### 3.2 Public Release Distribution Policy
+When official release distributions are published to GitHub Releases (`https://github.com/Gone27/ACULYX/releases`):
+1. **Tagged Commits**: Official releases correspond to annotated version tags (e.g. `v2.0.5`) on `main`.
+2. **Published Checksums**: Official release packages will be accompanied by a published `SHA256SUMS` manifest allowing researchers and auditors to independently verify package integrity.
+3. **Reproducibility**: Binaries are reproducible from the clean source tree using `npm run build:all` and `npm run pack`.

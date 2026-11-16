@@ -23,7 +23,7 @@ Thank you for your interest in contributing to ACULYX! We welcome contributions 
 | `npm run lint` | Runs ESLint across `src/` and `tests/` |
 | `npm test` | Executes full Vitest unit, scope, fuzz, and integration suites |
 | `npm run test:artifacts` | Validates compiled syntax and effective manifest security bounds |
-| `npm run test:e2e` | Runs Playwright Chromium end-to-end browser integration tests |
+| `npm run test:e2e` | Runs Playwright Chromium end-to-end browser runtime tests (Firefox covered via build, lint & packaging) |
 | `npm run pack` | Packages all 4 release ZIP archives into dedicated output directories |
 | `npm run verify:pack` | Validates RFC 1951 entry paths, manifest invariants, and smoke extractions |
 

@@ -12,6 +12,7 @@ import {
 import {
   collectFiles,
   writeZipArchive,
+  packTarget,
   isExcludedFile,
 } from '../../scripts/pack-release.mjs';
 
@@ -562,6 +563,79 @@ describe('Release ZIP Packaging & Verifier', () => {
         expect(() => {
           writeZipArchive([], targetZip, { overwrite: false });
         }).toThrow(/Refusing to overwrite existing archive/);
+      });
+
+      it('writeZipArchive writes real ZIP on disk and verifyZipArchive confirms decompression integrity', () => {
+        const fixtureDir = path.join(tmpDir, 'real-zip-fixture');
+        fs.mkdirSync(path.join(fixtureDir, 'src'), { recursive: true });
+
+        const pkgContent = '{\n  "name": "aculyx-fixture"\n}\n';
+        const srcContent = 'export const test = "deflate-compression-payload-repeated-'.repeat(20) + '";';
+        fs.writeFileSync(path.join(fixtureDir, 'package.json'), pkgContent);
+        fs.writeFileSync(path.join(fixtureDir, 'src', 'index.ts'), srcContent);
+
+        const files = collectFiles(fixtureDir, 'source');
+        const zipPath = path.join(tmpDir, 'output-test.zip');
+        const packRes = writeZipArchive(files, zipPath, { overwrite: true });
+
+        expect(packRes.fileCount).toBe(2);
+        expect(fs.existsSync(zipPath)).toBe(true);
+
+        const buf = fs.readFileSync(zipPath);
+        const entries = parseZipEntries(buf);
+        expect(entries).toHaveLength(2);
+
+        const entryNames = entries.map((e) => e.name);
+        expect(entryNames).toContain('package.json');
+        expect(entryNames).toContain('src/index.ts');
+
+        // Verify each entry decompressibility and byte-for-byte fidelity
+        for (const entry of entries) {
+          expect(entry.name).not.toContain('\\');
+          const decompressed = extractZipEntry(buf, entry).toString('utf8');
+          if (entry.name === 'package.json') {
+            expect(decompressed).toBe(pkgContent);
+          } else if (entry.name === 'src/index.ts') {
+            expect(decompressed).toBe(srcContent);
+          }
+        }
+      });
+
+      it('packTarget builds actual project packages into a fresh disposable directory and passes aggregate verification', () => {
+        const outDir = path.join(tmpDir, 'live-pack-out');
+        fs.mkdirSync(outDir);
+
+        // Pack all 4 targets from actual project repository
+        packTarget('source', outDir, { overwrite: true });
+        packTarget('chrome', outDir, { overwrite: true });
+        packTarget('firefox', outDir, { overwrite: true });
+        packTarget('full', outDir, { overwrite: true });
+
+        // Assert all 4 zip files exist on disk
+        expect(fs.existsSync(path.join(outDir, 'ACULYX-source.zip'))).toBe(true);
+        expect(fs.existsSync(path.join(outDir, 'ACULYX-chrome.zip'))).toBe(true);
+        expect(fs.existsSync(path.join(outDir, 'ACULYX-firefox.zip'))).toBe(true);
+        expect(fs.existsSync(path.join(outDir, 'ACULYX-full.zip'))).toBe(true);
+
+        // Run full aggregate verification with smoke extraction
+        const aggRes = verifyAllArchives(outDir, { smokeExtract: true });
+        expect(aggRes.success).toBe(true);
+        expect(aggRes.errors).toHaveLength(0);
+
+        // Inspect ACULYX-source.zip entries directly
+        const sourceBuf = fs.readFileSync(path.join(outDir, 'ACULYX-source.zip'));
+        const sourceEntries = parseZipEntries(sourceBuf).map((e) => e.name);
+
+        expect(sourceEntries).toContain('package.json');
+        expect(sourceEntries).toContain('manifest.json');
+        expect(sourceEntries.some((e) => e.startsWith('src/'))).toBe(true);
+
+        // Assert no forbidden files exist in the written archive
+        expect(sourceEntries).not.toContain('.env');
+        expect(sourceEntries).not.toContain('ORIGINAL_REQUEST.md');
+        expect(sourceEntries.some((e) => e.endsWith('.local'))).toBe(false);
+        expect(sourceEntries.some((e) => e.includes('node_modules/'))).toBe(false);
+        expect(sourceEntries.some((e) => e.startsWith('dist/'))).toBe(false);
       });
     });
   });

@@ -81,7 +81,8 @@ ACULYX is built on strict fail-closed privacy invariants:
 - **`scripting`**: Injects client-side DOM inspection sensors (S2 DOM collector and S3 Main-World hook scripts) into user-monitored tabs to analyze DOM sinks and subresource integrity.
 - **`storage`**: Used exclusively to persist user preferences, scope profiles, researcher triage notes, and bounded score history entirely on the local device.
 - **`alarms`**: Triggers periodic local cache pruning and data retention cleanup without running background threads.
-- **`optional_permissions` (`<all_urls>`)**: Never requested upfront. Only requested upon explicit user consent per-site or when all-sites monitoring is deliberately activated.
+- **`optional_permissions` / `optional_host_permissions` (`<all_urls>`)**: In standard Chrome and Firefox builds, broad access (`<all_urls>`) is **never requested at install time**. It is declared strictly as an *optional runtime permission* prompted only if the user explicitly switches the monitoring mode to "All Sites" in Options. By default, the extension runs in Per-Site or Off modes.
+- **Hunter Edition (`dist-hunter/`) Product Boundary**: Unlike standard builds, Hunter Edition is an active-testing build that deliberately includes `<all_urls>` in required `host_permissions` and relaxes `connect-src` to allow active HTTP/OOB probing. These broad permissions exist exclusively in Hunter builds and are verified never to enter standard store distributions.
 
 ### Reviewer Notes (Web Store & Mozilla AMO)
 - **Use of `eval` in `main-world-hooks.ts`**: The extension wraps `window.eval` in the page's MAIN execution world strictly as a passive taint-tracking sensor (Sensor 3). It observes calls made by the web page to detect unvalidated string execution. ACULYX **never** generates, compiles, or executes dynamic code via `eval()`. The original function is invoked with unmodified arguments, and only a sanitized event type is relayed to the extension.
@@ -165,9 +166,11 @@ npm test
 # 4. Built Artifact Security & Syntax Checks (scans dist/ chunks and content scripts)
 npm run test:artifacts
 
-# 5. Playwright End-to-End Tests (Chromium browser extension integration)
-# Note: Playwright browser tests target Chromium due to MV3 extension loading APIs.
-# Firefox distribution is verified via automated builds, web-ext lint, and packaging gates.
+# 5. Playwright End-to-End Tests (Chromium browser runtime)
+# Note: Browser-runtime E2E tests run exclusively in Chromium because Playwright only supports
+# loading unpacked Manifest V3 extensions with service workers in Chromium persistent contexts.
+# Firefox validation is build-, package-, and AMO-lint-level coverage (web-ext lint, manifest checks,
+# and zip verification); it does NOT include automated browser-runtime UI interaction.
 npm run test:e2e
 
 # 6. Dependency Audit (zero vulnerabilities at low level)
