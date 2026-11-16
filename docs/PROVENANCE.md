@@ -43,6 +43,8 @@ Every official release artifact includes:
 4. Clean reproducible build passing all automated quality and security gates:
    - TypeScript compilation (`tsc --noEmit`)
    - Strict ESLint checks (`eslint src tests --max-warnings=0`)
-   - Full Vitest suite (454+ tests)
-   - Playwright E2E verification
-   - Zero vulnerability dependency audit (`npm audit --audit-level=low`)
+   - Full automated test suite across rules, leads, detectors, scope, and storage (`npm test`)
+   - Post-build artifact security & syntax validation (`npm run test:artifacts`)
+   - Chromium extension end-to-end integration (`npm run test:e2e`)
+   - Zero-vulnerability dependency audit (`npm audit --audit-level=low`)
+   - Aggregate release package verification across all 4 targets (`npm run verify:pack`)

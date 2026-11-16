@@ -130,6 +130,22 @@ export function verifyZipArchive(zipPath, target, options = {}) {
     return { success: false, errors, entries };
   }
 
+  // Universal checks: reject sensitive files and ignored development files across all targets
+  for (const name of entries) {
+    const baseName = name.split('/').pop() || '';
+    if (
+      baseName === '.env' ||
+      baseName.startsWith('.env.') ||
+      baseName.endsWith('.local') ||
+      baseName === 'ORIGINAL_REQUEST.md' ||
+      baseName === '.DS_Store' ||
+      baseName === 'Thumbs.db' ||
+      baseName === 'desktop.ini'
+    ) {
+      errors.push(`Archive contains forbidden sensitive, ignored, or OS metadata file: "${name}"`);
+    }
+  }
+
   // Target-specific validation
   if (target === 'source') {
     const forbiddenPrefixes = [
@@ -315,12 +331,57 @@ export function verifyZipArchive(zipPath, target, options = {}) {
   };
 }
 
+/**
+ * Verifies all required release archives (source, full, chrome, firefox) in an output directory.
+ * Fails if any required package is missing or fails verification invariants.
+ * @param {string} dir
+ * @param {{ smokeExtract?: boolean; quiet?: boolean }} [options]
+ * @returns {{ success: boolean; errors: string[]; results: Record<string, any> }}
+ */
+export function verifyAllArchives(dir, options = { smokeExtract: true }) {
+  const targets = [
+    { target: 'source', filename: 'ACULYX-source.zip' },
+    { target: 'full', filename: 'ACULYX-full.zip' },
+    { target: 'chrome', filename: 'ACULYX-chrome.zip' },
+    { target: 'firefox', filename: 'ACULYX-firefox.zip' },
+  ];
+
+  const results = {};
+  const errors = [];
+  let success = true;
+
+  for (const item of targets) {
+    const zipPath = path.join(dir, item.filename);
+    if (!fs.existsSync(zipPath)) {
+      errors.push(`Missing required release archive: ${item.filename} (expected at ${zipPath})`);
+      success = false;
+      continue;
+    }
+
+    const res = verifyZipArchive(zipPath, item.target, options);
+    results[item.target] = res;
+    if (!res.success) {
+      success = false;
+      for (const err of res.errors) {
+        errors.push(`[${item.filename}] ${err}`);
+      }
+    }
+  }
+
+  return {
+    success,
+    errors,
+    results,
+  };
+}
+
 // CLI execution handling
 const isCli = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
 if (isCli) {
-  let target = 'source';
+  let target = 'all';
   let zipPath = '';
+  let searchDir = '';
 
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
@@ -330,29 +391,45 @@ if (isCli) {
     } else if (args[i] === '--target' && args[i + 1]) {
       target = args[i + 1];
       i++;
+    } else if ((args[i] === '--dir' || args[i] === '--output-dir') && args[i + 1]) {
+      searchDir = args[i + 1];
+      i++;
     }
+  }
+
+  const cwd = process.cwd();
+  const parentDir = path.resolve(cwd, '..');
+
+  if (target === 'all') {
+    const targetDir = searchDir || (zipPath && fs.existsSync(zipPath) && fs.statSync(zipPath).isDirectory() ? zipPath : '') || (fs.existsSync(path.join(cwd, 'release-artifacts')) ? path.join(cwd, 'release-artifacts') : '') || (fs.existsSync(path.join(parentDir, 'ACULYX-source.zip')) ? parentDir : cwd);
+
+    console.log(`Verifying all 4 release packages in directory: ${targetDir}...`);
+    const aggResult = verifyAllArchives(targetDir, { smokeExtract: true });
+
+    if (!aggResult.success) {
+      console.error('AGGREGATE VERIFICATION FAILED:');
+      for (const err of aggResult.errors) {
+        console.error(` - ${err}`);
+      }
+      process.exit(1);
+    }
+
+    console.log('✓ ALL 4 RELEASE PACKAGES (source, full, chrome, firefox) SATISFIED VERIFICATION INVARIANTS.');
+    process.exit(0);
   }
 
   if (!zipPath) {
     if (process.env.ACULYX_ZIP_PATH) {
       zipPath = process.env.ACULYX_ZIP_PATH;
     } else {
-      const cwd = process.cwd();
-      const parentDir = path.resolve(cwd, '..');
       const candidates = [
+        searchDir ? path.join(searchDir, `ACULYX-${target}.zip`) : '',
         path.join(parentDir, `ACULYX-${target}.zip`),
         path.join(cwd, `ACULYX-${target}.zip`),
-        path.join(parentDir, 'ACULYX-full.zip'),
-        path.join(cwd, 'ACULYX-full.zip'),
-        path.join(parentDir, 'ACULYX-source.zip'),
-        path.join(cwd, 'ACULYX-source.zip'),
-        path.join(parentDir, 'ACULYX.zip'),
-        path.join(cwd, 'ACULYX.zip'),
+        path.join(cwd, 'release-artifacts', `ACULYX-${target}.zip`),
         `D:/Projects/ACULYX-${target}.zip`,
-        'D:/Projects/ACULYX-full.zip',
-        'D:/Projects/ACULYX-source.zip',
-        'D:/Projects/ACULYX.zip',
-      ];
+      ].filter(Boolean);
+
       const found = candidates.find(p => {
         try {
           return fs.existsSync(p);

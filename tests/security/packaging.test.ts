@@ -7,7 +7,13 @@ import {
   parseZipEntries,
   extractZipEntry,
   verifyZipArchive,
+  verifyAllArchives,
 } from '../../scripts/verify-release-zip.mjs';
+import {
+  collectFiles,
+  writeZipArchive,
+  isExcludedFile,
+} from '../../scripts/pack-release.mjs';
 
 function createMockZipBuffer(files: { name: string; content: string | Buffer; method?: number }[]): Buffer {
   const localHeaders: Buffer[] = [];
@@ -374,6 +380,188 @@ describe('Release ZIP Packaging & Verifier', () => {
         const result = verifyZipArchive(zipPath, 'full', { smokeExtract: true });
         expect(result.success).toBe(true);
         expect(result.errors).toHaveLength(0);
+      });
+    });
+
+    describe('universal sensitive & ignored file rejection', () => {
+      it('rejects archives containing .env or .env.local', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: '{}', method: 0 },
+          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: '.env', content: 'SECRET=true', method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-env.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'source');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('.env'))).toBe(true);
+      });
+
+      it('rejects archives containing .local or ORIGINAL_REQUEST.md files', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: '{}', method: 0 },
+          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'secrets.local', content: 'secret', method: 0 },
+          { name: 'ORIGINAL_REQUEST.md', content: '# Prompt', method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-local-ignored.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'source');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('secrets.local'))).toBe(true);
+        expect(result.errors.some((err: string) => err.includes('ORIGINAL_REQUEST.md'))).toBe(true);
+      });
+
+      it('rejects archives containing OS metadata files like .DS_Store or Thumbs.db', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: '{}', method: 0 },
+          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: '.DS_Store', content: 'junk', method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-ds-store.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'source');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('.DS_Store'))).toBe(true);
+      });
+    });
+
+    describe('verifyAllArchives aggregate verification', () => {
+      it('fails closed when any of the four required release archives is missing', () => {
+        const aggDir = path.join(tmpDir, 'aggregate-missing');
+        fs.mkdirSync(aggDir);
+
+        // Only create source and chrome, leave full and firefox missing
+        fs.writeFileSync(
+          path.join(aggDir, 'ACULYX-source.zip'),
+          createMockZipBuffer([
+            { name: 'package.json', content: '{}', method: 0 },
+            { name: 'manifest.json', content: '{}', method: 0 },
+            { name: 'src/index.ts', content: 'export {}', method: 0 },
+          ])
+        );
+
+        const res = verifyAllArchives(aggDir);
+        expect(res.success).toBe(false);
+        expect(res.errors.some((err: string) => err.includes('ACULYX-full.zip'))).toBe(true);
+        expect(res.errors.some((err: string) => err.includes('ACULYX-firefox.zip'))).toBe(true);
+      });
+
+      it('succeeds when all four required archives exist and meet specifications', () => {
+        const aggDir = path.join(tmpDir, 'aggregate-valid');
+        fs.mkdirSync(aggDir);
+
+        const validManifest = {
+          manifest_version: 3,
+          name: 'ACULYX',
+          version: '2.0.5',
+          content_security_policy: {
+            extension_pages: "script-src 'self'; object-src 'none'; connect-src 'self'",
+          },
+        };
+
+        const validFirefoxManifest = {
+          manifest_version: 3,
+          name: 'ACULYX',
+          version: '2.0.5',
+          browser_specific_settings: { gecko: { id: 'aculyx@dhyanpatel.com' } },
+        };
+
+        fs.writeFileSync(
+          path.join(aggDir, 'ACULYX-source.zip'),
+          createMockZipBuffer([
+            { name: 'package.json', content: '{}', method: 0 },
+            { name: 'manifest.json', content: '{}', method: 0 },
+            { name: 'src/index.ts', content: 'export {}', method: 0 },
+          ])
+        );
+        fs.writeFileSync(
+          path.join(aggDir, 'ACULYX-full.zip'),
+          createMockZipBuffer([
+            { name: 'package.json', content: '{}', method: 0 },
+            { name: 'manifest.json', content: '{}', method: 0 },
+            { name: 'src/index.ts', content: 'export {}', method: 0 },
+            { name: 'dist/manifest.json', content: '{}', method: 0 },
+          ])
+        );
+        fs.writeFileSync(
+          path.join(aggDir, 'ACULYX-chrome.zip'),
+          createMockZipBuffer([
+            { name: 'manifest.json', content: JSON.stringify(validManifest), method: 8 },
+            { name: 'popup.html', content: '<html></html>', method: 0 },
+          ])
+        );
+        fs.writeFileSync(
+          path.join(aggDir, 'ACULYX-firefox.zip'),
+          createMockZipBuffer([
+            { name: 'manifest.json', content: JSON.stringify(validFirefoxManifest), method: 8 },
+            { name: 'popup.html', content: '<html></html>', method: 0 },
+          ])
+        );
+
+        const res = verifyAllArchives(aggDir, { smokeExtract: true });
+        expect(res.success).toBe(true);
+        expect(res.errors).toHaveLength(0);
+      });
+    });
+
+    describe('pack-release exclusions and workspace fixture integration', () => {
+      it('isExcludedFile correctly identifies sensitive files, local configs, and temporary dirs', () => {
+        expect(isExcludedFile('.env', 'source')).toBe(true);
+        expect(isExcludedFile('.env.production', 'source')).toBe(true);
+        expect(isExcludedFile('auth.local', 'source')).toBe(true);
+        expect(isExcludedFile('ORIGINAL_REQUEST.md', 'source')).toBe(true);
+        expect(isExcludedFile('.DS_Store', 'source')).toBe(true);
+        expect(isExcludedFile('Thumbs.db', 'source')).toBe(true);
+        expect(isExcludedFile('node_modules/express/index.js', 'source')).toBe(true);
+        expect(isExcludedFile('.git/HEAD', 'source')).toBe(true);
+        expect(isExcludedFile('dist/bundle.js', 'source')).toBe(true);
+        expect(isExcludedFile('dist/bundle.js', 'full')).toBe(false);
+        expect(isExcludedFile('src/index.ts', 'source')).toBe(false);
+        expect(isExcludedFile('src/index.ts', 'full')).toBe(false);
+      });
+
+      it('collectFiles scans a workspace fixture and strips all ignored and sensitive files', () => {
+        const fixtureDir = path.join(tmpDir, 'fixture-workspace');
+        fs.mkdirSync(path.join(fixtureDir, 'src'), { recursive: true });
+        fs.mkdirSync(path.join(fixtureDir, 'node_modules', 'dep'), { recursive: true });
+
+        fs.writeFileSync(path.join(fixtureDir, 'package.json'), '{}');
+        fs.writeFileSync(path.join(fixtureDir, 'src', 'index.ts'), 'export const v = 1;');
+        fs.writeFileSync(path.join(fixtureDir, '.env'), 'TOKEN=bad');
+        fs.writeFileSync(path.join(fixtureDir, '.env.local'), 'LOCAL=true');
+        fs.writeFileSync(path.join(fixtureDir, 'secrets.local'), 'SECRET=key');
+        fs.writeFileSync(path.join(fixtureDir, 'ORIGINAL_REQUEST.md'), '# Request');
+        fs.writeFileSync(path.join(fixtureDir, '.DS_Store'), 'junk');
+        fs.writeFileSync(path.join(fixtureDir, 'node_modules', 'dep', 'index.js'), 'export {}');
+
+        const collected = collectFiles(fixtureDir, 'source');
+        const relPaths = collected.map((c: { relPath: string }) => c.relPath);
+
+        expect(relPaths).toContain('package.json');
+        expect(relPaths).toContain('src/index.ts');
+
+        expect(relPaths).not.toContain('.env');
+        expect(relPaths).not.toContain('.env.local');
+        expect(relPaths).not.toContain('secrets.local');
+        expect(relPaths).not.toContain('ORIGINAL_REQUEST.md');
+        expect(relPaths).not.toContain('.DS_Store');
+        expect(relPaths.some((p: string) => p.includes('node_modules'))).toBe(false);
+      });
+
+      it('writeZipArchive refuses to overwrite existing archive without overwrite: true', () => {
+        const targetZip = path.join(tmpDir, 'existing.zip');
+        fs.writeFileSync(targetZip, 'dummy');
+
+        expect(() => {
+          writeZipArchive([], targetZip, { overwrite: false });
+        }).toThrow(/Refusing to overwrite existing archive/);
       });
     });
   });

@@ -67,7 +67,11 @@ ACULYX is built on strict fail-closed privacy invariants:
 6. **Policy-Gated Parameter Harvesting**: Query parameter harvesting (S1) is strictly gated behind the active URL capture policy and defined bug-bounty scope. If monitoring is paused/off, an origin is not granted, or a host is out-of-scope or unknown, parameter harvesting is completely halted.
 
 > [!NOTE]
-> The only command that contacts an external network endpoint is the standalone CLI when invoked with the explicit `--url` flag to fetch HTTP headers for terminal audit.
+> **Network Activity & Data Boundaries**: The extension performs 100% local passive analysis and contains zero telemetry, analytics, or tracking code. Outbound network communication is restricted exclusively to two transparent paths:
+> 1. **Optional Credential Liveness Checks**: An off-by-default, researcher-initiated capability that tests candidate keys (GitHub, Stripe, Slack) only after explicit, two-step user confirmation, sending bounded requests directly to official vendor endpoints.
+> 2. **Standalone Developer CLI**: Outbound requests occur only when explicitly invoked with the `--url` flag to fetch headers for terminal security audits.
+>
+> Full architectural details, CSP directives, and consent flow models are documented in [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md).
 
 ### Permissions Usage & Store Justifications
 - **`cookies`**: Passively audits cookie security attributes (`HttpOnly`, `Secure`, `SameSite`, `__Host-`, `__Secure-` prefixes). Cookie values are strictly never accessed, logged, stored, or transmitted (`cookie.value` is ignored).
@@ -152,25 +156,29 @@ ACULYX enforces a strict zero-tolerance gate policy:
 # 1. Typecheck (zero TypeScript errors)
 npm run typecheck
 
-# 2. Strict Lint (zero warnings, zero errors, zero eslint-disable)
+# 2. Strict Lint (zero warnings, zero errors)
 npm run lint -- --max-warnings=0
 
-# 3. Unit & Integration Tests (756 tests across 52 test suites)
+# 3. Unit, Scope & Fuzz Tests
 npm test
 
-# 4. Playwright End-to-End Tests (9 browser tests across 2 suites; auto-builds dist/)
+# 4. Built Artifact Security & Syntax Checks (scans dist/ chunks and content scripts)
+npm run test:artifacts
+
+# 5. Playwright End-to-End Tests (Chromium browser extension integration)
+# Note: Playwright browser tests target Chromium due to MV3 extension loading APIs.
+# Firefox distribution is verified via automated builds, web-ext lint, and packaging gates.
 npm run test:e2e
 
-# 5. Dependency Audit (zero vulnerabilities at low level)
+# 6. Dependency Audit (zero vulnerabilities at low level)
 npm audit --audit-level=low
 
-# 6. Build Release Targets
-npm run build          # Builds Chrome production distribution (dist/)
-npm run build:firefox  # Builds Firefox MV3 production distribution (dist-firefox/)
+# 7. Build All Release Targets
+npm run build:all       # Builds Chrome (dist/), Firefox (dist-firefox/), and Hunter (dist-hunter/)
 
-# 7. Package and Verify Release Artifacts
-npm run pack           # Generates ACULYX-full.zip, ACULYX-source.zip, ACULYX-chrome.zip, and ACULYX-firefox.zip
-npm run verify:pack    # Verifies entry paths, flat packaging, and manifest invariants
+# 8. Package and Verify Release Artifacts
+npm run pack            # Generates ACULYX-full.zip, ACULYX-source.zip, ACULYX-chrome.zip, and ACULYX-firefox.zip
+npm run verify:pack     # Verifies all 4 packages satisfy RFC 1951 entry paths, manifest invariants, and clean smoke extractions
 ```
 
 ### Release Artifacts & Store Packaging

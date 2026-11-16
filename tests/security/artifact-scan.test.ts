@@ -83,12 +83,19 @@ describe('Artifact Scan', () => {
   describe('dist/ chunks security', () => {
     it('scans built dist/ JS chunks ensuring no unredacted canaries or remote script URLs are embedded', () => {
       const distPath = path.join(__dirname, '../../dist');
+      const requireBuild = process.env.REQUIRE_BUILD_ARTIFACTS === 'true';
       if (!fs.existsSync(distPath)) {
+        if (requireBuild) {
+          throw new Error('Required build directory dist/ is missing. Run "npm run build" first.');
+        }
         return; // skip if dist/ not found
       }
 
       const files = fs.readdirSync(distPath, { recursive: true }) as string[];
       const jsFiles = files.filter(f => f.endsWith('.js')).map(f => path.join(distPath, f));
+      if (requireBuild && jsFiles.length === 0) {
+        throw new Error('Required build directory dist/ contains no compiled .js chunks.');
+      }
 
       for (const file of jsFiles) {
         const content = fs.readFileSync(file, 'utf-8');
@@ -104,6 +111,42 @@ describe('Artifact Scan', () => {
         expect(content).not.toContain('SECRET_CANARY_12345');
         expect(content).not.toContain('SECRET_CANARY_67890');
       }
+    });
+  });
+
+  describe('Built manifest separation and Hunter permission boundary', () => {
+    it('enforces that broad permissions and relaxed connect-src exist only in Hunter and never leak into standard builds', () => {
+      const distPath = path.join(__dirname, '../../dist');
+      const firefoxDistPath = path.join(__dirname, '../../dist-firefox');
+      const hunterDistPath = path.join(__dirname, '../../dist-hunter');
+
+      const requireBuild = process.env.REQUIRE_BUILD_ARTIFACTS === 'true';
+
+      if (!fs.existsSync(distPath) || !fs.existsSync(firefoxDistPath) || !fs.existsSync(hunterDistPath)) {
+        if (requireBuild) {
+          throw new Error('Expected built directories (dist/, dist-firefox/, dist-hunter/) are missing for boundary scan.');
+        }
+        return;
+      }
+
+      const chromeManifest = JSON.parse(fs.readFileSync(path.join(distPath, 'manifest.json'), 'utf-8')) as Manifest;
+      const firefoxManifest = JSON.parse(fs.readFileSync(path.join(firefoxDistPath, 'manifest.json'), 'utf-8')) as Manifest;
+      const hunterManifest = JSON.parse(fs.readFileSync(path.join(hunterDistPath, 'manifest.json'), 'utf-8')) as Manifest;
+
+      // 1. Standard Chrome manifest invariants
+      expect(chromeManifest.host_permissions ?? []).not.toContain('<all_urls>');
+      expect(chromeManifest.permissions ?? []).not.toContain('<all_urls>');
+      expect(chromeManifest.content_security_policy?.extension_pages).not.toContain('http:');
+      expect(chromeManifest.content_security_policy?.extension_pages).not.toContain('connect-src *');
+
+      // 2. Standard Firefox manifest invariants
+      expect(firefoxManifest.host_permissions ?? []).not.toContain('<all_urls>');
+      expect(firefoxManifest.permissions ?? []).not.toContain('sidePanel');
+      expect(firefoxManifest.content_security_policy?.extension_pages).not.toContain('http:');
+
+      // 3. Hunter edition: deliberately granted broad host permissions and relaxed connect-src for active probing
+      expect(hunterManifest.host_permissions).toContain('<all_urls>');
+      expect(hunterManifest.content_security_policy?.extension_pages).toContain("connect-src 'self' http: https:");
     });
   });
 });

@@ -54,6 +54,8 @@ export default defineConfig({
       name: 'chromium',
       use: {
         // browserName is implied by the project name above, but explicit for clarity.
+        // MV3 extensions with background service workers require Chromium persistent contexts (--load-extension);
+        // Playwright does not support loading unpacked MV3 extensions in Firefox or WebKit.
         browserName: 'chromium',
       },
     },
