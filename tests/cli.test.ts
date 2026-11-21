@@ -452,5 +452,12 @@ describe('ACULYX CLI report', () => {
         safeFetchTarget(new URL('http://127.0.0.1:8080/redirect'), { allowPrivateIps: false })
       ).rejects.toThrow(/SSRF Protection/);
     });
+
+    it('aligns CLI report driver version and user-agent with package.json', () => {
+      const report = buildCliReport({ url: 'https://example.com', headers: {} });
+      const sarif = formatSarif(report);
+      expect(sarif.runs[0]?.tool.driver.version).toBe(packageInfo.version);
+      expect(packageInfo.version).toBe('2.0.5');
+    });
   });
 });

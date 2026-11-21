@@ -605,24 +605,10 @@ describe('Release ZIP Packaging & Verifier', () => {
         const outDir = path.join(tmpDir, 'live-pack-out');
         fs.mkdirSync(outDir);
 
-        // Pack all 4 targets from actual project repository
+        // Pack source target from actual repository (always available without prior builds)
         packTarget('source', outDir, { overwrite: true });
-        packTarget('chrome', outDir, { overwrite: true });
-        packTarget('firefox', outDir, { overwrite: true });
-        packTarget('full', outDir, { overwrite: true });
-
-        // Assert all 4 zip files exist on disk
         expect(fs.existsSync(path.join(outDir, 'ACULYX-source.zip'))).toBe(true);
-        expect(fs.existsSync(path.join(outDir, 'ACULYX-chrome.zip'))).toBe(true);
-        expect(fs.existsSync(path.join(outDir, 'ACULYX-firefox.zip'))).toBe(true);
-        expect(fs.existsSync(path.join(outDir, 'ACULYX-full.zip'))).toBe(true);
 
-        // Run full aggregate verification with smoke extraction
-        const aggRes = verifyAllArchives(outDir, { smokeExtract: true });
-        expect(aggRes.success).toBe(true);
-        expect(aggRes.errors).toHaveLength(0);
-
-        // Inspect ACULYX-source.zip entries directly
         const sourceBuf = fs.readFileSync(path.join(outDir, 'ACULYX-source.zip'));
         const sourceEntries = parseZipEntries(sourceBuf).map((e) => e.name);
 
@@ -636,7 +622,39 @@ describe('Release ZIP Packaging & Verifier', () => {
         expect(sourceEntries.some((e) => e.endsWith('.local'))).toBe(false);
         expect(sourceEntries.some((e) => e.includes('node_modules/'))).toBe(false);
         expect(sourceEntries.some((e) => e.startsWith('dist/'))).toBe(false);
-      });
+
+        // Check if built distributions are present on disk (present after build:all, absent on clean checkout)
+        const chromeManifest = path.join(__dirname, '../../dist/manifest.json');
+        const firefoxManifest = path.join(__dirname, '../../dist-firefox/manifest.json');
+
+        if (fs.existsSync(chromeManifest) && fs.existsSync(firefoxManifest)) {
+          packTarget('chrome', outDir, { overwrite: true });
+          packTarget('firefox', outDir, { overwrite: true });
+          packTarget('full', outDir, { overwrite: true });
+
+          // Assert all 4 zip files plus legacy alias exist on disk
+          expect(fs.existsSync(path.join(outDir, 'ACULYX-source.zip'))).toBe(true);
+          expect(fs.existsSync(path.join(outDir, 'ACULYX-chrome.zip'))).toBe(true);
+          expect(fs.existsSync(path.join(outDir, 'ACULYX-firefox.zip'))).toBe(true);
+          expect(fs.existsSync(path.join(outDir, 'ACULYX-full.zip'))).toBe(true);
+          expect(fs.existsSync(path.join(outDir, 'ACULYX.zip'))).toBe(true);
+
+          // Assert ACULYX.zip matches ACULYX-full.zip in length
+          const fullStat = fs.statSync(path.join(outDir, 'ACULYX-full.zip'));
+          const legacyStat = fs.statSync(path.join(outDir, 'ACULYX.zip'));
+          expect(legacyStat.size).toBe(fullStat.size);
+
+          // Run full aggregate verification with smoke extraction
+          const aggRes = verifyAllArchives(outDir, { smokeExtract: true });
+          expect(aggRes.success).toBe(true);
+          expect(aggRes.errors).toHaveLength(0);
+        } else {
+          // On clean checkouts before build:all, assert packTarget fails closed with descriptive message
+          expect(() => packTarget('chrome', outDir, { overwrite: true })).toThrow(/Run "npm run build"/);
+          expect(() => packTarget('firefox', outDir, { overwrite: true })).toThrow(/Run "npm run build:firefox"/);
+          expect(() => packTarget('full', outDir, { overwrite: true })).toThrow(/Run "npm run build"/);
+        }
+      }, 30_000);
     });
   });
 });

@@ -53,29 +53,73 @@ describe('Artifact Scan', () => {
         expect(csp).not.toContain("'unsafe-eval'");
       });
 
-      it('does not request prohibited permissions', () => {
+      it('enforces strictly least-privilege required permissions', () => {
         const permissions = manifest.permissions ?? [];
         const hostPermissions = manifest.host_permissions ?? [];
 
-        const broadPatterns = ['<all_urls>', '*://*/*', 'https://*/*', 'http://*/*'];
+        // Required host permissions must be empty in passive store manifests
+        expect(hostPermissions).toHaveLength(0);
 
-        for (const pattern of broadPatterns) {
+        // Required permissions must contain only passive auditing capabilities
+        const allowedPermissions = new Set([
+          'cookies',
+          'webRequest',
+          'webNavigation',
+          'tabs',
+          'scripting',
+          'storage',
+          'alarms',
+          'activeTab',
+          'sidePanel', // Chrome-only
+        ]);
+
+        for (const perm of permissions) {
+          expect(allowedPermissions.has(perm)).toBe(true);
+        }
+
+        // Must never include broad access or dangerous capabilities in required permissions
+        const prohibitedPermissions = [
+          '<all_urls>',
+          '*://*/*',
+          'https://*/*',
+          'http://*/*',
+          'debugger',
+          'management',
+          'proxy',
+          'webRequestBlocking',
+          'nativeMessaging',
+          'declarativeNetRequest',
+        ];
+
+        for (const pattern of prohibitedPermissions) {
           expect(permissions).not.toContain(pattern);
-          expect(hostPermissions).not.toContain(pattern);
+        }
+
+        // Firefox must not declare Chrome-specific sidePanel
+        if (filename === 'manifest.firefox.json') {
+          expect(permissions).not.toContain('sidePanel');
         }
       });
 
-      it('has broad patterns only in optional permissions/host_permissions', () => {
-        // It's allowed in optional host permissions or optional permissions, so if it exists there, it's fine.
-        // We already verified above it's NOT in required ones.
+      it('enforces that broad patterns and vendor endpoints exist strictly in optional grants', () => {
         const allOptional = [
           ...(manifest.optional_permissions ?? []),
-          ...(manifest.optional_host_permissions ?? [])
+          ...(manifest.optional_host_permissions ?? []),
         ];
 
-        // It doesn't strictly have to have them, but if it does, it's fine.
-        // The main requirement was verifying they are NOT in required permissions.
-        expect(Array.isArray(allOptional)).toBe(true);
+        // Standard builds offer <all_urls> solely as an optional permission for user-toggled All-Sites mode
+        expect(allOptional).toContain('<all_urls>');
+
+        // Vendor endpoints for optional credential checks must be optional, never required
+        expect(allOptional).toContain('https://api.github.com/*');
+        expect(allOptional).toContain('https://api.stripe.com/*');
+        expect(allOptional).toContain('https://slack.com/*');
+
+        // Required permissions must not contain the vendor URLs
+        const permissions = manifest.permissions ?? [];
+        expect(permissions).not.toContain('https://api.github.com/*');
+        expect(permissions).not.toContain('https://api.stripe.com/*');
+        expect(permissions).not.toContain('https://slack.com/*');
       });
     });
   });
@@ -144,11 +188,14 @@ describe('Artifact Scan', () => {
       // 1. Standard Chrome manifest invariants
       expect(chromeManifest.host_permissions ?? []).not.toContain('<all_urls>');
       expect(chromeManifest.permissions ?? []).not.toContain('<all_urls>');
+      expect(chromeManifest.optional_host_permissions ?? []).toContain('<all_urls>');
       expect(chromeManifest.content_security_policy?.extension_pages).not.toContain('http:');
       expect(chromeManifest.content_security_policy?.extension_pages).not.toContain('connect-src *');
 
       // 2. Standard Firefox manifest invariants
       expect(firefoxManifest.host_permissions ?? []).not.toContain('<all_urls>');
+      expect(firefoxManifest.permissions ?? []).not.toContain('<all_urls>');
+      expect(firefoxManifest.optional_permissions ?? []).toContain('<all_urls>');
       expect(firefoxManifest.permissions ?? []).not.toContain('sidePanel');
       expect(firefoxManifest.content_security_policy?.extension_pages).not.toContain('http:');
 

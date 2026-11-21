@@ -735,7 +735,7 @@ function singleFetch(
         method: 'GET',
         agent,
         headers: {
-          'User-Agent': 'ACULYX/2.0.3 (CLI Security Scanner)',
+          'User-Agent': `ACULYX/${packageInfo.version} (CLI Security Scanner)`,
           'Accept': '*/*',
         },
       },
@@ -840,6 +840,7 @@ interface CliOptions {
   failOn: string;
   allowPrivateIps: boolean;
   help: boolean;
+  version: boolean;
 }
 
 function parseArguments(args: string[]): CliOptions {
@@ -849,10 +850,12 @@ function parseArguments(args: string[]): CliOptions {
     failOn: 'high',
     allowPrivateIps: false,
     help: false,
+    version: false,
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') options.help = true;
+    else if (argument === '--version' || argument === '-v') options.version = true;
     else if (argument === '--bundle') options.bundle = true;
     else if (argument === '--allow-private-ips') options.allowPrivateIps = true;
     else if (
@@ -908,7 +911,7 @@ async function loadInput(options: { input?: string | undefined; har?: string | u
   return { url: fetched.url, status: fetched.status, headers: fetched.headers, cookies: [] };
 }
 
-const usage = `ACULYX CLI
+const usage = `ACULYX CLI v${packageInfo.version}
 Header & Cookie Security Checker
 
 Usage:
@@ -917,6 +920,7 @@ Usage:
   npm run aculyx -- --har capture.har --url https://example.com/path [--format json|markdown|sarif] [--fail-on ...]
   npm run aculyx -- --input current.json --diff baseline.json [--format json|markdown]
   npm run aculyx -- --input audit.json --bundle
+  npm run aculyx -- --version
 
 Legacy alias:
   npm run seccheck -- [args]
@@ -932,6 +936,10 @@ Default --fail-on is high, so critical and high findings return 1.\n`;
 
 async function main(args: string[]): Promise<void> {
   const options = parseArguments(args);
+  if (options.version) {
+    process.stdout.write(`ACULYX CLI v${packageInfo.version}\n`);
+    return;
+  }
   if (options.help) {
     process.stdout.write(`${usage}\n${helpExitCodes}`);
     return;

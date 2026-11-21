@@ -247,16 +247,19 @@ export function packTarget(target, outputDir, options = {}) {
       throw new Error('dist/manifest.json not found. Run "npm run build" before packaging full.');
     }
     const destZip = path.join(outputDir, 'ACULYX-full.zip');
+    const legacyZip = path.join(outputDir, 'ACULYX.zip');
+
+    if (fs.existsSync(legacyZip) && !overwrite) {
+      throw new Error(
+        `Refusing to overwrite existing legacy archive: "${legacyZip}". Pass --overwrite to replace, or specify a new directory with --output-dir.`
+      );
+    }
+
     const files = collectFiles(repoRoot, 'full');
     const res = writeZipArchive(files, destZip, { overwrite });
 
-    // Synchronize legacy ACULYX.zip
-    const legacyZip = path.join(outputDir, 'ACULYX.zip');
-    if (fs.existsSync(legacyZip) && !overwrite) {
-      // If legacy already exists and not overwrite, skip copy
-    } else {
-      fs.copyFileSync(destZip, legacyZip);
-    }
+    // Synchronize legacy ACULYX.zip atomically from freshly written full archive
+    fs.copyFileSync(destZip, legacyZip);
     return res;
   }
 
