@@ -20,7 +20,7 @@
 
 ## Overview
 
-**ACULYX** is a local-first, privacy-preserving browser extension built on Manifest V3 for Chromium and Firefox. It passively inspects HTTP security headers, cookie attributes, and subresource API communications as you browse, computing a real-time security grade and actionable remediation guidance without sending any data off your machine.
+**ACULYX** is a local-first, privacy-preserving browser extension built on Manifest V3 for Chromium and Firefox. It passively inspects HTTP security headers, cookie attributes, and subresource API communications as you browse, computing a real-time security grade and actionable remediation guidance entirely locally in your browser. ACULYX operates with zero remote telemetry; the only outbound network communications are optional, user-confirmed active credential liveness checks sent directly to third-party vendor APIs, and user-initiated CLI audits via `--url`.
 
 Because ACULYX evaluates traffic within the browser's own authenticated network context, it audits internal endpoints, dashboards, and logged-in states without requiring credential storage, active crawling, or synthetic penetration probes.
 
@@ -67,9 +67,9 @@ ACULYX is built on strict fail-closed privacy invariants:
 6. **Policy-Gated Parameter Harvesting**: Query parameter harvesting (S1) is strictly gated behind the active URL capture policy and defined bug-bounty scope. If monitoring is paused/off, an origin is not granted, or a host is out-of-scope or unknown, parameter harvesting is completely halted.
 
 > [!NOTE]
-> **Network Activity & Data Boundaries**: The extension performs 100% local passive analysis and contains zero telemetry, analytics, or tracking code. Outbound network communication is restricted exclusively to two transparent paths:
-> 1. **Optional Credential Liveness Checks**: An off-by-default, researcher-initiated capability that tests candidate keys (GitHub, Stripe, Slack) only after explicit, two-step user confirmation; this check transmits the detected candidate credential directly to its corresponding official vendor API endpoint (`api.github.com`, `api.stripe.com`, `slack.com`) to determine validity and permissions. Zero telemetry or extraneous data is transmitted.
-> 2. **Standalone Developer CLI**: Outbound requests occur only when explicitly invoked with the `--url` flag to fetch headers for terminal security audits.
+> **Network Boundaries & Outbound Data Disclosure**: ACULYX contains zero telemetry, analytics, or tracking code. Outbound network traffic is strictly confined to two user-controlled paths:
+> 1. **Optional Credential Liveness Checks (Off by default)**: When a security researcher discovers an in-scope candidate API key (GitHub, Stripe, Slack) and explicitly turns on and confirms a verification probe, the extension transmits the candidate credential directly to that specific vendor's official endpoint (`api.github.com`, `api.stripe.com`, or `slack.com`) to determine validity and token permissions. No data is sent to ACULYX servers or any other party, and the raw token is held in memory for a maximum of 5 minutes before being discarded without persistence.
+> 2. **Standalone Developer CLI**: Outbound HTTP requests occur only when the developer explicitly invokes `npm run aculyx` with the `--url` flag to fetch headers for terminal security audits.
 >
 > Full architectural details, CSP directives, and consent flow models are documented in [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md).
 

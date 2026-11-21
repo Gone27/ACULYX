@@ -51,13 +51,13 @@ Every release package (`source`, `full`, `chrome`, `firefox`) built locally or i
 
 ### 3.2 Git Tagging & Release Verification
 - **Historical Git Tags**: Early tags (`v1.0.0`, `v2`, `v2.0.0`) are unsigned annotated milestone tags pointing to pre-v2.0.4 development commits prior to the modular architecture refactor.
-- **Current Version Tag**: Release `v2.0.5` corresponds to the validated commit on `main`.
-- **GPG Signing Policy**: When releasing official distributions, maintainers with verified GPG keys sign releases using:
+- **Current Version Tag**: Release `v2.0.5` corresponds to the validated commit on `main`. It is published as an authoritative annotated Git tag recording tagger metadata and release summary.
+- **GPG Signing Procedure**: When creating cryptographically signed tags, maintainers with their private GPG keys sign releases using:
   ```bash
   git tag -s -f v2.0.5 -m "Release v2.0.5"
   git verify-tag v2.0.5
   ```
-  Where GPG keys are unconfigured in automated or local CI environments, annotated tags preserve Git author provenance.
+  Where maintainer GPG keys are not imported into the automated build environment, annotated tags preserve Git author provenance and SHA-256 package manifests guarantee asset immutability.
 
 ### 3.3 Public Release Distribution Policy & Checksum Manifests
 When official release distributions are published to GitHub Releases (`https://github.com/Gone27/ACULYX/releases`):

@@ -7,7 +7,9 @@
 ## 1. Overview & Core Philosophy
 ACULYX was engineered from the ground up on a strict **zero-telemetry, zero-exfiltration** privacy architecture. We believe security auditing tools should never compromise the privacy of the person using them.
 
-All security analysis and evaluation is executed **100% locally inside your web browser**.
+All security analysis and evaluation is executed **locally inside your web browser**. Data leaves your device only in two explicit, user-directed scenarios:
+1. When you explicitly enable and confirm the optional credential liveness check to verify an in-scope credential directly with its issuing vendor (Section 5.1).
+2. When you run the developer CLI with the `--url` flag to inspect a target server's headers from your terminal (Section 5.2).
 
 ---
 
@@ -67,11 +69,11 @@ We do not sell, rent, monetize, or share your data with advertisers or third par
 
 Data leaves your browser only in two specific, transparent, and user-initiated scenarios:
 
-### 5.1 Optional credential liveness check (off by default)
-ACULYX can optionally check whether a credential it found on a page is still accepted by its vendor. This feature is **disabled by default** (`credentialLivenessEnabled: false`) and does nothing until you turn it on and approve each check yourself.
+### 5.1 Optional Third-Party Vendor Credential Check (Off by Default)
+When you discover a candidate API credential (such as a GitHub token, Stripe secret key, or Slack token) during a security assessment, ACULYX can optionally verify whether that credential is valid and live by transmitting it directly to the issuing vendor's official API. This feature is **strictly disabled by default** (`credentialLivenessEnabled: false`) and does nothing unless you explicitly enable it in settings and confirm the individual check.
 
-- **What is sent:** one request to one fixed vendor endpoint (`https://api.github.com/user`, `https://api.stripe.com/v1/balance` or `https://slack.com/api/auth.test`), transmitting the candidate credential in the `Authorization` header directly to the vendor that issued it to determine validity and permissions. This is the only case where a credential leaves your browser, and it is transmitted exclusively to that issuing vendor.
-- **When:** only after you (1) open the plan, (2) confirm the exact endpoint, (3) state that you are authorized to test this target under its program rules, and (4) grant the vendor host permission. The lead must be **in scope**. Unknown or out-of-scope leads are refused.
+- **What is sent & where:** One HTTPS request transmitting the candidate credential in the `Authorization` header directly to the issuing third-party vendor endpoint (`https://api.github.com/user`, `https://api.stripe.com/v1/balance` or `https://slack.com/api/auth.test`). This sends the discovered credential to that vendor solely to test validity and permissions. This is the only scenario where a credential leaves your browser, and it is sent exclusively to the issuing vendor.
+- **When:** Only after you (1) view the verification plan, (2) review and confirm the exact vendor endpoint, (3) confirm that you are authorized to test this target under its program rules, and (4) grant the browser host permission for that vendor API. The finding must be **in scope**. Unknown or out-of-scope targets are refused fail-closed.
 - **How:** one request per confirmation, no cookies, redirects not followed, no cache, no referrer, 5 second timeout, response read capped at 8 KiB.
 - **What is kept:** the raw credential lives only in memory for at most 5 minutes and is used once. It is never written to storage, logs, reports or exports. Only the result ("accepted", "rejected", "not checked") and a masked identity are kept.
 - **Your responsibility:** use a found credential only where the program's rules allow it. Many programs forbid it.

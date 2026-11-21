@@ -22,14 +22,14 @@ Please **do not** file public GitHub issues or post public comments for suspecte
 Security disclosures must be submitted through private channels:
 
 1. **Direct Security Email (Primary & Verified)**:
-   - Send details directly to the author and maintainer at: [`lucifersdg70@gmail.com`](mailto:lucifersdg70@gmail.com)
+   - Send details directly to the author and maintainer at: [`Dhyanpatel884@gmail.com`](mailto:Dhyanpatel884@gmail.com) (or alternate: [`lucifersdg70@gmail.com`](mailto:lucifersdg70@gmail.com))
    - Subject template: `[SECURITY] ACULYX Vulnerability Report - <Brief Component/Summary>`
    - This email channel is monitored directly by the author and is always active.
 
-2. **GitHub Private Vulnerability Reporting (When Enabled)**:
-   - If GitHub Private Vulnerability Reporting is active on the repository, you can submit an advisory at:
+2. **GitHub Private Vulnerability Reporting (Actively Enabled)**:
+   - GitHub Private Vulnerability Reporting is enabled for this repository. You can submit private vulnerability advisories directly to the maintainer at:
      👉 [New Security Advisory](https://github.com/Gone27/ACULYX/security/advisories/new)
-   - *Note for repository administrators*: Enable this feature in repository settings under **Settings > Code security and analysis > Private vulnerability reporting > Enable**. If the link above returns an error or is disabled, please use the direct email channel above.
+   - Advisories submitted through this route are encrypted and visible only to the repository maintainer until a fix is released.
 
 ### Report Guidelines
 
