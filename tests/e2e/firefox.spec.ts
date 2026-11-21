@@ -19,64 +19,82 @@ const firefoxDistPath = path.resolve(__dirname, '../../dist-firefox');
 
 /**
  * Connects to Firefox Remote Debugging Protocol (RDP) server and installs the temporary extension.
+ * Retries connection with backoff to accommodate browser debugger server initialization in CI.
  */
 function installFirefoxAddon(port: number, addonPath: string): Promise<{ id: string }> {
   return new Promise((resolve, reject) => {
-    const socket = net.connect({ port, host: '127.0.0.1' });
+    let attempts = 0;
+    const maxAttempts = 30;
+    let socket: net.Socket | null = null;
     let buffer = '';
 
-    function send(obj: Record<string, unknown>) {
-      const msg = JSON.stringify(obj);
-      socket.write(`${Buffer.byteLength(msg)}:${msg}`);
+    function tryConnect() {
+      attempts++;
+      socket = net.connect({ port, host: '127.0.0.1' });
+      buffer = '';
+
+      function send(obj: Record<string, unknown>) {
+        const msg = JSON.stringify(obj);
+        socket?.write(`${Buffer.byteLength(msg)}:${msg}`);
+      }
+
+      socket.on('connect', () => {
+        send({ to: 'root', type: 'getRoot' });
+      });
+
+      socket.on('data', (chunk) => {
+        buffer += chunk.toString();
+        while (true) {
+          const colonIdx = buffer.indexOf(':');
+          if (colonIdx === -1) break;
+          const len = parseInt(buffer.slice(0, colonIdx), 10);
+          if (isNaN(len)) {
+            socket?.destroy();
+            return reject(new Error('Invalid RDP length prefix'));
+          }
+          if (buffer.length < colonIdx + 1 + len) break;
+          const jsonStr = buffer.slice(colonIdx + 1, colonIdx + 1 + len);
+          buffer = buffer.slice(colonIdx + 1 + len);
+
+          try {
+            const packet = JSON.parse(jsonStr) as {
+              addonsActor?: string;
+              addon?: { id: string };
+              error?: string;
+              message?: string;
+            };
+
+            if (typeof packet.addonsActor === 'string' && packet.addonsActor.length > 0) {
+              send({
+                to: packet.addonsActor,
+                type: 'installTemporaryAddon',
+                addonPath: path.resolve(addonPath),
+              });
+            } else if (packet.addon !== undefined) {
+              socket?.end();
+              return resolve(packet.addon);
+            } else if (typeof packet.error === 'string' && packet.error.length > 0) {
+              socket?.end();
+              return reject(new Error(`RDP Error: ${packet.error} - ${packet.message ?? ''}`));
+            }
+          } catch (e) {
+            socket?.destroy();
+            return reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        }
+      });
+
+      socket.on('error', (err) => {
+        socket?.destroy();
+        if (attempts < maxAttempts) {
+          setTimeout(tryConnect, 100);
+        } else {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      });
     }
 
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString();
-      while (true) {
-        const colonIdx = buffer.indexOf(':');
-        if (colonIdx === -1) break;
-        const len = parseInt(buffer.slice(0, colonIdx), 10);
-        if (isNaN(len)) {
-          socket.destroy();
-          return reject(new Error('Invalid RDP length prefix'));
-        }
-        if (buffer.length < colonIdx + 1 + len) break;
-        const jsonStr = buffer.slice(colonIdx + 1, colonIdx + 1 + len);
-        buffer = buffer.slice(colonIdx + 1 + len);
-
-        try {
-          const packet = JSON.parse(jsonStr) as {
-            addonsActor?: string;
-            addon?: { id: string };
-            error?: string;
-            message?: string;
-          };
-
-          if (typeof packet.addonsActor === 'string' && packet.addonsActor.length > 0) {
-            send({
-              to: packet.addonsActor,
-              type: 'installTemporaryAddon',
-              addonPath: path.resolve(addonPath),
-            });
-          } else if (packet.addon !== undefined) {
-            socket.end();
-            return resolve(packet.addon);
-          } else if (typeof packet.error === 'string' && packet.error.length > 0) {
-            socket.end();
-            return reject(new Error(`RDP Error: ${packet.error} - ${packet.message ?? ''}`));
-          }
-        } catch (e) {
-          socket.destroy();
-          return reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      }
-    });
-
-    socket.on('error', (err) => {
-      reject(err instanceof Error ? err : new Error(String(err)));
-    });
-
-    send({ to: 'root', type: 'getRoot' });
+    tryConnect();
   });
 }
 
@@ -86,7 +104,7 @@ test.describe('Firefox Runtime Extension E2E', () => {
     const { server, baseUrl } = await startServer(3510, '127.0.0.1');
 
     const browser = await firefox.launch({
-      headless: false,
+      headless: true,
       args: ['-start-debugger-server', String(debugPort)],
       firefoxUserPrefs: {
         'devtools.debugger.remote-enabled': true,
