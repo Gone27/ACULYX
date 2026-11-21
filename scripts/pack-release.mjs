@@ -259,8 +259,22 @@ export function packTarget(target, outputDir, options = {}) {
     const files = collectFiles(repoRoot, 'full');
     const res = writeZipArchive(files, destZip, { overwrite });
 
-    // Synchronize legacy ACULYX.zip atomically from freshly written full archive
-    fs.copyFileSync(destZip, legacyZip);
+    // Synchronize legacy ACULYX.zip atomically via temp file + rename on the same filesystem
+    const tempLegacyZip = path.join(
+      outputDir,
+      `.ACULYX.zip.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`
+    );
+    fs.copyFileSync(destZip, tempLegacyZip);
+    fs.renameSync(tempLegacyZip, legacyZip);
+
+    // Verify byte-level identity between ACULYX-full.zip and legacy ACULYX.zip
+    const destBuf = fs.readFileSync(destZip);
+    const legacyBuf = fs.readFileSync(legacyZip);
+    if (!destBuf.equals(legacyBuf)) {
+      throw new Error(
+        `Atomic legacy synchronization failed: byte mismatch between "${destZip}" and "${legacyZip}".`
+      );
+    }
     return res;
   }
 

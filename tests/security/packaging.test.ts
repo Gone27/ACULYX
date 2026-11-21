@@ -640,10 +640,11 @@ describe('Release ZIP Packaging & Verifier', () => {
           expect(fs.existsSync(path.join(outDir, 'ACULYX-full.zip'))).toBe(true);
           expect(fs.existsSync(path.join(outDir, 'ACULYX.zip'))).toBe(true);
 
-          // Assert ACULYX.zip matches ACULYX-full.zip in length
-          const fullStat = fs.statSync(path.join(outDir, 'ACULYX-full.zip'));
-          const legacyStat = fs.statSync(path.join(outDir, 'ACULYX.zip'));
-          expect(legacyStat.size).toBe(fullStat.size);
+          // Assert ACULYX.zip matches ACULYX-full.zip in length and byte-level contents
+          const fullBuf = fs.readFileSync(path.join(outDir, 'ACULYX-full.zip'));
+          const legacyBuf = fs.readFileSync(path.join(outDir, 'ACULYX.zip'));
+          expect(legacyBuf.length).toBe(fullBuf.length);
+          expect(legacyBuf.equals(fullBuf)).toBe(true);
 
           // Run full aggregate verification with smoke extraction
           const aggRes = verifyAllArchives(outDir, { smokeExtract: true });

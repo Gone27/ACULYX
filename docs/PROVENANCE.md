@@ -44,18 +44,26 @@ Every release package (`source`, `full`, `chrome`, `firefox`) built locally or i
   - Strict ESLint checks (`npm run lint` with `--max-warnings=0`)
   - Unit, scope, fuzz, and integration suites (`npm test`)
   - Post-build artifact security & syntax validation across all targets (`npm run test:artifacts`)
-  - Chromium browser extension end-to-end integration (`npm run test:e2e`)
+  - Official Mozilla Firefox AMO linter (`npm run lint:amo` via `web-ext lint`)
+  - Chromium and Firefox browser extension runtime end-to-end integration (`npm run test:e2e`)
   - Zero-vulnerability dependency audit (`npm audit --audit-level=low`)
   - Aggregate release package verification across all 4 targets (`npm run verify:pack`)
 
-### 3.2 Git Tagging & Release History
+### 3.2 Git Tagging & Release Verification
 - **Historical Git Tags**: Early tags (`v1.0.0`, `v2`, `v2.0.0`) are unsigned annotated milestone tags pointing to pre-v2.0.4 development commits prior to the modular architecture refactor.
-- **Current Version Tag**: Release `v2.0.5` corresponds to the validated commit on `main`. Tags created in this repository are annotated Git tags. Where cryptographic signing is required by organizational policy, maintainers sign releases using verified GPG keys (`git tag -s v<version>`).
+- **Current Version Tag**: Release `v2.0.5` corresponds to the validated commit on `main`.
+- **GPG Signing Policy**: When releasing official distributions, maintainers with verified GPG keys sign releases using:
+  ```bash
+  git tag -s -f v2.0.5 -m "Release v2.0.5"
+  git verify-tag v2.0.5
+  ```
+  Where GPG keys are unconfigured in automated or local CI environments, annotated tags preserve Git author provenance.
 
 ### 3.3 Public Release Distribution Policy & Checksum Manifests
 When official release distributions are published to GitHub Releases (`https://github.com/Gone27/ACULYX/releases`):
 1. **Tagged Commits**: Official releases correspond to version tags (e.g. `v2.0.5`) on `main`.
-2. **Published `SHA256SUMS` Manifest**: Packaging (`npm run pack`) automatically outputs a cryptographic `SHA256SUMS` file alongside the archives in the release directory. Researchers and auditors can independently verify all published package checksums using:
+2. **Release Assets & Checksums**: The official distribution consists of the 4 release archives (`ACULYX-source.zip`, `ACULYX-full.zip`, `ACULYX-chrome.zip`, `ACULYX-firefox.zip`), legacy alias `ACULYX.zip`, and the generated `SHA256SUMS` manifest. Packaging (`npm run pack`) automatically writes and validates this manifest.
+3. **Independent Verification**: Researchers and auditors can independently verify all published package checksums using:
    ```bash
    sha256sum -c SHA256SUMS
    ```

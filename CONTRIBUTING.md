@@ -23,7 +23,8 @@ Thank you for your interest in contributing to ACULYX! We welcome contributions 
 | `npm run lint` | Runs ESLint across `src/` and `tests/` (enforces zero warnings) |
 | `npm test` | Executes full Vitest unit, scope, fuzz, and integration suites |
 | `npm run test:artifacts` | Validates compiled syntax and effective manifest security bounds |
-| `npm run test:e2e` | Runs Playwright Chromium end-to-end browser runtime tests (Firefox covered via build & package verification) |
+| `npm run lint:amo` | Runs official Mozilla web-ext linter against Firefox distribution |
+| `npm run test:e2e` | Runs Playwright Chromium and Firefox end-to-end browser runtime tests |
 | `npm run pack` | Packages all 4 release ZIP archives into dedicated output directories |
 | `npm run verify:pack` | Validates RFC 1951 entry paths, manifest invariants, and smoke extractions |
 
@@ -35,7 +36,7 @@ All pull requests must pass every automated gate before merging:
 
 1. **TypeScript Compilation**: Zero compiler errors with `strict` enabled (`npm run typecheck`).
 2. **ESLint**: Zero errors and zero warnings (`npm run lint`).
-3. **Automated Testing**: 100% pass rate across Vitest and Playwright suites (`npm test`, `npm run test:artifacts`, `npm run test:e2e`).
+3. **Automated Testing & Linting**: 100% pass rate across Vitest, Playwright, and web-ext suites (`npm test`, `npm run test:artifacts`, `npm run lint:amo`, `npm run test:e2e`).
 4. **Dependency Audit**: Zero vulnerabilities across all severities (`npm audit --audit-level=low`).
 5. **Release Integrity**: All 4 release archives package and verify cleanly (`npm run pack`, `npm run verify:pack`).
 6. **Privacy Invariants**:

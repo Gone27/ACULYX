@@ -27,7 +27,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 manifest.browser_specific_settings = {
   gecko: {
     id: "aculyx@dhyanpatel.com",
-    strict_min_version: "140.0",
+    strict_min_version: "142.0",
     data_collection_permissions: {
       required: ["none"]
     }

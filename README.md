@@ -60,7 +60,7 @@ Because ACULYX evaluates traffic within the browser's own authenticated network 
 ACULYX is built on strict fail-closed privacy invariants:
 
 1. **No Sensitive Value Storage**: Extension code never reads `cookie.value`, authorization credentials, bearer tokens, or URL query parameters. All query parameters (`?`) and fragments (`#`) are stripped before URLs enter session state, storage, or exports.
-2. **Strict Network Isolation**: Extension pages declare a Content Security Policy whose `connect-src` allows only `'self'` and three vendor APIs (`api.github.com`, `api.stripe.com`, `slack.com`). Those are used only by the optional, off-by-default credential liveness check after explicit user confirmation. There is no telemetry and no other outbound destination.
+2. **Strict Network Isolation**: Extension pages declare a Content Security Policy whose `connect-src` allows only `'self'` and three vendor APIs (`api.github.com`, `api.stripe.com`, `slack.com`). Those are used only by the optional, off-by-default credential liveness check after explicit user confirmation, which transmits the detected candidate credential directly to its corresponding vendor endpoint to verify validity and permissions. There is no telemetry and no other outbound destination.
 3. **100% Local Processing**: All evaluation, scoring, D3 graphing, and report generation execute locally on your device.
 4. **Isolated Incognito Handling**: Incognito and private browsing events never touch persistent storage (`localStorage`), history records, or the attack-surface graph.
 5. **No Telemetry**: Zero analytics, zero crash reporting, zero tracking pixels, zero remote script loading.
@@ -68,7 +68,7 @@ ACULYX is built on strict fail-closed privacy invariants:
 
 > [!NOTE]
 > **Network Activity & Data Boundaries**: The extension performs 100% local passive analysis and contains zero telemetry, analytics, or tracking code. Outbound network communication is restricted exclusively to two transparent paths:
-> 1. **Optional Credential Liveness Checks**: An off-by-default, researcher-initiated capability that tests candidate keys (GitHub, Stripe, Slack) only after explicit, two-step user confirmation, sending bounded requests directly to official vendor endpoints.
+> 1. **Optional Credential Liveness Checks**: An off-by-default, researcher-initiated capability that tests candidate keys (GitHub, Stripe, Slack) only after explicit, two-step user confirmation; this check transmits the detected candidate credential directly to its corresponding official vendor API endpoint (`api.github.com`, `api.stripe.com`, `slack.com`) to determine validity and permissions. Zero telemetry or extraneous data is transmitted.
 > 2. **Standalone Developer CLI**: Outbound requests occur only when explicitly invoked with the `--url` flag to fetch headers for terminal security audits.
 >
 > Full architectural details, CSP directives, and consent flow models are documented in [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md).
@@ -166,22 +166,22 @@ npm test
 # 4. Built Artifact Security & Syntax Checks (scans dist/, dist-firefox/, and dist-hunter/)
 npm run test:artifacts
 
-# 5. Playwright End-to-End Tests (Chromium browser runtime)
-# Note: Browser-runtime E2E tests run exclusively in Chromium because Playwright only supports
-# loading unpacked Manifest V3 extensions with service workers in Chromium persistent contexts.
-# Firefox validation covers build compilation (dist-firefox/), manifest schema & permission assertions
-# (npm run test:artifacts), and release package verification (npm run verify:pack); automated
-# browser-runtime UI interaction and web-ext lint are not executed.
+# 5. Firefox AMO Web-Ext Linter (official Mozilla add-on validator)
+npm run lint:amo
+
+# 6. Playwright End-to-End Tests (Chromium & Firefox browser runtimes)
+# Exercises unpacked MV3 extension loading in Chromium persistent contexts and live
+# temporary add-on execution in Firefox via Remote Debugging Protocol (RDP).
 npm run test:e2e
 
-# 6. Dependency Audit (zero vulnerabilities at low level)
+# 7. Dependency Audit (zero vulnerabilities at low level)
 npm audit --audit-level=low
 
-# 7. Build All Release Targets
+# 8. Build All Release Targets
 npm run build:all       # Builds Chrome (dist/), Firefox (dist-firefox/), and Hunter (dist-hunter/)
 
-# 8. Package and Verify Release Artifacts
-npm run pack            # Generates ACULYX-full.zip, ACULYX-source.zip, ACULYX-chrome.zip, and ACULYX-firefox.zip
+# 9. Package and Verify Release Artifacts
+npm run pack            # Generates ACULYX-full.zip, ACULYX-source.zip, ACULYX-chrome.zip, and ACULYX-firefox.zip + SHA256SUMS
 npm run verify:pack     # Verifies all 4 packages satisfy RFC 1951 entry paths, manifest invariants, and clean smoke extractions
 ```
 

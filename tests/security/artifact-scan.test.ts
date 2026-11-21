@@ -56,6 +56,25 @@ const FIREFOX_OPTIONAL_PERMISSIONS = [
   'https://slack.com/*',
 ].sort();
 
+/**
+ * Shared rigorous CSP assertion applied identically to source and compiled manifests
+ */
+function assertStandardCsp(csp: string | undefined): void {
+  expect(csp).toBeDefined();
+  expect(csp).toContain("script-src 'self'");
+  expect(csp).toContain("object-src 'none'");
+
+  // Explicit three-origin connect-src allowlist; never broad https: or wildcard
+  expect(csp).toContain("connect-src 'self' https://api.github.com https://api.stripe.com https://slack.com");
+  expect(csp).not.toContain("connect-src https:");
+  expect(csp).not.toContain("connect-src *");
+  expect(csp).not.toContain("http:");
+
+  // Assert no remote code or CDN script references
+  expect(csp).not.toMatch(/script-src [^;]*https:\/\//);
+  expect(csp).not.toContain("'unsafe-eval'");
+}
+
 describe('Artifact Scan', () => {
   const readManifest = (filename: string): Manifest => {
     const filePath = path.join(__dirname, '../../', filename);
@@ -79,21 +98,7 @@ describe('Artifact Scan', () => {
       });
 
       it('enforces secure CSP with provider allowlist and no broad permissions', () => {
-        const csp = manifest.content_security_policy?.extension_pages;
-        expect(csp).toBeDefined();
-
-        expect(csp).toContain("script-src 'self'");
-        expect(csp).toContain("object-src 'none'");
-
-        // Explicit three-origin connect-src allowlist; never broad https: or wildcard
-        expect(csp).toContain("connect-src 'self' https://api.github.com https://api.stripe.com https://slack.com");
-        expect(csp).not.toContain("connect-src https:");
-        expect(csp).not.toContain("connect-src *");
-        expect(csp).not.toContain("http:");
-
-        // Assert no remote code or CDN script references
-        expect(csp).not.toMatch(/script-src [^;]*https:\/\//);
-        expect(csp).not.toContain("'unsafe-eval'");
+        assertStandardCsp(manifest.content_security_policy?.extension_pages);
       });
 
       it('enforces exact required permission allowlist', () => {
@@ -187,6 +192,8 @@ describe('Artifact Scan', () => {
           // Check for specific dummy secrets from tests leaking into production build
           expect(content).not.toContain('SECRET_CANARY_12345');
           expect(content).not.toContain('SECRET_CANARY_67890');
+          expect(content).not.toContain('CANARY_SECRET');
+          expect(content).not.toContain('TEST_API_TOKEN');
 
           // Private key pattern check
           expect(content).not.toMatch(/-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/);
@@ -196,6 +203,7 @@ describe('Artifact Scan', () => {
           expect(content).not.toMatch(/\bsk_live_[0-9a-zA-Z]{24,}\b/);
           expect(content).not.toMatch(/\b(?:ghp_[0-9a-zA-Z]{36}|github_pat_[0-9a-zA-Z_]{82})\b/);
           expect(content).not.toMatch(/\bxox[baprs]-[0-9a-zA-Z]{10,}\b/);
+          expect(content).not.toMatch(/\bAIza[0-9A-Za-z-_]{35}\b/);
 
           // Zero telemetry or analytics client tracking calls
           expect(content).not.toMatch(/\b(?:gtag|ga)\s*\(\s*['"](?:event|send|config)/i);
@@ -253,22 +261,22 @@ describe('Artifact Scan', () => {
       const firefoxManifest = JSON.parse(fs.readFileSync(path.join(firefoxDistPath, 'manifest.json'), 'utf-8')) as Manifest;
       const hunterManifest = JSON.parse(fs.readFileSync(path.join(hunterDistPath, 'manifest.json'), 'utf-8')) as Manifest;
 
-      // 1. Standard Chrome manifest exact permissions & invariants
+      // 1. Standard Chrome manifest exact permissions & rigorous CSP assertions
       expect((chromeManifest.permissions ?? []).slice().sort()).toEqual(CHROME_REQUIRED_PERMISSIONS);
       expect(chromeManifest.host_permissions ?? []).toHaveLength(0);
       expect((chromeManifest.optional_host_permissions ?? []).slice().sort()).toEqual(CHROME_OPTIONAL_HOSTS);
       expect(chromeManifest.optional_permissions ?? []).toHaveLength(0);
-      expect(chromeManifest.content_security_policy?.extension_pages).not.toContain('http:');
-      expect(chromeManifest.content_security_policy?.extension_pages).not.toContain('connect-src *');
+      assertStandardCsp(chromeManifest.content_security_policy?.extension_pages);
 
-      // 2. Standard Firefox manifest exact permissions & invariants
+      // 2. Standard Firefox manifest exact permissions & rigorous CSP assertions
       expect((firefoxManifest.permissions ?? []).slice().sort()).toEqual(FIREFOX_REQUIRED_PERMISSIONS);
       expect(firefoxManifest.host_permissions ?? []).toHaveLength(0);
       expect((firefoxManifest.optional_permissions ?? []).slice().sort()).toEqual(FIREFOX_OPTIONAL_PERMISSIONS);
       expect(firefoxManifest.optional_host_permissions ?? []).toHaveLength(0);
       expect(firefoxManifest.permissions ?? []).not.toContain('sidePanel');
-      expect(firefoxManifest.content_security_policy?.extension_pages).not.toContain('http:');
+      assertStandardCsp(firefoxManifest.content_security_policy?.extension_pages);
       expect(firefoxManifest.browser_specific_settings?.gecko?.id).toBe('aculyx@dhyanpatel.com');
+      expect(firefoxManifest.browser_specific_settings?.gecko?.strict_min_version).toBe('142.0');
 
       // 3. Hunter edition: broad host permissions and relaxed connect-src for active probing
       expect((hunterManifest.permissions ?? []).slice().sort()).toEqual(CHROME_REQUIRED_PERMISSIONS);
@@ -278,7 +286,9 @@ describe('Artifact Scan', () => {
         'https://api.stripe.com/*',
         'https://slack.com/*',
       ]);
-      expect(hunterManifest.content_security_policy?.extension_pages).toContain("connect-src 'self' http: https:");
+      expect(hunterManifest.content_security_policy?.extension_pages).toBe(
+        "script-src 'self'; object-src 'none'; connect-src 'self' http: https:"
+      );
     });
   });
 });
