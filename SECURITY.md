@@ -15,14 +15,21 @@ The latest released version receives active security updates and vulnerability p
 
 The ACULYX project takes security and privacy vulnerabilities seriously. If you discover a potential vulnerability in ACULYX, please follow responsible disclosure guidelines.
 
-### Reporting Channel
+### Reporting Channels
 
 Please **do not** file public GitHub issues or post public comments for suspected security vulnerabilities.
 
-Instead, submit reports privately through **GitHub Private Vulnerability Reporting**:
-👉 [New Security Advisory](https://github.com/Gone27/ACULYX/security/advisories/new)
+Security disclosures must be submitted through private channels:
 
-If private advisory submission is unavailable, contact the author directly via the email listed in repository metadata.
+1. **Direct Security Email (Primary & Verified)**:
+   - Send details directly to the author and maintainer at: [`lucifersdg70@gmail.com`](mailto:lucifersdg70@gmail.com)
+   - Subject template: `[SECURITY] ACULYX Vulnerability Report - <Brief Component/Summary>`
+   - This email channel is monitored directly by the author and is always active.
+
+2. **GitHub Private Vulnerability Reporting (When Enabled)**:
+   - If GitHub Private Vulnerability Reporting is active on the repository, you can submit an advisory at:
+     👉 [New Security Advisory](https://github.com/Gone27/ACULYX/security/advisories/new)
+   - *Note for repository administrators*: Enable this feature in repository settings under **Settings > Code security and analysis > Private vulnerability reporting > Enable**. If the link above returns an error or is disabled, please use the direct email channel above.
 
 ### Report Guidelines
 

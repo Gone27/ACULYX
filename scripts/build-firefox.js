@@ -44,6 +44,7 @@ if (manifest.background) {
 
 if (manifest.optional_host_permissions && !manifest.optional_permissions) {
   manifest.optional_permissions = [...manifest.optional_host_permissions];
+  delete manifest.optional_host_permissions;
 }
 
 delete manifest.minimum_chrome_version;

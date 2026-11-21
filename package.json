@@ -24,7 +24,7 @@
     "test:e2e": "vite build && playwright test",
     "aculyx": "tsx src/cli.ts",
     "seccheck": "tsx src/cli.ts",
-    "lint": "eslint src tests",
+    "lint": "eslint src tests --max-warnings=0",
     "lint:fix": "eslint src tests --fix"
   },
   "dependencies": {

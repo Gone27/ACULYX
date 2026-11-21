@@ -21,3 +21,6 @@ export function packTarget(
   outputDir: string,
   options?: { overwrite?: boolean }
 ): PackResult;
+export function generateChecksumManifest(
+  outputDir: string
+): { manifestPath: string; lines: string[] } | null;

@@ -35,6 +35,11 @@ if (manifest.content_security_policy) {
 
 // Grant host permissions so background fetch can probe target endpoints without CORS blocking
 manifest.host_permissions = ['<all_urls>'];
+if (manifest.optional_host_permissions) {
+  manifest.optional_host_permissions = manifest.optional_host_permissions.filter(
+    (perm) => perm !== '<all_urls>'
+  );
+}
 
 // 4. Save adjusted manifest
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');

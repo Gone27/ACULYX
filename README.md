@@ -158,19 +158,20 @@ ACULYX enforces a strict zero-tolerance gate policy:
 npm run typecheck
 
 # 2. Strict Lint (zero warnings, zero errors)
-npm run lint -- --max-warnings=0
+npm run lint
 
 # 3. Unit, Scope & Fuzz Tests
 npm test
 
-# 4. Built Artifact Security & Syntax Checks (scans dist/ chunks and content scripts)
+# 4. Built Artifact Security & Syntax Checks (scans dist/, dist-firefox/, and dist-hunter/)
 npm run test:artifacts
 
 # 5. Playwright End-to-End Tests (Chromium browser runtime)
 # Note: Browser-runtime E2E tests run exclusively in Chromium because Playwright only supports
 # loading unpacked Manifest V3 extensions with service workers in Chromium persistent contexts.
-# Firefox validation is build-, package-, and AMO-lint-level coverage (web-ext lint, manifest checks,
-# and zip verification); it does NOT include automated browser-runtime UI interaction.
+# Firefox validation covers build compilation (dist-firefox/), manifest schema & permission assertions
+# (npm run test:artifacts), and release package verification (npm run verify:pack); automated
+# browser-runtime UI interaction and web-ext lint are not executed.
 npm run test:e2e
 
 # 6. Dependency Audit (zero vulnerabilities at low level)

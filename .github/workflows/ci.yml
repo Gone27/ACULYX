@@ -29,13 +29,13 @@ jobs:
         run: npm ci
 
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=low
 
       - name: Type check
         run: npx tsc --noEmit
 
       - name: Lint
-        run: npx eslint src/ tests/
+        run: npm run lint
 
       - name: Unit, scope, and fuzz tests
         run: npx vitest run

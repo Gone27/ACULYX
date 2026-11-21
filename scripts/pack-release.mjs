@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -289,6 +290,34 @@ export function packTarget(target, outputDir, options = {}) {
 }
 
 /**
+ * Generates SHA256SUMS manifest file for generated release archives
+ */
+export function generateChecksumManifest(outputDir) {
+  const archives = [
+    'ACULYX-source.zip',
+    'ACULYX-full.zip',
+    'ACULYX-chrome.zip',
+    'ACULYX-firefox.zip',
+    'ACULYX.zip',
+  ];
+  const lines = [];
+  for (const name of archives) {
+    const fullPath = path.join(outputDir, name);
+    if (fs.existsSync(fullPath)) {
+      const data = fs.readFileSync(fullPath);
+      const hash = crypto.createHash('sha256').update(data).digest('hex');
+      lines.push(`${hash}  ${name}`);
+    }
+  }
+  if (lines.length > 0) {
+    const manifestPath = path.join(outputDir, 'SHA256SUMS');
+    fs.writeFileSync(manifestPath, lines.join('\n') + '\n', 'utf8');
+    return { manifestPath, lines };
+  }
+  return null;
+}
+
+/**
  * CLI runner
  */
 const isCli = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
@@ -328,6 +357,13 @@ if (isCli) {
     } catch (err) {
       console.error(`Packaging failed for target "${t}": ${err.message}`);
       process.exit(1);
+    }
+  }
+
+  if (target === 'all') {
+    const checksums = generateChecksumManifest(outputDir);
+    if (checksums) {
+      console.log(`✓ Generated ${path.basename(checksums.manifestPath)} with ${checksums.lines.length} archive checksums`);
     }
   }
 }

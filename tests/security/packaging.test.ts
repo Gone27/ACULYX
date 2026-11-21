@@ -14,6 +14,7 @@ import {
   writeZipArchive,
   packTarget,
   isExcludedFile,
+  generateChecksumManifest,
 } from '../../scripts/pack-release.mjs';
 
 function createMockZipBuffer(files: { name: string; content: string | Buffer; method?: number }[]): Buffer {
@@ -648,6 +649,14 @@ describe('Release ZIP Packaging & Verifier', () => {
           const aggRes = verifyAllArchives(outDir, { smokeExtract: true });
           expect(aggRes.success).toBe(true);
           expect(aggRes.errors).toHaveLength(0);
+
+          // Generate and verify SHA256SUMS manifest
+          const checksums = generateChecksumManifest(outDir);
+          expect(checksums).not.toBeNull();
+          if (checksums) {
+            expect(checksums.lines).toHaveLength(5);
+          }
+          expect(fs.existsSync(path.join(outDir, 'SHA256SUMS'))).toBe(true);
         } else {
           // On clean checkouts before build:all, assert packTarget fails closed with descriptive message
           expect(() => packTarget('chrome', outDir, { overwrite: true })).toThrow(/Run "npm run build"/);
