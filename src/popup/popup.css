@@ -1,6 +1,6 @@
 /* =============================================================
    ACULYX Popup — Dark-themed security checker popup styles
-   Width: fixed 350px | Max-height: 600px with scroll
+   Width: fluid up to 380px | Max-height: 600px with scroll
    ============================================================= */
 
 /* ── CSS variables ─────────────────────────────────────────── */
@@ -70,13 +70,13 @@
 }
 
 html {
-  width: 380px;
-  min-width: 380px;
+  width: min(380px, 100vw);
+  min-width: 320px;
 }
 
 body {
-  width: 380px;
-  min-width: 380px;
+  width: min(380px, 100vw);
+  min-width: 320px;
   max-width: 380px;
   min-height: 520px;
   max-height: 600px;
@@ -123,8 +123,19 @@ body {
 .popup-title {
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sc-text);
+  /* violet accent echoes the wordmark katana; trailing dot is decorative */
+}
+
+.popup-title::after {
+  content: '·';
+  margin-left: 2px;
+  color: var(--sc-violet);
+  font-size: 18px;
+  line-height: 0;
+  vertical-align: -1px;
 }
 
 .settings-icon {
