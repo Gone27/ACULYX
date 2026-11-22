@@ -71,9 +71,10 @@ body {
 
 /* ── Header ── */
 .sidepanel-header {
-  padding: 12px 16px;
-  background: var(--sc-sidepanel-header-bg);
-  border-bottom: 1px solid var(--border);
+  padding: 11px 16px;
+  background: linear-gradient(180deg, #0d1522 0%, #070c14 100%);
+  border-bottom: 1px solid transparent;
+  border-image: var(--sc-border-glint) 1;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -85,9 +86,17 @@ body {
   gap: 8px;
 }
 
+.brand-katana-icon {
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 5px rgba(124, 111, 205, 0.45));
+}
+
 .sidepanel-title {
-  font-weight: 700;
-  font-size: 14px;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  font-family: var(--sc-font-mono, monospace);
+  color: #f0f6fc;
 }
 
 .tier-badge {

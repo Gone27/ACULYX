@@ -1,10 +1,10 @@
 :root {
   /* ─── Surfaces ─────────────────────────────────────────── */
-  --sc-bg:          #09111c;  /* deepest ink */
-  --sc-bg-card:     #0e1825;  /* card surface */
-  --sc-bg-raised:   #152030;  /* raised panel */
-  --sc-bg-hover:    #1c2d41;  /* hover/active state */
-  --sc-bg-input:    #111e2c;  /* form inputs */
+  --sc-bg:          #070c14;  /* deepest ink */
+  --sc-bg-card:     #0c1420;  /* card surface */
+  --sc-bg-raised:   #121c2c;  /* raised panel */
+  --sc-bg-hover:    #18263a;  /* hover/active state */
+  --sc-bg-input:    #0a101a;  /* form inputs */
 
   /* ─── Accent ────────────────────────────────────────────── */
   --sc-accent:      #2dd4c4;  /* primary teal/cyan accent */
@@ -14,9 +14,9 @@
   --sc-magenta:     #b84592;  /* brand highlight — wordmark echo, never severity */
 
   /* ─── Borders ───────────────────────────────────────────── */
-  --sc-border:      #1e3149;  /* subtle borders */
+  --sc-border:      #182335;  /* subtle borders */
   --sc-border-focus:#2dd4c4;  /* focus ring = accent */
-  --sc-border-glint: linear-gradient(90deg, rgba(124, 111, 205, 0.4) 0%, rgba(45, 212, 196, 0.2) 100%); /* edge glint divider */
+  --sc-border-glint: linear-gradient(90deg, rgba(184, 69, 146, 0.5) 0%, rgba(124, 111, 205, 0.7) 35%, rgba(45, 212, 196, 0.6) 70%, transparent 100%); /* edge glint divider */
 
   /* ─── Typography ────────────────────────────────────────── */
   --sc-text:        #dce8f0;  /* primary text */
