@@ -1342,3 +1342,27 @@ body {
 .dim-assessment-informational { color: var(--sc-info); }
 .dim-assessment-false_positive { color: #f85149; }
 
+/* ── Accessible Focus & Reduced-Motion Polish ── */
+.nav-tab:focus-visible {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: -2px;
+}
+
+.panel-action-btn:focus-visible,
+.panel-select:focus-visible,
+.icon-btn:focus-visible {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-tab,
+  .lead-card,
+  .panel-action-btn,
+  .icon-btn,
+  .cmd-palette-item {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+

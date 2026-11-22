@@ -167,6 +167,20 @@ test.describe('Sidepanel Lead Verdict UI Regression E2E', () => {
       await expect(registeredDims).toContainText('Evidence: observed');
       await expect(registeredDims).toContainText('Scope: in-scope');
 
+      // 3. Verify sidepanel nav tabs have proper roles and keyboard focus attributes
+      const graphTab = sidepanelPage.locator('#tab-graph');
+      const leadsTab = sidepanelPage.locator('#tab-leads');
+      await expect(graphTab).toHaveAttribute('role', 'tab');
+      await expect(leadsTab).toHaveAttribute('role', 'tab');
+      await expect(leadsTab).toHaveAttribute('aria-selected', 'true');
+      await expect(graphTab).toHaveAttribute('aria-selected', 'false');
+
+      // Verify no horizontal overflow in sidepanel body
+      const sidepanelNoHScroll = await sidepanelPage.evaluate(() => {
+        return document.body.scrollWidth <= document.body.clientWidth + 1;
+      });
+      expect(sidepanelNoHScroll).toBe(true);
+
       await context.close();
     } finally {
       if (fs.existsSync(testExtDir)) {
