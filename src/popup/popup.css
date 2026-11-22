@@ -1675,6 +1675,11 @@ summary:focus-visible {
   color: var(--text, #e6edf3);
 }
 
+.nav-segment:focus-visible {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 2px;
+}
+
 .nav-segment.active#tab-btn-hygiene {
   background: rgba(32, 178, 170, 0.15);
   color: #20b2aa;
@@ -2031,4 +2036,27 @@ summary:focus-visible {
   background: var(--sc-violet);
   border-color: var(--sc-violet);
   color: #fff;
+}
+
+/* ── Accessible Focus & Reduced-Motion Polish ── */
+.lead-btn:focus-visible {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-header,
+  .nav-segment,
+  .grade-badge,
+  .radar-sweep-group,
+  .radar-sweep-line,
+  .radar-sweep-arc,
+  .lead-btn,
+  .lead-card {
+    transition: none !important;
+    animation: none !important;
+  }
+  .radar-sweep-group {
+    display: none;
+  }
 }

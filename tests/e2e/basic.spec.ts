@@ -425,4 +425,81 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       fs.rmSync(testExtDir, { recursive: true, force: true });
     }
   });
+
+  test('popup renders accessible tabs, handles switching without horizontal overflow', async () => {
+    const testExtDir = path.resolve(__dirname, `../../test-results/dist-popup-a11y-${Date.now()}`);
+    fs.cpSync(extensionPath, testExtDir, { recursive: true });
+
+    let context;
+    try {
+      context = await chromium.launchPersistentContext('', {
+        headless: false,
+        args: [
+          '--headless=new',
+          `--disable-extensions-except=${testExtDir}`,
+          `--load-extension=${testExtDir}`,
+          '--no-sandbox',
+        ],
+      });
+
+      let background = context.serviceWorkers()[0];
+      if (!background) {
+        background = await context.waitForEvent('serviceworker', { timeout: 10_000 });
+      }
+      const extensionId = new URL(background.url()).host;
+      const popupPage = await context.newPage();
+      await popupPage.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
+      await popupPage.waitForLoadState('domcontentloaded');
+
+      // Verify header and logotype
+      const title = popupPage.locator('.popup-title');
+      await expect(title).toHaveText('ACULYX');
+
+      // Verify initial tab roles and aria-selected state
+      const hygieneTab = popupPage.locator('#tab-btn-hygiene');
+      const leadsTab = popupPage.locator('#tab-btn-leads');
+      await expect(hygieneTab).toHaveAttribute('role', 'tab');
+      await expect(leadsTab).toHaveAttribute('role', 'tab');
+      await expect(hygieneTab).toHaveAttribute('aria-selected', 'true');
+      await expect(leadsTab).toHaveAttribute('aria-selected', 'false');
+
+      const hygienePanel = popupPage.locator('#hygiene-view');
+      const leadsPanel = popupPage.locator('#leads-view');
+      await expect(hygienePanel).toHaveAttribute('role', 'tabpanel');
+      await expect(leadsPanel).toHaveAttribute('role', 'tabpanel');
+      await expect(hygienePanel).toBeVisible();
+      await expect(leadsPanel).toBeHidden();
+
+      // Verify no horizontal overflow in Hygiene view
+      const hygieneNoHScroll = await popupPage.evaluate(() => {
+        return document.body.scrollWidth <= document.body.clientWidth + 1;
+      });
+      expect(hygieneNoHScroll).toBe(true);
+
+      // Switch to Leads tab
+      await leadsTab.click();
+      await expect(hygieneTab).toHaveAttribute('aria-selected', 'false');
+      await expect(leadsTab).toHaveAttribute('aria-selected', 'true');
+      await expect(hygienePanel).toBeHidden();
+      await expect(leadsPanel).toBeVisible();
+
+      // Verify no horizontal overflow in Leads view
+      const leadsNoHScroll = await popupPage.evaluate(() => {
+        return document.body.scrollWidth <= document.body.clientWidth + 1;
+      });
+      expect(leadsNoHScroll).toBe(true);
+
+      // Switch back to Hygiene tab
+      await hygieneTab.click();
+      await expect(hygieneTab).toHaveAttribute('aria-selected', 'true');
+      await expect(leadsTab).toHaveAttribute('aria-selected', 'false');
+      await expect(hygienePanel).toBeVisible();
+      await expect(leadsPanel).toBeHidden();
+
+      await popupPage.close();
+    } finally {
+      if (context) await context.close();
+      fs.rmSync(testExtDir, { recursive: true, force: true });
+    }
+  });
 });

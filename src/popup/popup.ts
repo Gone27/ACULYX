@@ -1807,7 +1807,9 @@ function wireSegmentedControl(): void {
     tabBtnLeads.classList.remove('active');
     tabBtnLeads.setAttribute('aria-selected', 'false');
     hygieneView.hidden = false;
+    hygieneView.classList.add('active');
     leadsView.hidden = true;
+    leadsView.classList.remove('active');
   });
 
   tabBtnLeads.addEventListener('click', () => {
@@ -1816,7 +1818,9 @@ function wireSegmentedControl(): void {
     tabBtnHygiene.classList.remove('active');
     tabBtnHygiene.setAttribute('aria-selected', 'false');
     leadsView.hidden = false;
+    leadsView.classList.add('active');
     hygieneView.hidden = true;
+    hygieneView.classList.remove('active');
     renderRadarBase();
     if (currentSettings?.leadsEnabled === true && currentTabId !== null && currentTabUrl.length > 0) {
       void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl }).catch(() => undefined);
