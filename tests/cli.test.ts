@@ -457,7 +457,7 @@ describe('ACULYX CLI report', () => {
       const report = buildCliReport({ url: 'https://example.com', headers: {} });
       const sarif = formatSarif(report);
       expect(sarif.runs[0]?.tool.driver.version).toBe(packageInfo.version);
-      expect(packageInfo.version).toBe('2.0.5');
+      expect(packageInfo.version).toBe('2.0.6');
     });
   });
 });

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] - 2026-11-22
+
+### Release Provenance & Cryptographic Attestations
+- **Sigstore Artifact Attestation**: Integrated GitHub Actions `actions/attest-build-provenance` to generate cryptographically signed in-toto attestations anchored to GitHub's OIDC and public Rekor transparency log for all release packages.
+- **Automated Tag-Triggered Release Pipeline**: Configured CI to automatically build, attest, verify, and publish release archives and SHA256SUMS directly upon version tag pushes.
+- **Cryptographic Tag & Commit Signing**: Enabled native SSH cryptographic signature verification (`git verify-tag`) for immutable Git provenance.
+
 ## [2.0.5] - 2026-11-15
 
 ### Security, Error Hardening & Lifecycle Bounds

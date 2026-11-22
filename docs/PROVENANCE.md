@@ -51,7 +51,7 @@ Every release package (`source`, `full`, `chrome`, `firefox`) built locally or i
 
 ### 3.2 Git Tagging & Cryptographic Signature Procedures
 - **Historical Git Tags**: Early tags (`v1.0.0`, `v2`, `v2.0.0`) are unsigned annotated milestone tags pointing to pre-v2.0.4 development commits prior to the modular architecture refactor.
-- **Current Version Tag**: Release `v2.0.5` corresponds to the validated commit on `main`. It is published as an authoritative annotated Git tag recording tagger metadata and release summary.
+- **Current Version Tag**: Release `v2.0.6` corresponds to the validated commit on `main`. It is published as an authoritative cryptographically signed Git tag recording tagger metadata, release summary, and cryptographic signature.
 
 #### Method A: Modern SSH Key Signing (Recommended)
 Git (>= 2.34) and GitHub natively support signing commits and release tags with standard SSH keys (using `ssh-keygen`), eliminating GPG key-server and daemon configuration:
@@ -72,8 +72,8 @@ Git (>= 2.34) and GitHub natively support signing commits and release tags with 
    ```
 4. Sign and push the release tag:
    ```bash
-   git tag -s -f v2.0.5 -m "Release v2.0.5: hardened security, AMO lint, multi-browser runtime E2E, and verified package integrity"
-   git push origin v2.0.5 --force
+   git tag -s -f v2.0.6 -m "Release v2.0.6: multi-browser runtime E2E, AMO compliance, atomic packaging, and verifiable artifact attestations"
+   git push origin v2.0.6 --force
    ```
    GitHub will verify the SSH cryptographic signature against your account and display the green **Verified** badge.
 
@@ -95,9 +95,9 @@ If using GPG keys:
    ```
 4. Sign and verify the tag:
    ```bash
-   git tag -s -f v2.0.5 -m "Release v2.0.5"
-   git verify-tag v2.0.5
-   git push origin v2.0.5 --force
+   git tag -s -f v2.0.6 -m "Release v2.0.6"
+   git verify-tag v2.0.6
+   git push origin v2.0.6 --force
    ```
 
 ---
@@ -108,7 +108,7 @@ ACULYX integrates **GitHub Artifact Attestations** (`actions/attest-build-proven
 1. **Cryptographic Build Provenance**: During automated CI execution on `push` and `v*` tag releases, GitHub generates signed in-toto attestations backed by GitHub's Sigstore OpenID Connect (OIDC) identity provider and public Rekor transparency log.
 2. **Immutable Traceability**: The attestation cryptographically binds the exact SHA-256 digests of all 4 release packages (`ACULYX-source.zip`, `ACULYX-full.zip`, `ACULYX-chrome.zip`, `ACULYX-firefox.zip`, `ACULYX.zip`) and `SHA256SUMS` to:
    - The canonical repository: `Gone27/ACULYX`
-   - The exact commit SHA and release ref: `refs/tags/v2.0.5`
+   - The exact commit SHA and release ref: `refs/tags/v2.0.6`
    - The workflow run ID and builder environment.
 3. **Independent Verification**: Researchers, enterprise consumers, and security auditors can verify any release archive against the immutable transparency log using the GitHub CLI:
    ```bash
@@ -124,7 +124,7 @@ ACULYX integrates **GitHub Artifact Attestations** (`actions/attest-build-proven
 
 ### 3.4 Public Release Distribution Policy & Checksum Manifests
 When official release distributions are published to GitHub Releases (`https://github.com/Gone27/ACULYX/releases`):
-1. **Tagged Commits**: Official releases correspond to version tags (e.g. `v2.0.5`) on `main`.
+1. **Tagged Commits**: Official releases correspond to version tags (e.g. `v2.0.6`) on `main`.
 2. **Release Assets & Checksums**: The official distribution consists of the 4 release archives (`ACULYX-source.zip`, `ACULYX-full.zip`, `ACULYX-chrome.zip`, `ACULYX-firefox.zip`), legacy alias `ACULYX.zip`, and the generated `SHA256SUMS` manifest. Packaging (`npm run pack`) automatically writes and validates this manifest.
 3. **Checksum Verification**: In addition to cryptographic artifact attestations, researchers can independently verify packages using:
    ```bash

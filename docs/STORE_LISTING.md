@@ -5,7 +5,7 @@
 ## 1. Title & Short Name
 - **Extension Name:** ACULYX: Header & Cookie Security Checker
 - **Short Name:** ACULYX
-- **Version:** 2.0.5
+- **Version:** 2.0.6
 - **Author:** Dhyan Patel
 
 ---

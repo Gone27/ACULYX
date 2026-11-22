@@ -12,7 +12,7 @@ jobs:
     name: Typecheck, Test, Build & Verify Packaging
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       security-events: write
       actions: read
       id-token: write
@@ -63,8 +63,27 @@ jobs:
         if: github.event_name == 'push'
         with:
           subject-path: |
-            release-dist/*.zip
+            release-dist/ACULYX-source.zip
+            release-dist/ACULYX-full.zip
+            release-dist/ACULYX-chrome.zip
+            release-dist/ACULYX-firefox.zip
+            release-dist/ACULYX.zip
             release-dist/SHA256SUMS
+
+      - name: Publish GitHub Release and upload attested assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            release-dist/ACULYX-source.zip \
+            release-dist/ACULYX-full.zip \
+            release-dist/ACULYX-chrome.zip \
+            release-dist/ACULYX-firefox.zip \
+            release-dist/ACULYX.zip \
+            release-dist/SHA256SUMS \
+            --title "ACULYX ${{ github.ref_name }}" \
+            --generate-notes
 
       - name: Archive release package artifacts
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.1
