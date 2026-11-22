@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
 
@@ -14,6 +15,8 @@ jobs:
       contents: read
       security-events: write
       actions: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -54,6 +57,22 @@ jobs:
 
       - name: Verify all four release packages (source, full, chrome, firefox)
         run: npm run verify:pack -- --target all --dir release-dist
+
+      - name: Generate cryptographically verifiable artifact attestations
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name == 'push'
+        with:
+          subject-path: |
+            release-dist/*.zip
+            release-dist/SHA256SUMS
+
+      - name: Archive release package artifacts
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.1
+        if: github.event_name == 'push'
+        with:
+          name: aculyx-release-packages
+          path: release-dist/
+          retention-days: 30
 
       - name: Verify CLI & generate SARIF
         run: npx tsx src/cli.ts --input tests/fixtures/cli-sample.json --format sarif > aculyx.sarif
