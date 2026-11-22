@@ -737,7 +737,9 @@ body {
   color: var(--sc-accent);
   margin: 0 0 20px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--sc-border, var(--border));
+  /* Edge-glint divider: gradient from violet to teal, echoes brand wordmark */
+  border-bottom: 2px solid transparent;
+  border-image: var(--sc-border-glint) 1;
 }
 
 .subsection-title {
@@ -778,6 +780,16 @@ body {
 }
 .btn-secondary:hover { background: var(--sc-bg-hover, var(--bg-hover)); border-color: var(--sc-accent-dim); }
 .btn-secondary:focus-visible { outline: 2px solid var(--sc-border-focus); outline-offset: 2px; }
+
+/* Discard button: magenta-tinted to distinguish from Save — brand accent only, not a severity color */
+#btn-discard {
+  border-color: var(--sc-magenta);
+  color: var(--sc-magenta);
+}
+#btn-discard:hover {
+  background: rgba(184, 69, 146, 0.08);
+  border-color: var(--sc-magenta);
+}
 
 .btn-danger--prominent {
   background: var(--sc-danger-bg) !important;

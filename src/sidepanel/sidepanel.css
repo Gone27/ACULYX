@@ -764,16 +764,18 @@ body {
 .lead-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
+  border-left: 3px solid transparent;
   border-radius: 6px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  transition: all 0.15s ease;
+  transition: border-color var(--sc-duration-fast, 120ms) var(--sc-easing, ease), box-shadow var(--sc-duration-fast, 120ms) var(--sc-easing, ease);
 }
 
 .lead-card:hover {
-  border-color: var(--sc-violet-border);
+  border-left-color: var(--sc-violet);
+  box-shadow: var(--sc-glow-accent);
 }
 
 .lead-card.card-pinned {
