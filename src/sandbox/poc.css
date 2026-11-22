@@ -464,3 +464,16 @@ input[type="range"] {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ── Focus rings & Reduced motion ── */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

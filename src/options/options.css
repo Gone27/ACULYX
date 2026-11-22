@@ -1042,3 +1042,15 @@ dialog p { font-size: 13px; color: var(--sc-text-muted, var(--text-muted)); marg
   .home-cards-row { flex-direction: column; }
   .about-row { grid-template-columns: 1fr; }
 }
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .nav-item,
+  .btn-primary,
+  .btn-secondary,
+  .home-nav-card,
+  dialog {
+    transition: none !important;
+    animation: none !important;
+  }
+}

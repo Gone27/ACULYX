@@ -38,10 +38,30 @@ This document provides a comprehensive manual QA checklist for the ACULYX extens
 
 ## 4. Visuals & Accessibility
 - [ ] **Keyboard accessibility**
-  - **Reproduction Steps**: Use `Tab` to navigate through the popup and side panel.
-  - **Pass Criteria**: Ensure all interactive elements have a visible focus outline (`:focus-visible`) and can be activated via `Enter`/`Space`.
+  - **Reproduction Steps**: Use `Tab` to navigate through the popup, side panel, options, and DevTools panel.
+  - **Pass Criteria**: Ensure all interactive elements have a visible focus outline (`:focus-visible` ring using `--sc-accent` or `--sc-violet-light`) and can be activated via `Enter`/`Space`.
   - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
 - [ ] **`prefers-reduced-motion`**
-  - **Reproduction Steps**: Enable OS-level reduced motion settings. Open the popup.
-  - **Pass Criteria**: Verify animations (e.g., score transitions, pulsing dots) are disabled or simplified.
+  - **Reproduction Steps**: Enable OS-level reduced motion settings or select "Always reduced" in Options > Appearance. Open the popup, side panel, and radar.
+  - **Pass Criteria**: Verify transitions and animations (radar sweep line, header/card transitions) are completely disabled or set to static fallbacks without loss of data.
+  - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
+- [ ] **Popup Viewport & Fluid Scaling (320px–380px)**
+  - **Reproduction Steps**: Open extension popup in standard and constrained browser window sizes; inspect body width.
+  - **Pass Criteria**: Fluid down to 320px, capped at 380px max-width, max-height 600px with smooth vertical scroll. Ensure zero horizontal scrollbars or clipped text. Footer and export buttons remain fully reachable.
+  - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
+- [ ] **Typographic Brand Header (Option A)**
+  - **Reproduction Steps**: Open popup. Inspect the header.
+  - **Pass Criteria**: Crisp `ACULYX` text logotype with subtle violet accent dot. Full master raster wordmark remains intact and crisp on Options About page (`#section-about`).
+  - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
+- [ ] **200% Zoom and High-DPI Text Scaling**
+  - **Reproduction Steps**: Set browser zoom to 200% in Options and Sidepanel.
+  - **Pass Criteria**: Layout wraps gracefully (nav collapses to responsive wrap, cards stack vertically), text remains readable, no overlapping text or hidden action buttons.
+  - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
+- [ ] **Theme Contrast Matrix (Dark & Light)**
+  - **Reproduction Steps**: Toggle between Dark and Light modes in Options > Appearance.
+  - **Pass Criteria**: Semantic severities (Critical, High, Medium, Low, Info) and grades (A–F) remain high contrast against background surfaces. Section titles display `--sc-border-glint` gradient divider cleanly. Discard button displays distinct `--sc-magenta` tint.
+  - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
+- [ ] **Options Dirty Tracking & Navigation Guard**
+  - **Reproduction Steps**: Navigate to Options > Leads. Toggle "Credential liveness checks". Without clicking Save, click "Monitoring" in the navigation sidebar.
+  - **Pass Criteria**: Unsaved changes modal dialog appears. Clicking "Cancel" leaves user on Leads section with changes intact. Clicking "Discard" restores previous saved state and clears dirty badge. Closing tab prompts browser `beforeunload` warning.
   - **Browser Test Results**: [ ] Chrome | [ ] Edge | [ ] Firefox
