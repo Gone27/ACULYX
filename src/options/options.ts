@@ -134,6 +134,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   void loadAndPopulate();
+
+  // Guard browser-level reload / close when unsaved changes exist
+  window.addEventListener('beforeunload', (e) => {
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 });
 
 /* ================================================================
@@ -837,6 +845,7 @@ function getFormStateString(): string {
     scopeProfiles: current.scopeProfiles ?? [],
     leadsEnabled: current.leadsEnabled,
     deepModeEnabled: current.deepModeEnabled,
+    credentialLivenessEnabled: Boolean(current.credentialLivenessEnabled),
     hunterConfig: current.hunterConfig,
     theme: current.theme ?? 'system',
     density: current.density ?? 'comfortable',

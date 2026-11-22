@@ -169,3 +169,87 @@ test('credential setting toggles update background state and invalidate candidat
     fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 });
+
+test('credential-liveness toggle alone marks settings dirty, exposes Discard, triggers unsaved navigation guard, and cleanly discards', async () => {
+  const userDataDir = path.resolve(__dirname, `../../test-results/playwright-cred-dirty-${Date.now()}`);
+  const testExtDir = path.resolve(__dirname, `../../test-results/dist-e2e-cred-dirty-${Date.now()}`);
+  fs.cpSync(extensionPath, testExtDir, { recursive: true });
+
+  let context: BrowserContext | undefined;
+  try {
+    context = await chromium.launchPersistentContext(userDataDir, {
+      headless: false,
+      args: [
+        '--headless=new',
+        `--disable-extensions-except=${testExtDir}`,
+        `--load-extension=${testExtDir}`,
+        '--no-sandbox',
+      ],
+    });
+
+    let background = context.serviceWorkers()[0];
+    if (background === undefined) {
+      background = await context.waitForEvent('serviceworker', { timeout: 10_000 });
+    }
+    const extensionId = new URL(background.url()).host;
+    const options = await context.newPage();
+    await options.goto(`chrome-extension://${extensionId}/src/options/options.html`);
+
+    // Wait for options page to fully initialize
+    await options.waitForFunction(() => {
+      const badge = document.getElementById('nav-dirty-badge');
+      return badge !== null;
+    }, undefined, { timeout: 10_000 });
+    await options.waitForTimeout(600);
+
+    // Navigate to leads section to expose the credential liveness toggle
+    await options.locator('.nav-item[data-section="leads"]').click();
+    await options.waitForTimeout(300);
+
+    // Precondition: toggle unchecked, dirty indicators hidden
+    await expect(options.locator('#credential-liveness-toggle')).not.toBeChecked();
+    await expect(options.locator('#nav-dirty-badge')).toBeHidden();
+    await expect(options.locator('#btn-discard')).toBeHidden();
+
+    // ACT: check the credential liveness toggle
+    await options.locator('#credential-liveness-toggle').check();
+
+    // ASSERT: dirty indicators now visible, save-status says unsaved
+    await expect(options.locator('#nav-dirty-badge')).toBeVisible();
+    await expect(options.locator('#btn-discard')).toBeVisible();
+    await expect(options.locator('#save-status')).toContainText('Unsaved changes');
+
+    // ASSERT: unsaved navigation guard fires when switching sections
+    await options.locator('.nav-item[data-section="monitoring"]').click();
+    await expect(options.locator('#unsaved-dialog')).toHaveAttribute('open');
+
+    // Cancel the dialog — dirty state must remain
+    await options.locator('#dialog-cancel').click();
+    await expect(options.locator('#nav-dirty-badge')).toBeVisible();
+    await expect(options.locator('#btn-discard')).toBeVisible();
+
+    // ACT: discard via the top-bar button
+    await options.locator('#btn-discard').click();
+    await options.waitForTimeout(400);
+
+    // ASSERT: toggle reverted, dirty indicators gone
+    await expect(options.locator('#credential-liveness-toggle')).not.toBeChecked();
+    await expect(options.locator('#nav-dirty-badge')).toBeHidden();
+    await expect(options.locator('#btn-discard')).toBeHidden();
+
+    // ASSERT: background storage still has credentialLivenessEnabled = false
+    const storedValue = await background.evaluate(async () => {
+      const service = (self as unknown as BackgroundWindow).__SettingsService;
+      if (service === undefined) throw new Error('settings service not exposed');
+      const settings = await service.getSettings();
+      return settings['credentialLivenessEnabled'];
+    });
+    expect(storedValue).toBe(false);
+
+    await options.close();
+  } finally {
+    if (context !== undefined) await context.close();
+    fs.rmSync(testExtDir, { recursive: true, force: true });
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
