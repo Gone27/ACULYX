@@ -364,7 +364,7 @@ export function interpretCorsProbes(results: HunterCorsProbeResult[]): ActiveRes
     checks: [check('cors-reflect', 'inconclusive', `${results.length} test origins tried; none reflected with credentials.`)],
     missing: [
       'Check whether the originally reflected origin is attacker-controllable (e.g. subdomain takeover, wildcard match).',
-      'Browsers may ignore an Origin header set from script, so a negative result is not proof: re-test with curl -H "Origin: https://evil.tld".',
+      'A negative result is not proof of safety: the server may trust other origins. Re-test with curl -H \"Origin: https://evil.tld\", the null origin, and a lookalike such as https://target.com.evil.tld.',
     ],
     ran: true,
   };
