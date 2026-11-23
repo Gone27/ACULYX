@@ -1,40 +1,28 @@
 /**
- * popup.ts — ACULYX popup logic
+ * popup.ts — ACULYX Compact Status Launcher
  *
  * Rules enforced here:
  *  - ZERO innerHTML / outerHTML / insertAdjacentHTML
  *  - All user-visible strings set via textContent or createElement+appendChild
  *  - Only chrome.* APIs (no fetch / XHR — connect-src is 'none')
- *
- * Sections:
- *  - B: Score breakdown <details> panel
- *  - C: "Stop monitoring" button (revokes permission for this origin)
- *  - D: "Export JSON" button (local blob download, no network)
- *  - E: Subdomain trust analysis panel (new — SUB-001 to SUB-006)
+ *  - Fast, responsive launcher for origin status, gating, top 3 teasers, and workspace launch
  */
 
 import type {
   TabState,
   Finding,
   CoverageInfo,
-  ScoreBreakdown,
-  SubdomainTrustAnalysis,
-  SubdomainTrustVector,
-  ApiEndpointState,
   SettingsV2,
 } from '../shared/types';
 import { sendToBackground } from '../shared/messaging';
 import type { LeadStateUpdateMessage } from '../shared/messaging';
 import type { Lead } from '../leads/types';
-import { formatLeadsReportMarkdown } from '../leads/export/export';
 import { POPUP_PORT_NAME, SEVERITY_ORDER } from '../shared/constants';
-import { LocalStorage } from '../shared/storage';
 import { SettingsService } from '../shared/settings';
 import { PermissionsService, patternFromOrigin } from '../background/permissions';
 import { isModeCaptureAllowed } from '../shared/gating';
 import { selectVisibleFindings } from '../shared/filters';
 import { applyAppearance } from '../shared/appearance';
-import { TriageStore, ReportBuilder, type ResearcherReviewState } from '../shared/reporting';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let tabBtnHygiene:       HTMLButtonElement;
@@ -42,13 +30,8 @@ let tabBtnLeads:         HTMLButtonElement;
 let hygieneView:         HTMLDivElement;
 let leadsView:           HTMLDivElement;
 let leadsCountBadge:     HTMLSpanElement;
-let radarRings:          SVGGElement;
-let radarAxes:           SVGGElement;
-let radarBlips:          SVGGElement;
 let leadsEmptyState:     HTMLDivElement;
 let leadsCardList:       HTMLDivElement;
-let currentLeads:        Lead[] = [];
-let radarBaseRendered:   boolean = false;
 
 let gradeBadge:          HTMLDivElement;
 let badgeGrade:          SVGTextElement;
@@ -57,56 +40,15 @@ let qualityScoreText:    HTMLDivElement;
 let originText:          HTMLDivElement;
 let coverageBar:         HTMLDivElement;
 let stateMessage:        HTMLDivElement;
+let specialNotice:       HTMLDivElement;
 let monitorSection:      HTMLDivElement;
 let monitorBtn:          HTMLButtonElement;
-let stopMonitoringBtn:   HTMLButtonElement;   // C
+let stopMonitoringBtn:   HTMLButtonElement;
 let findingsSection:     HTMLDivElement;
+let findingsCountBadge:  HTMLSpanElement;
 let findingsList:        HTMLUListElement;
-let breakdownSection:    HTMLDetailsElement; // B
-let breakdownBody:       HTMLTableSectionElement; // B
-let exportBtn:           HTMLButtonElement;   // D
-let copyReportBtn:       HTMLButtonElement;   // Markdown audit export
-let settingsLink:        HTMLAnchorElement;
-let subdomainSection:    HTMLDetailsElement; // E
-let subdomainBadge:      HTMLSpanElement;    // E
-let vectorList:          HTMLUListElement;   // E
-let trustGraph:          SVGSVGElement;
-let apiEndpointsSection: HTMLDetailsElement;
-let apiEndpointsBadge:   HTMLSpanElement;
-let apiEndpointsList:    HTMLUListElement;
-let onboardingCard:      HTMLDivElement;     // 5. Onboarding
-let onboardingCloseBtn:  HTMLButtonElement;
-let onboardingActionBtn: HTMLButtonElement;
-let trendIndicator:      HTMLDivElement;     // 3. Trend over time
-let trendChart:          SVGSVGElement;
-let trendText:           HTMLSpanElement;
-let specialNotice:       HTMLDivElement;     // 8. Graceful edge cases
-let authDiffSection:     HTMLDetailsElement;
-let authDiffDelta:       HTMLSpanElement;
-let authDiffMeta:        HTMLDivElement;
-let authDiffList:        HTMLUListElement;
 let openGraphBtn:        HTMLButtonElement;
-let findingsFilterNotice: HTMLDivElement;
-let showAllFindingsBtn:  HTMLButtonElement;
-let findingDetailsDrawer: HTMLDialogElement;
-let drawerRuleId:        HTMLSpanElement;
-let drawerScopeBadge:    HTMLSpanElement;
-let drawerCloseBtn:      HTMLButtonElement;
-let drawerFindingTitle:  HTMLHeadingElement;
-let drawerSeverityTag:   HTMLSpanElement;
-let drawerProvenanceTag: HTMLSpanElement;
-let drawerConfidenceTag: HTMLSpanElement;
-let drawerEvidence:      HTMLPreElement;
-let drawerLimitationsField: HTMLDivElement;
-let drawerLimitations:   HTMLUListElement;
-let drawerImpact:        HTMLParagraphElement;
-let drawerRemediation:   HTMLParagraphElement;
-let drawerTriageSelect:  HTMLSelectElement;
-let drawerTriageNotes:   HTMLTextAreaElement;
-let drawerExportMdBtn:   HTMLButtonElement;
-let drawerExportJsonBtn: HTMLButtonElement;
-let drawerCopyBtn:       HTMLButtonElement;
-let activeDrawerFinding: Finding | null = null;
+let settingsLink:        HTMLAnchorElement;
 
 /** The tab ID currently being inspected by the popup. */
 let currentTabId: number | null = null;
@@ -114,16 +56,10 @@ let currentTabId: number | null = null;
 let currentTabUrl: string = '';
 /** The normalised origin (scheme + host + port) of the active tab. */
 let currentOrigin: string = '';
-/** Last full TabState received — used by the export function. */
-let currentState: TabState | null = null;
 /** Cached settings used for presentation filtering. */
 let currentSettings: SettingsV2 | null = null;
-/** Current findings array for filtering re-renders. */
-let currentFindings: Finding[] = [];
-/** Temporary override to show all findings regardless of filter. */
-let showAllFindingsOverride: boolean = false;
-let currentBreakdown: ScoreBreakdown[] = [];
-let breakdownRendered = false;
+/** Current leads list. */
+let currentLeads: Lead[] = [];
 
 type PopupDisplayState =
   | 'not-monitored'
@@ -145,6 +81,14 @@ function setPopupState(s: PopupDisplayState): void {
    ================================================================ */
 
 document.addEventListener('DOMContentLoaded', () => {
+  tabBtnHygiene       = getEl<HTMLButtonElement>('tab-btn-hygiene');
+  tabBtnLeads         = getEl<HTMLButtonElement>('tab-btn-leads');
+  hygieneView         = getEl<HTMLDivElement>('hygiene-view');
+  leadsView           = getEl<HTMLDivElement>('leads-view');
+  leadsCountBadge     = getEl<HTMLSpanElement>('leads-count-badge');
+  leadsEmptyState     = getEl<HTMLDivElement>('leads-empty-state');
+  leadsCardList       = getEl<HTMLDivElement>('leads-card-list');
+
   gradeBadge          = getEl<HTMLDivElement>('grade-badge');
   badgeGrade          = getEl<SVGTextElement>('badge-grade');
   scoreText           = getEl<HTMLDivElement>('score-text');
@@ -152,174 +96,27 @@ document.addEventListener('DOMContentLoaded', () => {
   originText          = getEl<HTMLDivElement>('origin-text');
   coverageBar         = getEl<HTMLDivElement>('coverage-bar');
   stateMessage        = getEl<HTMLDivElement>('state-message');
+  specialNotice       = getEl<HTMLDivElement>('special-notice');
   monitorSection      = getEl<HTMLDivElement>('monitor-section');
   monitorBtn          = getEl<HTMLButtonElement>('monitor-btn');
   stopMonitoringBtn   = getEl<HTMLButtonElement>('stop-monitoring-btn');
   findingsSection     = getEl<HTMLDivElement>('findings-section');
+  findingsCountBadge  = getEl<HTMLSpanElement>('findings-count-badge');
   findingsList        = getEl<HTMLUListElement>('findings-list');
-  breakdownSection    = getEl<HTMLDetailsElement>('breakdown-section');
-  breakdownBody       = getEl<HTMLTableSectionElement>('breakdown-body');
-  exportBtn           = getEl<HTMLButtonElement>('export-btn');
-  copyReportBtn       = getEl<HTMLButtonElement>('copy-report-btn');
-  settingsLink        = getEl<HTMLAnchorElement>('settings-link');
-  subdomainSection    = getEl<HTMLDetailsElement>('subdomain-section');   // E
-  subdomainBadge      = getEl<HTMLSpanElement>('subdomain-badge');         // E
-  vectorList          = getEl<HTMLUListElement>('vector-list');            // E
-  trustGraph          = getEl<SVGSVGElement>('trust-graph');
-  apiEndpointsSection = getEl<HTMLDetailsElement>('api-endpoints-section');
-  apiEndpointsBadge   = getEl<HTMLSpanElement>('api-endpoints-badge');
-  apiEndpointsList    = getEl<HTMLUListElement>('api-endpoints-list');
-  onboardingCard      = getEl<HTMLDivElement>('onboarding-card');
-  onboardingCloseBtn  = getEl<HTMLButtonElement>('onboarding-close-btn');
-  onboardingActionBtn = getEl<HTMLButtonElement>('onboarding-action-btn');
-  trendIndicator      = getEl<HTMLDivElement>('trend-indicator');
-  trendChart          = getEl<SVGSVGElement>('trend-chart');
-  trendText           = getEl<HTMLSpanElement>('trend-text');
-  specialNotice       = getEl<HTMLDivElement>('special-notice');
-  authDiffSection     = getEl<HTMLDetailsElement>('auth-diff-section');
-  authDiffDelta       = getEl<HTMLSpanElement>('auth-diff-delta');
-  authDiffMeta        = getEl<HTMLDivElement>('auth-diff-meta');
-  authDiffList        = getEl<HTMLUListElement>('auth-diff-list');
   openGraphBtn        = getEl<HTMLButtonElement>('open-graph-btn');
-  findingsFilterNotice = getEl<HTMLDivElement>('findings-filter-notice');
-  showAllFindingsBtn  = getEl<HTMLButtonElement>('show-all-findings-btn');
-  findingDetailsDrawer = getEl<HTMLDialogElement>('finding-details-drawer');
-  drawerRuleId        = getEl<HTMLSpanElement>('drawer-rule-id');
-  drawerScopeBadge    = getEl<HTMLSpanElement>('drawer-scope-badge');
-  drawerCloseBtn      = getEl<HTMLButtonElement>('drawer-close-btn');
-  drawerFindingTitle  = getEl<HTMLHeadingElement>('drawer-finding-title');
-  drawerSeverityTag   = getEl<HTMLSpanElement>('drawer-severity-tag');
-  drawerProvenanceTag = getEl<HTMLSpanElement>('drawer-provenance-tag');
-  drawerConfidenceTag = getEl<HTMLSpanElement>('drawer-confidence-tag');
-  drawerEvidence      = getEl<HTMLPreElement>('drawer-evidence');
-  drawerLimitationsField = getEl<HTMLDivElement>('drawer-limitations-field');
-  drawerLimitations   = getEl<HTMLUListElement>('drawer-limitations');
-  drawerImpact        = getEl<HTMLParagraphElement>('drawer-impact');
-  drawerRemediation   = getEl<HTMLParagraphElement>('drawer-remediation');
-  drawerTriageSelect  = getEl<HTMLSelectElement>('drawer-triage-select');
-  drawerTriageNotes   = getEl<HTMLTextAreaElement>('drawer-triage-notes');
-  drawerExportMdBtn   = getEl<HTMLButtonElement>('drawer-export-md-btn');
-  drawerExportJsonBtn = getEl<HTMLButtonElement>('drawer-export-json-btn');
-  drawerCopyBtn       = getEl<HTMLButtonElement>('drawer-copy-btn');
-
-  tabBtnHygiene       = getEl<HTMLButtonElement>('tab-btn-hygiene');
-  tabBtnLeads         = getEl<HTMLButtonElement>('tab-btn-leads');
-  hygieneView         = getEl<HTMLDivElement>('hygiene-view');
-  leadsView           = getEl<HTMLDivElement>('leads-view');
-  leadsCountBadge     = getEl<HTMLSpanElement>('leads-count-badge');
-  radarRings          = getEl<SVGGElement>('radar-rings');
-  radarAxes           = getEl<SVGGElement>('radar-axes');
-  radarBlips          = getEl<SVGGElement>('radar-blips');
-  leadsEmptyState     = getEl<HTMLDivElement>('leads-empty-state');
-  leadsCardList       = getEl<HTMLDivElement>('leads-card-list');
+  settingsLink        = getEl<HTMLAnchorElement>('settings-link');
 
   wireSegmentedControl();
-
-  drawerCloseBtn.addEventListener('click', () => {
-    findingDetailsDrawer.close();
-  });
-
-  drawerTriageSelect.addEventListener('change', () => {
-    if (activeDrawerFinding) {
-      const state = drawerTriageSelect.value as ResearcherReviewState;
-      const notes = drawerTriageNotes.value;
-      const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
-      void TriageStore.setAnnotation(findingKey, state, notes, { isIncognito: currentState?.isIncognito === true }).catch(() => undefined);
-    }
-  });
-
-  drawerTriageNotes.addEventListener('blur', () => {
-    if (activeDrawerFinding) {
-      const state = drawerTriageSelect.value as ResearcherReviewState;
-      const notes = drawerTriageNotes.value;
-      const findingKey = `${activeDrawerFinding.ruleId}:${currentOrigin}`;
-      void TriageStore.setAnnotation(findingKey, state, notes, { isIncognito: currentState?.isIncognito === true }).catch(() => undefined);
-    }
-  });
-
-  drawerExportMdBtn.addEventListener('click', () => {
-    if (!activeDrawerFinding) return;
-    const state = drawerTriageSelect.value as ResearcherReviewState;
-    const notes = drawerTriageNotes.value;
-    const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
-      targetUrl: currentState?.url ?? currentOrigin,
-      reviewState: state,
-      triageNotes: notes,
-    });
-    const md = ReportBuilder.formatReportAsMarkdown(draft);
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `aculyx-report-${activeDrawerFinding.ruleId.toLowerCase()}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
-
-  drawerExportJsonBtn.addEventListener('click', () => {
-    if (!activeDrawerFinding) return;
-    const state = drawerTriageSelect.value as ResearcherReviewState;
-    const notes = drawerTriageNotes.value;
-    const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
-      targetUrl: currentState?.url ?? currentOrigin,
-      reviewState: state,
-      triageNotes: notes,
-    });
-    const json = ReportBuilder.formatReportAsJson(draft);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `aculyx-report-${activeDrawerFinding.ruleId.toLowerCase()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
-
-  drawerCopyBtn.addEventListener('click', () => {
-    if (!activeDrawerFinding) return;
-    const state = drawerTriageSelect.value as ResearcherReviewState;
-    const notes = drawerTriageNotes.value;
-    const draft = ReportBuilder.buildReportDraft(activeDrawerFinding, {
-      targetUrl: currentState?.url ?? currentOrigin,
-      reviewState: state,
-      triageNotes: notes,
-    });
-    const md = ReportBuilder.formatReportAsMarkdown(draft);
-    navigator.clipboard.writeText(md).then(() => {
-      const origText = drawerCopyBtn.textContent;
-      drawerCopyBtn.textContent = 'Copied!';
-      setTimeout(() => {
-        drawerCopyBtn.textContent = origText;
-      }, 1500);
-    }).catch(() => undefined);
-  });
-
-  showAllFindingsBtn.addEventListener('click', () => {
-    showAllFindingsOverride = !showAllFindingsOverride;
-    renderFindings(currentFindings);
-  });
-
-  breakdownSection.addEventListener('toggle', () => {
-    if (breakdownSection.open && !breakdownRendered) {
-      renderBreakdown(currentBreakdown);
-    }
-  });
+  wireSettingsLink();
+  wireMonitorButton();
+  wireStopMonitoringButton();
+  wireOpenWorkspaceButton();
 
   SettingsService.onSettingsChanged((newSettings) => {
     currentSettings = newSettings;
+    applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
   });
 
-  wireSettingsLink();
-  wireMonitorButton();
-  wireStopMonitoringButton(); // C
-  wireExportButton();         // D
-  wireCopyReportButton();     // Markdown export
-  wireOpenGraphButton();
-  void initOnboarding();
   void initPopup();
 });
 
@@ -468,7 +265,7 @@ function openLivePort(): void {
       const leadMsg = msg as LeadStateUpdateMessage;
       if (!currentOrigin || leadMsg.origin === currentOrigin || (leadMsg.tabId !== undefined && leadMsg.tabId === currentTabId)) {
         currentLeads = leadMsg.leads ?? [];
-        renderLeadsTab(currentLeads);
+        renderLeadsTeaser(currentLeads);
       }
       return;
     }
@@ -495,9 +292,7 @@ function openLivePort(): void {
 
 function renderState(state: TabState): void {
   const savedScrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-  const savedFocusId = document.activeElement?.id;
 
-  currentState = state; // store for export
   clearStateMessage();
 
   if (state.hops.length === 0 || state.grade === '?') {
@@ -505,78 +300,28 @@ function renderState(state: TabState): void {
     setBadgeState('scanning', '?', 'No security data captured yet');
     gradeBadge.className = 'grade-badge grade-unknown';
     scoreText.textContent = 'Score: No data';
-    qualityScoreText.textContent = 'Configuration quality: No data';
+    qualityScoreText.textContent = '';
   } else {
     setPopupState('results');
-    // Grade badge & accessibility
     setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
     gradeBadge.className = 'grade-badge grade-' + (state.grade?.toLowerCase() ?? 'unknown');
 
-    // Score + origin
     scoreText.textContent = `Score: ${state.score}/100`;
-    qualityScoreText.textContent = `Configuration quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? 'A'})`;
+    qualityScoreText.textContent = `Quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? 'A'})`;
   }
   originText.textContent = state.origin;
 
-  // 3. Historical trend over time
-  void renderTrend(state.origin, state.score, state.grade);
-
-  // 8. Graceful edge cases (localhost, clean cookie footprint, etc.)
   renderSpecialNotices(state);
 
-  // C: show stop-monitoring button
   stopMonitoringBtn.hidden = false;
-
-  // Coverage warnings
-  renderCoverage(state.coverage, state.hops);
-
-  // Findings list (top 5)
-  if (state.findings.length > 0) {
-    renderFindings(state.findings);
-    findingsSection.hidden = false;
-  } else {
-    findingsSection.hidden = true;
-  }
-
-  // B: Score breakdown
-  currentBreakdown = state.scoreBreakdown;
-  const scoring = currentBreakdown.filter((b) => b.penalty > 0);
-  if (scoring.length === 0) {
-    breakdownSection.hidden = true;
-  } else {
-    breakdownSection.hidden = false;
-    if (breakdownSection.open) {
-      renderBreakdown(currentBreakdown);
-    } else {
-      breakdownRendered = false;
-      while (breakdownBody.firstChild) {
-        breakdownBody.removeChild(breakdownBody.firstChild);
-      }
-    }
-  }
-
-  // Auth Posture Diff
-  void renderAuthDiff(state.origin);
-
-  // E: Subdomain trust analysis
-  renderSubdomainTrust(state.subdomainTrust);
-
-  // API endpoints analysis
-  renderApiEndpoints(state);
-
-  // 4. Export & Copy buttons
-  exportBtn.hidden = false;
-  copyReportBtn.hidden = false;
-
   monitorSection.hidden = true;
+
+  renderCoverage(state.coverage, state.hops);
+  renderFindingsTeaser(state.findings);
 
   if (savedScrollTop > 0) {
     document.documentElement.scrollTop = savedScrollTop;
     document.body.scrollTop = savedScrollTop;
-  }
-  if (savedFocusId !== undefined && savedFocusId !== '') {
-    const el = document.getElementById(savedFocusId);
-    if (el) el.focus();
   }
 }
 
@@ -588,15 +333,20 @@ function renderCoverage(
 ): void {
   const warnings: string[] = [
     `Coverage: ${coverage.hopsCaptured}/${coverage.hopsExpected} response${coverage.hopsExpected === 1 ? '' : 's'}`,
-    `Service worker: ${formatServiceWorkerStatus(coverage)}`,
   ];
 
+  if (coverage.serviceWorkerStatus === 'controlled') {
+    warnings.push('SW: controlled');
+  } else if (coverage.serviceWorkerStatus === 'not-controlled') {
+    warnings.push('SW: not detected');
+  }
+
   if (coverage.isRestricted) warnings.push('Restricted page');
-  if (coverage.hasCache) warnings.push('⚠ Response from cache — headers may be stale');
-  if (coverage.metaCspFound) warnings.push('Meta CSP detected — policy contents not evaluated');
+  if (coverage.hasCache) warnings.push('⚠ Cached response');
+  if (coverage.metaCspFound) warnings.push('Meta CSP present');
 
   const headersDiffer = hops.some((h) => h.headersDiffer);
-  if (headersDiffer) warnings.push('⚠ Headers differ between capture points; source cannot be attributed');
+  if (headersDiffer) warnings.push('⚠ Headers differ between points');
 
   if (Array.isArray(coverage.blindSpots)) {
     for (const spot of coverage.blindSpots) {
@@ -610,950 +360,144 @@ function renderCoverage(
   coverageBar.hidden = false;
 }
 
-function formatServiceWorkerStatus(coverage: CoverageInfo): string {
-  if (coverage.serviceWorkerStatus === 'controlled') return 'controlled';
-  if (coverage.serviceWorkerStatus === 'not-controlled') return 'not detected';
-  return 'not verified';
-}
+/* ── Top 3 Findings Teaser (Safe text DOM APIs, zero innerHTML) ─── */
 
-/* ── Findings list ────────────────────────────────────────────── */
-
-function renderFindings(findings: Finding[]): void {
-  currentFindings = findings;
+function renderFindingsTeaser(findings: Finding[]): void {
   while (findingsList.firstChild) {
     findingsList.removeChild(findingsList.firstChild);
   }
 
   const severityFilter = currentSettings?.severityFilter ?? SEVERITY_ORDER;
-  const { visibleFindings, hiddenCount } = selectVisibleFindings(
+  const { visibleFindings } = selectVisibleFindings(
     findings,
     severityFilter,
-    showAllFindingsOverride,
+    false,
   );
-
-  if (hiddenCount > 0 && !showAllFindingsOverride) {
-    findingsFilterNotice.textContent = `${hiddenCount} finding${hiddenCount === 1 ? '' : 's'} hidden by filter`;
-    findingsFilterNotice.hidden = false;
-    showAllFindingsBtn.textContent = 'Show all';
-    showAllFindingsBtn.hidden = false;
-  } else if (showAllFindingsOverride && hiddenCount === 0 && findings.length > visibleFindings.length) {
-    findingsFilterNotice.textContent = 'Showing all findings (filter overridden)';
-    findingsFilterNotice.hidden = false;
-    showAllFindingsBtn.textContent = 'Reset filter';
-    showAllFindingsBtn.hidden = false;
-  } else {
-    findingsFilterNotice.textContent = '';
-    findingsFilterNotice.hidden = true;
-    showAllFindingsBtn.hidden = true;
-  }
 
   const sorted = [...visibleFindings].sort(
     (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity),
   );
-  const top5 = sorted.slice(0, 5);
+  const top3 = sorted.slice(0, 3);
 
-  for (const finding of top5) {
-    findingsList.appendChild(buildFindingItem(finding));
-  }
-}
+  findingsCountBadge.textContent = `${findings.length} total`;
 
-function buildFindingItem(finding: Finding): HTMLLIElement {
-  const li = document.createElement('li');
-  li.className = `finding-item severity-${finding.severity}`;
-  li.dataset['severity'] = finding.severity;
-
-  const severitySpan = document.createElement('span');
-  severitySpan.className = 'finding-severity';
-  severitySpan.textContent = finding.severity;
-
-  const body = document.createElement('div');
-  body.className = 'finding-body';
-
-  const tagsContainer = document.createElement('div');
-  tagsContainer.className = 'finding-meta-tags';
-
-  if (finding.provenance) {
-    const provSpan = document.createElement('span');
-    provSpan.className = 'finding-tag-provenance';
-    provSpan.textContent = finding.provenance;
-    tagsContainer.appendChild(provSpan);
-  }
-
-  if (finding.confidence) {
-    const confSpan = document.createElement('span');
-    confSpan.className = 'finding-tag-confidence';
-    confSpan.textContent = finding.confidence;
-    tagsContainer.appendChild(confSpan);
-  }
-
-  if (finding.provenance || finding.confidence) {
-    body.appendChild(tagsContainer);
-  }
-
-  const titleSpan = document.createElement('span');
-  titleSpan.className = 'finding-title';
-  titleSpan.textContent = finding.title;
-  titleSpan.title = finding.title;
-
-  const evidenceSpan = document.createElement('span');
-  evidenceSpan.className = 'finding-evidence';
-  evidenceSpan.textContent = finding.evidence;
-  evidenceSpan.title = finding.evidence;
-
-  const referenceLink = document.createElement('a');
-  referenceLink.className = 'finding-reference';
-  referenceLink.href = finding.reference;
-  referenceLink.target = '_blank';
-  referenceLink.rel = 'noopener noreferrer';
-  referenceLink.textContent = 'Learn more →';
-
-  body.appendChild(titleSpan);
-  body.appendChild(evidenceSpan);
-
-  // 2. Explain why, not just what — real-world impact sentence
-  if (finding.impact != null && finding.impact.length > 0) {
-    const impactSpan = document.createElement('span');
-    impactSpan.className = 'finding-impact';
-    impactSpan.textContent = `⚡ Impact: ${finding.impact}`;
-    body.appendChild(impactSpan);
-  }
-
-  if (finding.sourceUrl != null) {
-    const sourceLink = document.createElement('a');
-    sourceLink.className = 'finding-source';
-    sourceLink.href = finding.sourceUrl;
-    sourceLink.target = '_blank';
-    sourceLink.rel = 'noopener noreferrer';
-    sourceLink.textContent = `Found on ${formatSourceHost(finding.sourceUrl)}`;
-    sourceLink.title = finding.sourceUrl;
-    body.appendChild(sourceLink);
-  }
-
-  body.appendChild(referenceLink);
-
-  if (finding.ruleId === 'XFO-001' || finding.ruleId === 'CSP-005') {
-    const pocBtn = document.createElement('button');
-    pocBtn.className = 'sandbox-poc-btn';
-    pocBtn.textContent = '🧪 Clickjacking PoC';
-    const isInScope = currentState?.scopeStatus === 'in-scope';
-    if (!isInScope) {
-      pocBtn.disabled = true;
-      pocBtn.title = 'Active verification sandbox requires target to be explicitly in-scope under an active scope profile';
-      pocBtn.style.opacity = '0.5';
-      pocBtn.style.cursor = 'not-allowed';
-    } else {
-      pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
-      pocBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (currentTabId !== null) {
-          void sendToBackground({
-            type: 'GENERATE_POC',
-            tabId: currentTabId,
-            pocType: 'clickjacking',
-          });
-        }
-      });
-    }
-    body.appendChild(pocBtn);
-  } else if (finding.ruleId === 'SUB-006') {
-    const pocBtn = document.createElement('button');
-    pocBtn.className = 'sandbox-poc-btn';
-    pocBtn.textContent = '🧪 COOP PoC';
-    const isInScope = currentState?.scopeStatus === 'in-scope';
-    if (!isInScope) {
-      pocBtn.disabled = true;
-      pocBtn.title = 'Active verification sandbox requires target to be explicitly in-scope under an active scope profile';
-      pocBtn.style.opacity = '0.5';
-      pocBtn.style.cursor = 'not-allowed';
-    } else {
-      pocBtn.title = 'Generate safe client-side PoC in sandboxed tab';
-      pocBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (currentTabId !== null) {
-          void sendToBackground({
-            type: 'GENERATE_POC',
-            tabId: currentTabId,
-            pocType: 'coop',
-          });
-        }
-      });
-    }
-    body.appendChild(pocBtn);
-  }
-
-  const detailsBtn = document.createElement('button');
-  detailsBtn.className = 'finding-details-btn';
-  detailsBtn.textContent = 'Details ↗';
-  detailsBtn.setAttribute('aria-label', `View details for ${finding.ruleId}`);
-  detailsBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    openFindingDetails(finding);
-  });
-  body.appendChild(detailsBtn);
-
-  li.appendChild(severitySpan);
-  li.appendChild(body);
-
-  return li;
-}
-
-function openFindingDetails(finding: Finding): void {
-  activeDrawerFinding = finding;
-  drawerRuleId.textContent = finding.ruleId;
-  const scope = finding.scopeStatus ?? 'unknown';
-  drawerScopeBadge.textContent = scope;
-  drawerScopeBadge.className = `drawer-scope-badge scope-${scope}`;
-  drawerFindingTitle.textContent = finding.title;
-  drawerSeverityTag.textContent = finding.severity.toUpperCase();
-  drawerProvenanceTag.textContent = finding.provenance ?? 'observation';
-  drawerConfidenceTag.textContent = finding.confidence ?? 'high';
-  drawerEvidence.textContent = finding.evidence.length > 0 ? finding.evidence : 'No raw evidence captured';
-  drawerImpact.textContent = (finding.impact !== undefined && finding.impact.length > 0) ? finding.impact : 'Potential security weakness.';
-  drawerRemediation.textContent = finding.recommendation.length > 0 ? finding.recommendation : 'Consult security recommendations.';
-
-  while (drawerLimitations.firstChild) {
-    drawerLimitations.removeChild(drawerLimitations.firstChild);
-  }
-
-  if (finding.limitations !== undefined && finding.limitations.length > 0) {
-    drawerLimitationsField.hidden = false;
-    for (const lim of finding.limitations) {
-      const li = document.createElement('li');
-      li.textContent = lim;
-      drawerLimitations.appendChild(li);
-    }
-  } else {
-    drawerLimitationsField.hidden = true;
-  }
-
-  const findingKey = `${finding.ruleId}:${currentOrigin}`;
-  void TriageStore.getAnnotation(findingKey, { isIncognito: currentState?.isIncognito === true }).then((ann) => {
-    if (activeDrawerFinding?.ruleId === finding.ruleId) {
-      drawerTriageSelect.value = ann?.state ?? 'unreviewed';
-      drawerTriageNotes.value = ann?.notes ?? '';
-    }
-  });
-
-  if (typeof findingDetailsDrawer.showModal === 'function') {
-    findingDetailsDrawer.showModal();
-  } else {
-    findingDetailsDrawer.setAttribute('open', '');
-  }
-}
-
-/* ── B: Score breakdown ───────────────────────────────────────── */
-
-function renderBreakdown(breakdown: ScoreBreakdown[]): void {
-  // Clear existing rows
-  while (breakdownBody.firstChild) {
-    breakdownBody.removeChild(breakdownBody.firstChild);
-  }
-
-  // Only show rules that cost points
-  const scoring = breakdown.filter((b) => b.penalty > 0);
-
-  if (scoring.length === 0) {
-    breakdownSection.hidden = true;
+  if (top3.length === 0) {
+    findingsSection.hidden = true;
     return;
   }
 
-  for (const item of scoring) {
-    const tr = document.createElement('tr');
+  findingsSection.hidden = false;
 
-    const tdRule = document.createElement('td');
-    tdRule.className = 'col-rule';
-    tdRule.textContent = item.ruleId;
+  for (const finding of top3) {
+    const li = document.createElement('li');
+    li.className = `finding-item severity-${finding.severity}`;
+    li.dataset['severity'] = finding.severity;
 
-    const tdTitle = document.createElement('td');
-    tdTitle.className = 'col-title';
-    tdTitle.textContent = item.title;
+    const headerRow = document.createElement('div');
+    headerRow.className = 'finding-header-row';
 
-    const tdPts = document.createElement('td');
-    tdPts.className = 'col-pts';
-    tdPts.textContent = `−${item.penalty}`;
+    const pill = document.createElement('span');
+    pill.className = `finding-severity-pill severity-${finding.severity}`;
+    pill.textContent = finding.severity.toUpperCase();
 
-    tr.appendChild(tdRule);
-    tr.appendChild(tdTitle);
-    tr.appendChild(tdPts);
-    breakdownBody.appendChild(tr);
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'finding-title';
+    titleSpan.textContent = finding.title;
+
+    headerRow.appendChild(pill);
+    headerRow.appendChild(titleSpan);
+
+    li.appendChild(headerRow);
+
+    if (finding.impact !== undefined && finding.impact.length > 0) {
+      const impactEl = document.createElement('p');
+      impactEl.className = 'finding-impact-text';
+      impactEl.textContent = finding.impact;
+      li.appendChild(impactEl);
+    } else if (finding.evidence.length > 0) {
+      const evEl = document.createElement('p');
+      evEl.className = 'finding-evidence-text';
+      evEl.textContent = finding.evidence;
+      li.appendChild(evEl);
+    }
+
+    findingsList.appendChild(li);
   }
-
-  breakdownSection.hidden = false;
-  breakdownRendered = true;
 }
 
-/* ── Auth Posture Diff ────────────────────────────────────────── */
+/* ── Top 3 Leads Teaser (Safe text DOM APIs, zero innerHTML) ────── */
 
-async function renderAuthDiff(origin: string): Promise<void> {
+function renderLeadsTeaser(leads: Lead[]): void {
+  while (leadsCardList.firstChild) {
+    leadsCardList.removeChild(leadsCardList.firstChild);
+  }
+
+  leadsCountBadge.textContent = `${leads.length} lead${leads.length === 1 ? '' : 's'}`;
+
+  if (leads.length === 0) {
+    leadsEmptyState.hidden = false;
+    return;
+  }
+
+  leadsEmptyState.hidden = true;
+
+  const top3 = leads.slice(0, 3);
+  for (const lead of top3) {
+    const card = document.createElement('div');
+    card.className = `lead-teaser-card potential-${lead.potential ?? 'info'}`;
+
+    const topRow = document.createElement('div');
+    topRow.className = 'lead-card-top';
+
+    const potentialBadge = document.createElement('span');
+    potentialBadge.className = `lead-tier-badge tier-${lead.potential ?? 'info'}`;
+    potentialBadge.textContent = (lead.potential ?? lead.tier ?? 'INFO').toUpperCase();
+
+    const familyBadge = document.createElement('span');
+    familyBadge.className = 'lead-family-badge';
+    familyBadge.textContent = lead.family ?? 'LEAD';
+
+    topRow.appendChild(potentialBadge);
+    topRow.appendChild(familyBadge);
+
+    const titleEl = document.createElement('p');
+    titleEl.className = 'lead-title';
+    titleEl.textContent = lead.title;
+
+    card.appendChild(topRow);
+    card.appendChild(titleEl);
+
+    const detail = lead.verdict?.summary ?? lead.remediation ?? (lead.evidence.location.length > 0 ? String(lead.evidence.location) : '');
+    if (detail.length > 0) {
+      const descEl = document.createElement('p');
+      descEl.className = 'lead-desc';
+      descEl.textContent = detail;
+      card.appendChild(descEl);
+    }
+
+    leadsCardList.appendChild(card);
+  }
+}
+
+async function refreshLeads(): Promise<void> {
+  if (currentTabId === null && (currentOrigin === null || currentOrigin.length === 0)) return;
   try {
-    const diff = await LocalStorage.getLatestAuthDiff(origin);
-    if (diff === null) {
-      authDiffSection.hidden = true;
-      return;
-    }
-
-    const deltaPrefix = diff.scoreDelta > 0 ? '+' : '';
-    authDiffDelta.textContent = `${deltaPrefix}${diff.scoreDelta} pts`;
-    const deltaClass =
-      diff.scoreDelta > 0 ? 'positive' : diff.scoreDelta < 0 ? 'negative' : 'neutral';
-    authDiffDelta.className = `auth-diff-delta ${deltaClass}`;
-
-    const dateStr = new Date(diff.timestamp).toLocaleTimeString();
-    authDiffMeta.textContent = `Triggered by cookie "${diff.triggeredByCookie}" at ${dateStr} • Pre: ${diff.preAuthScore} (${diff.preAuthGrade}) → Post: ${diff.postAuthScore} (${diff.postAuthGrade})`;
-
-    while (authDiffList.firstChild) {
-      authDiffList.removeChild(authDiffList.firstChild);
-    }
-
-    if (diff.changes.length === 0) {
-      const li = document.createElement('li');
-      li.className = 'auth-diff-item';
-      const text = document.createElement('span');
-      text.className = 'auth-diff-title';
-      text.textContent = 'No finding status changes detected between pre- and post-login.';
-      li.appendChild(text);
-      authDiffList.appendChild(li);
-    } else {
-      for (const change of diff.changes) {
-        const li = document.createElement('li');
-        li.className = 'auth-diff-item';
-
-        const badge = document.createElement('span');
-        badge.className = `auth-diff-badge ${change.type}`;
-        badge.textContent = change.type === 'added' ? '+ NEW' : '- RESOLVED';
-
-        const rule = document.createElement('span');
-        rule.className = 'auth-diff-rule';
-        rule.textContent = change.ruleId;
-
-        const title = document.createElement('span');
-        title.className = 'auth-diff-title';
-        title.textContent = change.title;
-
-        li.appendChild(badge);
-        li.appendChild(rule);
-        li.appendChild(title);
-        authDiffList.appendChild(li);
-      }
-    }
-
-    authDiffSection.hidden = false;
-  } catch {
-    authDiffSection.hidden = true;
-  }
-}
-
-/* ── E: Subdomain trust analysis ──────────────────────────────── */
-
-function renderSubdomainTrust(trust: SubdomainTrustAnalysis | undefined): void {
-  // Guard: old states (before upgrade) may lack this field
-  if (!trust || trust.vectors.length === 0) {
-    subdomainSection.hidden = true;
-    return;
-  }
-
-  // Clear existing vector rows
-  while (vectorList.firstChild) {
-    vectorList.removeChild(vectorList.firstChild);
-  }
-
-  // Escalation badge
-  subdomainBadge.textContent = trust.hasEscalationPath
-    ? '⚠ Escalation path found'
-    : '✔ No escalation path';
-  subdomainBadge.className = `subdomain-badge ${trust.hasEscalationPath ? 'has-path' : 'no-path'}`;
-
-  renderTrustGraph(trust.vectors);
-
-  // Render each vector as a list item
-  for (const vector of trust.vectors) {
-    vectorList.appendChild(buildVectorItem(vector));
-  }
-
-  subdomainSection.hidden = false;
-}
-
-function renderTrustGraph(vectors: SubdomainTrustVector[]): void {
-  const svgNamespace = 'http://www.w3.org/2000/svg';
-  const centerX = 160;
-  const centerY = 90;
-  const positions = [
-    { x: 44, y: 28 },
-    { x: 116, y: 18 },
-    { x: 204, y: 18 },
-    { x: 276, y: 28 },
-    { x: 276, y: 150 },
-    { x: 204, y: 162 },
-    { x: 116, y: 162 },
-    { x: 44, y: 150 },
-  ];
-  const graphLabel = vectors.map((vector) => {
-    const status = vector.present === true ? 'risk detected' : vector.present === false ? 'protected' : 'not applicable';
-    return `${vector.id}: ${status}`;
-  }).join('. ');
-
-  const graphTitle = document.createElementNS(svgNamespace, 'title');
-  graphTitle.id = 'trust-graph-title';
-  graphTitle.textContent = 'Subdomain trust graph';
-  const graphDescription = document.createElementNS(svgNamespace, 'desc');
-  graphDescription.id = 'trust-graph-description';
-  graphDescription.textContent = `Spokes connect the analyzed page to each subdomain trust vector. ${graphLabel}`;
-  trustGraph.replaceChildren(graphTitle, graphDescription);
-  trustGraph.setAttribute('aria-labelledby', 'trust-graph-title trust-graph-description');
-
-  vectors.forEach((vector, index) => {
-    const position = positions[index % positions.length];
-    if (!position) return;
-    const state = String(vector.present);
-
-    const edgeGroup = document.createElementNS(svgNamespace, 'g');
-    const edgeTitle = document.createElementNS(svgNamespace, 'title');
-    edgeTitle.id = `trust-edge-title-${vector.id}`;
-    edgeTitle.textContent = `${vector.id} link to analyzed page`;
-    const edgeDescription = document.createElementNS(svgNamespace, 'desc');
-    edgeDescription.id = `trust-edge-description-${vector.id}`;
-    edgeDescription.textContent = `Trust bridge status: ${graphLabelForVector(vector)}. Risk level: ${vector.risk}.`;
-    edgeGroup.setAttribute('role', 'img');
-    edgeGroup.setAttribute('aria-labelledby', `${edgeTitle.id} ${edgeDescription.id}`);
-    edgeGroup.append(edgeTitle, edgeDescription);
-
-    const edge = document.createElementNS(svgNamespace, 'line');
-    edge.setAttribute('x1', String(centerX));
-    edge.setAttribute('y1', String(centerY));
-    edge.setAttribute('x2', String(position.x));
-    edge.setAttribute('y2', String(position.y));
-    edge.setAttribute('class', `trust-edge present-${state}`);
-    edge.setAttribute('aria-hidden', 'true');
-    edgeGroup.appendChild(edge);
-    trustGraph.appendChild(edgeGroup);
-
-    const node = document.createElementNS(svgNamespace, 'g');
-    node.setAttribute('class', `trust-node present-${state} risk-${vector.risk}`);
-    node.setAttribute('role', 'img');
-    const nodeTitle = document.createElementNS(svgNamespace, 'title');
-    nodeTitle.id = `trust-node-title-${vector.id}`;
-    nodeTitle.textContent = `${vector.id}: ${vector.label}`;
-    const nodeDescription = document.createElementNS(svgNamespace, 'desc');
-    nodeDescription.id = `trust-node-description-${vector.id}`;
-    nodeDescription.textContent = `${graphLabelForVector(vector)}. ${vector.detail}`;
-    node.setAttribute('aria-labelledby', `${nodeTitle.id} ${nodeDescription.id}`);
-    node.append(nodeTitle, nodeDescription);
-
-    const circle = document.createElementNS(svgNamespace, 'circle');
-    circle.setAttribute('cx', String(position.x));
-    circle.setAttribute('cy', String(position.y));
-    circle.setAttribute('r', '15');
-    circle.setAttribute('class', 'trust-node-circle');
-    circle.setAttribute('aria-hidden', 'true');
-    node.appendChild(circle);
-
-    const label = document.createElementNS(svgNamespace, 'text');
-    label.setAttribute('x', String(position.x));
-    label.setAttribute('y', String(position.y + 3));
-    label.textContent = vector.id.slice(-3);
-    label.setAttribute('aria-hidden', 'true');
-    node.appendChild(label);
-    trustGraph.appendChild(node);
-  });
-
-  const center = document.createElementNS(svgNamespace, 'g');
-  center.setAttribute('class', 'trust-center');
-  center.setAttribute('role', 'img');
-  center.setAttribute('aria-labelledby', 'trust-center-title trust-center-description');
-  const centerTitle = document.createElementNS(svgNamespace, 'title');
-  centerTitle.id = 'trust-center-title';
-  centerTitle.textContent = 'Analyzed page';
-  const centerDescription = document.createElementNS(svgNamespace, 'desc');
-  centerDescription.id = 'trust-center-description';
-  centerDescription.textContent = 'Central page node for the subdomain trust bridge graph.';
-  center.append(centerTitle, centerDescription);
-  const centerCircle = document.createElementNS(svgNamespace, 'circle');
-  centerCircle.setAttribute('cx', String(centerX));
-  centerCircle.setAttribute('cy', String(centerY));
-  centerCircle.setAttribute('r', '28');
-  centerCircle.setAttribute('aria-hidden', 'true');
-  center.appendChild(centerCircle);
-
-  const centerLabel = document.createElementNS(svgNamespace, 'text');
-  centerLabel.setAttribute('x', String(centerX));
-  centerLabel.setAttribute('y', String(centerY + 4));
-  centerLabel.textContent = 'PAGE';
-  centerLabel.setAttribute('aria-hidden', 'true');
-  center.appendChild(centerLabel);
-  trustGraph.appendChild(center);
-}
-
-function graphLabelForVector(vector: SubdomainTrustVector): string {
-  if (vector.present === true) return 'risk detected';
-  if (vector.present === false) return 'protected';
-  return 'not applicable';
-}
-
-function buildVectorItem(vector: SubdomainTrustVector): HTMLLIElement {
-  const li = document.createElement('li');
-  li.className = `vector-item risk-${vector.risk}`;
-
-  // Status dot
-  const dot = document.createElement('span');
-  dot.className = `vector-dot present-${String(vector.present)}`;
-
-  // Body
-  const body = document.createElement('div');
-  body.className = 'vector-body';
-
-  const label = document.createElement('span');
-  label.className = 'vector-label';
-  label.textContent = vector.label;
-
-  const detail = document.createElement('span');
-  detail.className = 'vector-detail';
-  detail.textContent = vector.detail;
-  detail.title = vector.detail;
-
-  body.appendChild(label);
-  body.appendChild(detail);
-
-  // Rule ID badge
-  const idSpan = document.createElement('span');
-  idSpan.className = 'vector-id';
-  idSpan.textContent = vector.id;
-
-  li.appendChild(dot);
-  li.appendChild(body);
-  li.appendChild(idSpan);
-
-  return li;
-}
-
-/* ── API endpoints analysis ──────────────────────────────────── */
-
-function getApiEndpointsList(state: TabState): ApiEndpointState[] {
-  const endpoints: unknown = state.apiEndpoints;
-  if (endpoints === undefined || endpoints === null) return [];
-  if (endpoints instanceof Map) {
-    const list: ApiEndpointState[] = [];
-    for (const val of endpoints.values()) {
-      if (val !== null && typeof val === 'object' && 'normalizedPath' in val) {
-        list.push(val as ApiEndpointState);
-      }
-    }
-    return list;
-  }
-  if (Array.isArray(endpoints)) {
-    const list: ApiEndpointState[] = [];
-    for (const entry of endpoints as unknown[]) {
-      if (Array.isArray(entry) && entry.length >= 2 && entry[1] !== null && typeof entry[1] === 'object') {
-        list.push(entry[1] as ApiEndpointState);
-      } else if (entry !== null && typeof entry === 'object' && 'normalizedPath' in entry) {
-        list.push(entry as ApiEndpointState);
-      }
-    }
-    return list;
-  }
-  if (typeof endpoints === 'object') {
-    const list: ApiEndpointState[] = [];
-    for (const val of Object.values(endpoints as Record<string, unknown>)) {
-      if (val !== null && typeof val === 'object' && 'normalizedPath' in val) {
-        list.push(val as ApiEndpointState);
-      }
-    }
-    return list;
-  }
-  return [];
-}
-
-function renderApiEndpoints(state: TabState): void {
-  const endpoints = getApiEndpointsList(state);
-  if (endpoints.length === 0) {
-    apiEndpointsSection.hidden = true;
-    return;
-  }
-
-  while (apiEndpointsList.firstChild) {
-    apiEndpointsList.removeChild(apiEndpointsList.firstChild);
-  }
-
-  let totalFindings = 0;
-  for (const ep of endpoints) {
-    totalFindings += ep.findings.length;
-  }
-
-  apiEndpointsBadge.textContent = `${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'}${totalFindings > 0 ? ` (${totalFindings} finding${totalFindings === 1 ? '' : 's'})` : ''}`;
-  if (totalFindings > 0) {
-    apiEndpointsBadge.classList.add('has-findings');
-  } else {
-    apiEndpointsBadge.classList.remove('has-findings');
-  }
-
-  for (const ep of endpoints) {
-    const card = document.createElement('li');
-    card.className = 'api-endpoint-card';
-
-    const header = document.createElement('div');
-    header.className = 'api-endpoint-header';
-
-    const pathSpan = document.createElement('span');
-    pathSpan.className = 'api-endpoint-path';
-    pathSpan.textContent = ep.normalizedPath;
-    pathSpan.title = ep.normalizedPath;
-
-    const badges = document.createElement('div');
-    badges.style.display = 'flex';
-    badges.style.gap = '4px';
-
-    const methodBadge = document.createElement('span');
-    methodBadge.className = 'api-method-badge';
-    methodBadge.textContent = ep.lastHop.method ?? 'GET';
-
-    const partyBadge = document.createElement('span');
-    partyBadge.className = 'api-party-badge';
-    partyBadge.textContent = ep.isFirstParty ? '1st party' : '3rd party';
-
-    badges.appendChild(methodBadge);
-    badges.appendChild(partyBadge);
-
-    header.appendChild(pathSpan);
-    header.appendChild(badges);
-    card.appendChild(header);
-
-    if (ep.findings.length > 0) {
-      const findingsContainer = document.createElement('div');
-      findingsContainer.className = 'api-endpoint-findings';
-      for (const finding of ep.findings) {
-        const pill = document.createElement('div');
-        pill.className = `api-finding-pill severity-${finding.severity}`;
-
-        const ruleSpan = document.createElement('strong');
-        ruleSpan.textContent = finding.ruleId;
-
-        const titleSpan = document.createElement('span');
-        titleSpan.textContent = finding.title;
-
-        pill.appendChild(ruleSpan);
-        pill.appendChild(titleSpan);
-        findingsContainer.appendChild(pill);
-      }
-      card.appendChild(findingsContainer);
-    } else {
-      const noFindings = document.createElement('div');
-      noFindings.className = 'api-no-findings';
-      noFindings.textContent = '✔ No header or CORS issues detected';
-      card.appendChild(noFindings);
-    }
-
-    apiEndpointsList.appendChild(card);
-  }
-
-  apiEndpointsSection.hidden = false;
-}
-
-/* ================================================================
-   C: Stop monitoring
-   ================================================================ */
-
-function wireStopMonitoringButton(): void {
-  stopMonitoringBtn.addEventListener('click', () => {
-    if (!currentOrigin) return;
-
-    const pattern = patternFromOrigin(currentOrigin);
-    chrome.permissions.remove(
-      { origins: [pattern] },
-      (removed) => {
-        if (removed) {
-          // Notify SW so it can flush state and reset badge
-          void sendToBackground({
-            type: 'PERMISSIONS_CHANGED',
-            granted: false,
-            origins: [pattern],
-          }).catch(() => undefined);
-
-          // Return to un-monitored UI
-          stopMonitoringBtn.hidden = true;
-          exportBtn.hidden = true;
-          copyReportBtn.hidden = true;
-          trendIndicator.hidden = true;
-          specialNotice.hidden = true;
-          breakdownSection.hidden = true;
-          findingsSection.hidden = true;
-          subdomainSection.hidden = true;
-          apiEndpointsSection.hidden = true;
-          setBadgeState('locked', undefined, 'Site access locked');
-          scoreText.textContent = '';
-          qualityScoreText.textContent = '';
-          currentState = null;
-          showMonitorSection();
-          clearStateMessage();
-        }
-      },
-    );
-  });
-}
-
-/* ================================================================
-   D: Export JSON
-   ================================================================ */
-
-function wireExportButton(): void {
-  exportBtn.addEventListener('click', () => {
-    if (currentState === null) return;
-
-    // Build a clean export object — no cookie values (CookieRecord has none),
-    // no internal IDs, just what's useful to the user.
-    const exportData = {
-      exportedAt: new Date().toISOString(),
-      origin: currentState.origin,
-      url: currentState.url,
-      grade: currentState.grade,
-      score: currentState.score,
-      qualityScore: currentState.qualityScore ?? 100,
-      qualityGrade: currentState.qualityGrade ?? 'A',
-      scoreVersion: currentState.scoreVersion,
-      findings: currentState.findings,
-      scoreBreakdown: currentState.scoreBreakdown,
-      cookies: currentState.cookies, // metadata only — no values
-      coverage: {
-        ...currentState.coverage,
-        serviceWorkerUrl: (currentState.coverage.serviceWorkerUrl !== null && currentState.coverage.serviceWorkerUrl !== undefined && currentState.coverage.serviceWorkerUrl !== '')
-          ? ((currentState.coverage.serviceWorkerUrl.split('?')[0] ?? '').split('#')[0] ?? null)
-          : null
-      },
-      subdomainTrust: currentState.subdomainTrust, // E: include escalation analysis
-      apiEndpoints: getApiEndpointsList(currentState),
-    };
-
-    const json = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-
-    // Derive a safe filename from the origin hostname
-    let hostname = 'unknown';
-    try {
-      hostname = new URL(currentState.origin).hostname;
-    } catch { /* leave as 'unknown' */ }
-
-    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const filename = `aculyx-${hostname}-${date}.json`;
-
-    // Trigger download via a synthetic anchor click
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
-}
-
-/* ================================================================
-   4. Markdown Audit Report Export & Copy
-   ================================================================ */
-
-function generateMarkdownReport(state: TabState): string {
-  const date = new Date().toLocaleString();
-  let md = `# Security Audit Report — ${state.origin}\n\n`;
-  md += `**Date:** ${date}  \n`;
-  md += `**Target URL:** ${state.url}  \n`;
-  md += `**Overall Security Grade:** **${state.grade}** (${state.score} / 100)  \n\n`;
-  md += `**Configuration Quality:** ${state.qualityGrade ?? 'A'} (${state.qualityScore ?? 100} / 100)  \n\n`;
-
-  md += `## Executive Summary\n`;
-  md += `ACULYX conducted an automated, passive inspection of HTTP response headers and cookies for \`${state.origin}\`.\n\n`;
-
-  if (state.subdomainTrust.hasEscalationPath) {
-    md += `> ⚠️ **Subdomain Escalation Path Detected:** Trust bridges exist between this site and its subdomains that could allow a compromised subdomain to compromise main-domain sessions or data.\n\n`;
-  }
-
-  md += `## Key Findings (${state.findings.length} total)\n\n`;
-  if (state.findings.length === 0) {
-    md += `No security weaknesses detected. All standard headers and cookie protections are configured properly.\n\n`;
-  } else {
-    for (const f of state.findings) {
-      md += `### [${f.severity.toUpperCase()}] ${f.title}\n`;
-      md += `- **Rule ID:** \`${f.ruleId}\`\n`;
-      if (f.impact != null && f.impact.length > 0) md += `- **Real-World Impact:** ${f.impact}\n`;
-      if (f.evidence.length > 0) md += `- **Evidence:** \`${f.evidence}\`\n`;
-      md += `- **Recommendation:** ${f.recommendation}\n`;
-      md += `- **Reference:** ${f.reference}\n\n`;
-    }
-  }
-
-  if (state.subdomainTrust.vectors.length > 0) {
-    md += `## Subdomain Trust Analysis\n\n`;
-    md += `| Vector ID | Assessment | Detail |\n`;
-    md += `|---|---|---|\n`;
-    for (const v of state.subdomainTrust.vectors) {
-      const status = v.present === true ? '⚠️ Risk confirmed' : v.present === false ? '✅ Protected' : 'ℹ️ N/A';
-      md += `| \`${v.id}\` | ${status} | ${v.detail} |\n`;
-    }
-    md += `\n`;
-  }
-
-  md += `---\n*Generated locally by ACULYX - Header & Cookie Security Checker*\n`;
-  return md;
-}
-
-function wireCopyReportButton(): void {
-  copyReportBtn.addEventListener('click', () => {
-    if (currentState === null) return;
-    const report = generateMarkdownReport(currentState);
-    void navigator.clipboard.writeText(report).then(() => {
-      const original = copyReportBtn.textContent;
-      copyReportBtn.textContent = '✔ Copied!';
-      setTimeout(() => {
-        copyReportBtn.textContent = original;
-      }, 2000);
-    }).catch(() => {
-      copyReportBtn.textContent = 'Failed to copy';
+    const res = await sendToBackground({
+      type: 'GET_LEADS_STATE',
+      tabId: currentTabId ?? undefined,
+      origin: currentOrigin !== null && currentOrigin.length > 0 ? currentOrigin : undefined,
     });
-  });
-}
-
-function openGraphInTab(): void {
-  let apex = '';
-  if (currentOrigin) {
-    try {
-      apex = new URL(currentOrigin).hostname;
-    } catch {
-      // ignore
-    }
-  }
-  const tabParam = currentTabId !== null ? `&tabId=${currentTabId}` : '';
-  const apexParam = apex ? `?apex=${encodeURIComponent(apex)}` : '';
-  const url = chrome.runtime.getURL(`src/sidepanel/sidepanel.html${apexParam}${tabParam}`);
-  void chrome.tabs.create({ url });
-}
-
-interface SidePanelApi {
-  open: (options: { tabId?: number; windowId?: number }) => Promise<void>;
-}
-
-function wireOpenGraphButton(): void {
-  openGraphBtn.addEventListener('click', () => {
-    try {
-      const sp = (chrome as unknown as { sidePanel?: SidePanelApi }).sidePanel;
-      if (sp !== undefined && typeof sp.open === 'function') {
-        if (currentTabId !== null) {
-          sp.open({ tabId: currentTabId }).catch(() => {
-            chrome.windows.getCurrent((win) => {
-              if (win.id !== undefined && sp !== undefined) {
-                sp.open({ windowId: win.id }).catch(() => {
-                  openGraphInTab();
-                });
-              } else {
-                openGraphInTab();
-              }
-            });
-          });
-        } else {
-          chrome.windows.getCurrent((win) => {
-            if (win.id !== undefined && sp !== undefined) {
-              sp.open({ windowId: win.id }).catch(() => {
-                openGraphInTab();
-              });
-            } else {
-              openGraphInTab();
-            }
-          });
-        }
-        return;
-      }
-    } catch {
-      // Firefox fallback: open in tab
-    }
-    // Firefox MV3 fallback: open graph in a new tab
-    openGraphInTab();
-  });
-}
-
-/* ================================================================
-   5. Onboarding Banner
-   ================================================================ */
-
-async function initOnboarding(): Promise<void> {
-  try {
-    const dismissed = await LocalStorage.isOnboardingDismissed();
-    if (!dismissed) {
-      onboardingCard.hidden = false;
+    if (res.type === 'LEAD_STATE_UPDATE') {
+      currentLeads = res.leads ?? [];
+      renderLeadsTeaser(currentLeads);
     }
   } catch {
-    // Storage access fallback
+    // Background service worker might be waking up
   }
-
-  const dismiss = async (): Promise<void> => {
-    onboardingCard.hidden = true;
-    try {
-      await LocalStorage.setOnboardingDismissed(true);
-    } catch {
-      // Storage access fallback
-    }
-  };
-
-  onboardingCloseBtn.addEventListener('click', () => { void dismiss(); });
-  onboardingActionBtn.addEventListener('click', () => { void dismiss(); });
 }
 
 /* ================================================================
-   3. Historical Trend Over Time
-   ================================================================ */
-
-async function renderTrend(origin: string, currentScore: number, currentGrade: TabState['grade']): Promise<void> {
-  try {
-    const history = await LocalStorage.getOriginHistory(origin);
-    if (history.length >= 2) {
-      const points = history.slice(-8);
-      const lastPoint = points[points.length - 1];
-      if (!lastPoint || lastPoint.score !== currentScore || lastPoint.grade !== currentGrade) {
-        points.push({ timestamp: Date.now(), score: currentScore, grade: currentGrade });
-      }
-
-      if (points.length >= 2) {
-        const minScore = Math.min(...points.map((point) => point.score));
-        const maxScore = Math.max(...points.map((point) => point.score));
-        const coordinates = points.map((point, index) => {
-          const x = 4 + (index / (points.length - 1)) * 88;
-          const y = maxScore === minScore
-            ? 14
-            : 24 - ((point.score - minScore) / (maxScore - minScore)) * 20;
-          return `${x},${y}`;
-        });
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        line.setAttribute('points', coordinates.join(' '));
-        line.setAttribute('fill', 'none');
-        line.setAttribute('stroke', 'currentColor');
-        line.setAttribute('stroke-width', '2');
-        trendChart.replaceChildren(line);
-        trendChart.setAttribute('aria-label', `Score trend: ${points.map((point) => point.score).join(', ')}`);
-        trendChart.removeAttribute('hidden');
-      }
-
-      // Compare current score to the previous recorded score
-      const prev = history[history.length - 2];
-      if (prev != null) {
-        const diff = currentScore - prev.score;
-        if (diff > 0) {
-          trendText.textContent = `↗ +${diff} pts (was ${prev.grade}/${prev.score})`;
-          trendIndicator.className = 'trend-indicator trend-improved';
-        } else if (diff < 0) {
-          trendText.textContent = `↘ ${diff} pts (was ${prev.grade}/${prev.score})`;
-          trendIndicator.className = 'trend-indicator trend-regressed';
-        } else {
-          trendText.textContent = `• Stable ${currentGrade} (${currentScore})`;
-          trendIndicator.className = 'trend-indicator trend-stable';
-        }
-        trendIndicator.hidden = false;
-        return;
-      }
-    }
-  } catch {
-    // Ignore history error
-  }
-  trendChart.setAttribute('hidden', '');
-  trendIndicator.hidden = true;
-}
-
-/* ================================================================
-   8. Graceful Edge Case Notices
+   Special Notices
    ================================================================ */
 
 function renderSpecialNotices(state: TabState): void {
@@ -1636,6 +580,34 @@ function showMonitorSection(): void {
    Event wiring
    ================================================================ */
 
+function wireSegmentedControl(): void {
+  tabBtnHygiene.addEventListener('click', () => {
+    tabBtnHygiene.classList.add('active');
+    tabBtnHygiene.setAttribute('aria-selected', 'true');
+    tabBtnLeads.classList.remove('active');
+    tabBtnLeads.setAttribute('aria-selected', 'false');
+    hygieneView.hidden = false;
+    hygieneView.classList.add('active');
+    leadsView.hidden = true;
+    leadsView.classList.remove('active');
+  });
+
+  tabBtnLeads.addEventListener('click', () => {
+    tabBtnLeads.classList.add('active');
+    tabBtnLeads.setAttribute('aria-selected', 'true');
+    tabBtnHygiene.classList.remove('active');
+    tabBtnHygiene.setAttribute('aria-selected', 'false');
+    leadsView.hidden = false;
+    leadsView.classList.add('active');
+    hygieneView.hidden = true;
+    hygieneView.classList.remove('active');
+    if (currentSettings?.leadsEnabled === true && currentTabId !== null && currentTabUrl.length > 0) {
+      void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl }).catch(() => undefined);
+    }
+    void refreshLeads();
+  });
+}
+
 function wireSettingsLink(): void {
   settingsLink.addEventListener('click', (e) => {
     e.preventDefault();
@@ -1675,6 +647,92 @@ function wireMonitorButton(): void {
         }
       },
     );
+  });
+}
+
+function wireStopMonitoringButton(): void {
+  stopMonitoringBtn.addEventListener('click', () => {
+    if (!currentOrigin) return;
+
+    const pattern = patternFromOrigin(currentOrigin);
+    chrome.permissions.remove(
+      { origins: [pattern] },
+      (removed) => {
+        if (removed) {
+          void sendToBackground({
+            type: 'PERMISSIONS_CHANGED',
+            granted: false,
+            origins: [pattern],
+          }).catch(() => undefined);
+
+          stopMonitoringBtn.hidden = true;
+          specialNotice.hidden = true;
+          findingsSection.hidden = true;
+          setBadgeState('locked', undefined, 'Site access locked');
+          scoreText.textContent = '';
+          qualityScoreText.textContent = '';
+          showMonitorSection();
+          clearStateMessage();
+          setPopupState('not-monitored');
+        }
+      },
+    );
+  });
+}
+
+interface SidePanelApi {
+  open: (options: { tabId?: number; windowId?: number }) => Promise<void>;
+}
+
+function openWorkspaceInTab(): void {
+  let apex = '';
+  if (currentOrigin) {
+    try {
+      apex = new URL(currentOrigin).hostname;
+    } catch {
+      // ignore
+    }
+  }
+  const tabParam = currentTabId !== null ? `&tabId=${currentTabId}` : '';
+  const apexParam = apex ? `?apex=${encodeURIComponent(apex)}` : '';
+  const url = chrome.runtime.getURL(`src/sidepanel/sidepanel.html${apexParam}${tabParam}`);
+  void chrome.tabs.create({ url });
+}
+
+function wireOpenWorkspaceButton(): void {
+  openGraphBtn.addEventListener('click', () => {
+    try {
+      const sp = (chrome as unknown as { sidePanel?: SidePanelApi }).sidePanel;
+      if (sp !== undefined && typeof sp.open === 'function') {
+        if (currentTabId !== null) {
+          sp.open({ tabId: currentTabId }).catch(() => {
+            chrome.windows.getCurrent((win) => {
+              if (win.id !== undefined && sp !== undefined) {
+                sp.open({ windowId: win.id }).catch(() => {
+                  openWorkspaceInTab();
+                });
+              } else {
+                openWorkspaceInTab();
+              }
+            });
+          });
+        } else {
+          chrome.windows.getCurrent((win) => {
+            if (win.id !== undefined && sp !== undefined) {
+              sp.open({ windowId: win.id }).catch(() => {
+                openWorkspaceInTab();
+              });
+            } else {
+              openWorkspaceInTab();
+            }
+          });
+        }
+        return;
+      }
+    } catch {
+      // Firefox fallback
+    }
+    openWorkspaceInTab();
   });
 }
 
@@ -1788,472 +846,6 @@ function checkPermission(origin: string): Promise<boolean> {
   });
 }
 
-function formatSourceHost(sourceUrl: string): string {
-  try {
-    return new URL(sourceUrl).hostname;
-  } catch {
-    return sourceUrl;
-  }
-}
-
-/* ================================================================
-   Leads Tab, Radar Visualizer, and Lead Cards
-   ================================================================ */
-
-function wireSegmentedControl(): void {
-  tabBtnHygiene.addEventListener('click', () => {
-    tabBtnHygiene.classList.add('active');
-    tabBtnHygiene.setAttribute('aria-selected', 'true');
-    tabBtnLeads.classList.remove('active');
-    tabBtnLeads.setAttribute('aria-selected', 'false');
-    hygieneView.hidden = false;
-    hygieneView.classList.add('active');
-    leadsView.hidden = true;
-    leadsView.classList.remove('active');
-  });
-
-  tabBtnLeads.addEventListener('click', () => {
-    tabBtnLeads.classList.add('active');
-    tabBtnLeads.setAttribute('aria-selected', 'true');
-    tabBtnHygiene.classList.remove('active');
-    tabBtnHygiene.setAttribute('aria-selected', 'false');
-    leadsView.hidden = false;
-    leadsView.classList.add('active');
-    hygieneView.hidden = true;
-    hygieneView.classList.remove('active');
-    renderRadarBase();
-    if (currentSettings?.leadsEnabled === true && currentTabId !== null && currentTabUrl.length > 0) {
-      void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl }).catch(() => undefined);
-    }
-    void refreshLeads();
-  });
-}
-
-async function refreshLeads(): Promise<void> {
-  if (currentTabId === null && (currentOrigin === null || currentOrigin.length === 0)) return;
-  try {
-    const res = await sendToBackground({
-      type: 'GET_LEADS_STATE',
-      tabId: currentTabId ?? undefined,
-      origin: currentOrigin !== null && currentOrigin.length > 0 ? currentOrigin : undefined,
-    });
-    if (res.type === 'LEAD_STATE_UPDATE') {
-      currentLeads = res.leads ?? [];
-      renderLeadsTab(currentLeads);
-    }
-  } catch {
-    // Background service worker might be waking up
-  }
-}
-
-const FAMILIES: Array<{ id: string; name: string }> = [
-  { id: 'F1', name: 'Secrets' },
-  { id: 'F2', name: 'Endpoints' },
-  { id: 'F3', name: 'Source Maps' },
-  { id: 'F4', name: 'Auth' },
-  { id: 'F5', name: 'Params' },
-  { id: 'F6', name: 'CORS/Headers' },
-  { id: 'F7', name: 'Response Body' },
-  { id: 'F8', name: 'Cloud/Recon' },
-];
-
-function renderRadarBase(): void {
-  if (radarBaseRendered) return;
-  radarBaseRendered = true;
-
-  while (radarRings.firstChild) radarRings.removeChild(radarRings.firstChild);
-  while (radarAxes.firstChild) radarAxes.removeChild(radarAxes.firstChild);
-
-  const ringRadii = [25, 50, 75, 100];
-  for (const r of ringRadii) {
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', '0');
-    circle.setAttribute('cy', '0');
-    circle.setAttribute('r', String(r));
-    circle.setAttribute('stroke', r === 100 ? 'rgba(138, 43, 226, 0.45)' : 'rgba(138, 43, 226, 0.2)');
-    circle.setAttribute('stroke-width', '1');
-    circle.setAttribute('fill', 'none');
-    radarRings.appendChild(circle);
-  }
-
-  for (let i = 0; i < FAMILIES.length; i++) {
-    const angle = (i * 2 * Math.PI) / FAMILIES.length - Math.PI / 2;
-    const x2 = Math.round(105 * Math.cos(angle));
-    const y2 = Math.round(105 * Math.sin(angle));
-
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', '0');
-    line.setAttribute('y1', '0');
-    line.setAttribute('x2', String(x2));
-    line.setAttribute('y2', String(y2));
-    line.setAttribute('stroke', 'rgba(138, 43, 226, 0.25)');
-    line.setAttribute('stroke-width', '1');
-    radarAxes.appendChild(line);
-
-    const lx = Math.round(114 * Math.cos(angle));
-    const ly = Math.round(114 * Math.sin(angle) + 3);
-    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    text.setAttribute('x', String(lx));
-    text.setAttribute('y', String(ly));
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('font-size', '8');
-    text.setAttribute('font-weight', '600');
-    text.setAttribute('fill', '#a78bfa');
-    text.textContent = FAMILIES[i]?.id ?? '';
-    radarAxes.appendChild(text);
-  }
-}
-
-function renderRadarBlips(leads: Lead[]): void {
-  while (radarBlips.firstChild) {
-    radarBlips.removeChild(radarBlips.firstChild);
-  }
-
-  const potentialRadii: Record<Lead['potential'], number> = {
-    critical: 28,
-    high: 48,
-    medium: 68,
-    low: 84,
-    info: 96,
-  };
-
-  for (const lead of leads) {
-    const famIndex = Math.max(0, FAMILIES.findIndex((f) => f.id === lead.family));
-    const baseAngle = (famIndex * 2 * Math.PI) / FAMILIES.length - Math.PI / 2;
-    const baseRadius = potentialRadii[lead.potential] ?? 70;
-
-    let hash = 0;
-    for (let c = 0; c < lead.id.length; c++) {
-      hash = ((hash << 5) - hash + lead.id.charCodeAt(c)) | 0;
-    }
-    const angleOffset = (((Math.abs(hash) % 13) - 6) * Math.PI) / 60;
-    const radiusOffset = ((Math.abs(hash >> 3) % 9) - 4) * 2;
-
-    const angle = baseAngle + angleOffset;
-    const radius = Math.max(16, Math.min(102, baseRadius + radiusOffset));
-
-    const cx = Math.round(radius * Math.cos(angle));
-    const cy = Math.round(radius * Math.sin(angle));
-
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', String(cx));
-    circle.setAttribute('cy', String(cy));
-    circle.setAttribute('r', '4');
-    circle.setAttribute('class', `radar-blip radar-blip-${lead.potential}`);
-
-    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `[${lead.potential.toUpperCase()}] ${lead.title} (${lead.ruleId})`;
-    circle.appendChild(title);
-
-    circle.addEventListener('click', () => {
-      focusLeadCard(lead.id);
-    });
-
-    radarBlips.appendChild(circle);
-  }
-}
-
-function renderLeadsTab(leads: Lead[]): void {
-  renderRadarBase();
-  renderRadarBlips(leads);
-
-  leadsCountBadge.textContent = `${leads.length} lead${leads.length === 1 ? '' : 's'}`;
-
-  while (leadsCardList.firstChild) {
-    leadsCardList.removeChild(leadsCardList.firstChild);
-  }
-
-  if (leads.length === 0) {
-    leadsEmptyState.hidden = false;
-    leadsCardList.hidden = true;
-    while (leadsEmptyState.firstChild) {
-      leadsEmptyState.removeChild(leadsEmptyState.firstChild);
-    }
-
-    const icon = document.createElement('span');
-    icon.className = 'empty-icon';
-    const title = document.createElement('p');
-    title.className = 'empty-title';
-    const desc = document.createElement('p');
-    desc.className = 'empty-desc';
-
-    if (currentSettings !== null && currentSettings.leadsEnabled === false) {
-      icon.textContent = '⚙️';
-      title.textContent = 'Lead Radar is Disabled';
-      desc.textContent = 'Passive vulnerability discovery and recon intelligence are turned off in Settings.';
-      const enableBtn = document.createElement('button');
-      enableBtn.type = 'button';
-      enableBtn.className = 'btn-primary btn-sm';
-      enableBtn.style.marginTop = '12px';
-      enableBtn.style.cursor = 'pointer';
-      enableBtn.textContent = 'Enable Lead Radar';
-      enableBtn.addEventListener('click', () => {
-        void (async () => {
-          enableBtn.disabled = true;
-          enableBtn.textContent = 'Enabling…';
-          if (currentSettings !== null) {
-            currentSettings.leadsEnabled = true;
-            await SettingsService.updateSettings(currentSettings);
-            await sendToBackground({ type: 'SETTINGS_CHANGED', settings: currentSettings });
-          }
-          if (currentTabId !== null && currentTabUrl.length > 0) {
-            void sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl });
-          }
-          void refreshLeads();
-        })();
-      });
-      leadsEmptyState.appendChild(icon);
-      leadsEmptyState.appendChild(title);
-      leadsEmptyState.appendChild(desc);
-      leadsEmptyState.appendChild(enableBtn);
-    } else {
-      icon.textContent = '📡';
-      title.textContent = 'No leads detected on this origin';
-      desc.textContent = 'Monitoring passive traffic, scripts, DOM sinks, and endpoints in real-time…';
-      const scanBtn = document.createElement('button');
-      scanBtn.type = 'button';
-      scanBtn.className = 'btn-secondary btn-sm';
-      scanBtn.style.marginTop = '12px';
-      scanBtn.style.cursor = 'pointer';
-      scanBtn.textContent = '🔍 Scan DOM Now';
-      scanBtn.addEventListener('click', () => {
-        void (async () => {
-          scanBtn.disabled = true;
-          scanBtn.textContent = 'Scanning…';
-          if (currentTabId !== null && currentTabUrl.length > 0) {
-            await sendToBackground({ type: 'TRIGGER_LEADS_SCAN', tabId: currentTabId, url: currentTabUrl });
-          }
-          setTimeout(() => {
-            void refreshLeads();
-            scanBtn.disabled = false;
-            scanBtn.textContent = '🔍 Scan DOM Now';
-          }, 600);
-        })();
-      });
-      leadsEmptyState.appendChild(icon);
-      leadsEmptyState.appendChild(title);
-      leadsEmptyState.appendChild(desc);
-      leadsEmptyState.appendChild(scanBtn);
-    }
-    return;
-  }
-
-  leadsEmptyState.hidden = true;
-  leadsCardList.hidden = false;
-
-  const sorted = [...leads].sort((a, b) => {
-    const aPinned = a.pinned === true;
-    const bPinned = b.pinned === true;
-    if (aPinned && !bPinned) return -1;
-    if (!aPinned && bPinned) return 1;
-    return (b.priority ?? 0) - (a.priority ?? 0);
-  });
-
-  for (const lead of sorted) {
-    leadsCardList.appendChild(createLeadCard(lead));
-  }
-}
-
-function createLeadCard(lead: Lead): HTMLDivElement {
-  const card = document.createElement('div');
-  card.className = 'lead-card';
-  card.id = `lead-card-${lead.id}`;
-  if (lead.pinned === true) {
-    card.classList.add('card-pinned');
-  }
-
-  const header = document.createElement('div');
-  header.className = 'lead-card-header';
-
-  const metaLeft = document.createElement('div');
-  metaLeft.className = 'lead-card-meta-left';
-
-  const famIcon = document.createElement('span');
-  famIcon.className = 'lead-family-icon';
-  famIcon.textContent = lead.family;
-  famIcon.title = `Family ${lead.family}`;
-  metaLeft.appendChild(famIcon);
-
-  const tierBadge = document.createElement('span');
-  tierBadge.className = `lead-tier-badge tier-${lead.tier}`;
-  tierBadge.textContent = lead.tier;
-  metaLeft.appendChild(tierBadge);
-
-  const scopeBadge = document.createElement('span');
-  scopeBadge.className = `lead-scope-chip scope-${lead.scopeStatus}`;
-  scopeBadge.textContent = lead.scopeStatus === 'in-scope' ? 'In-Scope' : lead.scopeStatus === 'out-of-scope' ? 'Out-of-Scope' : 'Unknown Scope';
-  metaLeft.appendChild(scopeBadge);
-
-  header.appendChild(metaLeft);
-
-  const potentialBadge = document.createElement('span');
-  potentialBadge.className = `lead-tier-badge dot-${lead.potential}`;
-  potentialBadge.textContent = lead.potential.toUpperCase();
-  header.appendChild(potentialBadge);
-
-  card.appendChild(header);
-
-  const title = document.createElement('div');
-  title.className = 'lead-card-title';
-  title.textContent = lead.title;
-  card.appendChild(title);
-
-  if (typeof lead.evidence?.preview === 'string' && lead.evidence.preview.length > 0) {
-    const pre = document.createElement('pre');
-    pre.className = 'lead-evidence-pre';
-    pre.textContent = lead.evidence.preview;
-    card.appendChild(pre);
-  }
-
-  if (typeof lead.evidence?.location === 'string' && lead.evidence.location.length > 0) {
-    const locLine = document.createElement('div');
-    locLine.className = 'lead-detail-line';
-    const locLabel = document.createElement('span');
-    locLabel.className = 'lead-detail-label';
-    locLabel.textContent = 'Location: ';
-    locLine.appendChild(locLabel);
-    const locVal = document.createTextNode(lead.evidence.location);
-    locLine.appendChild(locVal);
-    card.appendChild(locLine);
-  }
-
-  if (lead.chainIds !== undefined && lead.chainIds.length > 0) {
-    const chainLine = document.createElement('div');
-    chainLine.className = 'lead-detail-line';
-    const chainLabel = document.createElement('span');
-    chainLabel.className = 'lead-detail-label';
-    chainLabel.textContent = '⛓ Correlated Chain: ';
-    chainLine.appendChild(chainLabel);
-    const chainVal = document.createTextNode(lead.chainIds.join(', '));
-    chainLine.appendChild(chainVal);
-    card.appendChild(chainLine);
-  }
-
-  if (lead.needs !== undefined && lead.needs.length > 0) {
-    const needsLine = document.createElement('div');
-    needsLine.className = 'lead-detail-line';
-    const needsLabel = document.createElement('span');
-    needsLabel.className = 'lead-detail-label';
-    needsLabel.textContent = 'Validation Needed: ';
-    needsLine.appendChild(needsLabel);
-    const needsVal = document.createTextNode(lead.needs.join('; '));
-    needsLine.appendChild(needsVal);
-    card.appendChild(needsLine);
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'lead-card-actions';
-
-  // Pin
-  const pinBtn = document.createElement('button');
-  pinBtn.className = 'lead-btn';
-  pinBtn.textContent = lead.pinned === true ? '📌 Pinned' : '📍 Pin';
-  if (lead.pinned === true) pinBtn.classList.add('btn-active');
-  pinBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const newPinned = lead.pinned !== true;
-    lead.pinned = newPinned;
-    pinBtn.textContent = newPinned ? '📌 Pinned' : '📍 Pin';
-    if (newPinned) {
-      pinBtn.classList.add('btn-active');
-      card.classList.add('card-pinned');
-    } else {
-      pinBtn.classList.remove('btn-active');
-      card.classList.remove('card-pinned');
-    }
-    void sendToBackground({
-      type: 'LEAD_ACTION',
-      leadId: lead.id,
-      action: newPinned ? 'pin' : 'unpin',
-      pinned: newPinned,
-      origin: currentOrigin,
-    });
-  });
-  actions.appendChild(pinBtn);
-
-  // Triage
-  const triageBtn = document.createElement('button');
-  triageBtn.className = 'lead-btn';
-  const triageText = typeof lead.triageState === 'string' && lead.triageState.length > 0 ? lead.triageState : 'Triage';
-  triageBtn.textContent = `🎯 ${triageText}`;
-  triageBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const states: Array<NonNullable<Lead['triageState']>> = ['open', 'triaged', 'false_positive', 'resolved'];
-    const currentIdx = states.indexOf(lead.triageState ?? 'open');
-    const nextState = states[(currentIdx + 1) % states.length] ?? 'open';
-    lead.triageState = nextState;
-    triageBtn.textContent = `🎯 ${nextState}`;
-    void sendToBackground({
-      type: 'LEAD_ACTION',
-      leadId: lead.id,
-      action: 'triage',
-      triageState: nextState,
-      origin: currentOrigin,
-    });
-  });
-  actions.appendChild(triageBtn);
-
-  // Copy report
-  const reportBtn = document.createElement('button');
-  reportBtn.className = 'lead-btn';
-  reportBtn.textContent = '📄 Copy Report';
-  reportBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const md = formatLeadsReportMarkdown([lead]);
-    void navigator.clipboard.writeText(md).then(() => {
-      const orig = reportBtn.textContent;
-      reportBtn.textContent = '✔ Copied!';
-      setTimeout(() => { reportBtn.textContent = orig; }, 1500);
-    });
-  });
-  actions.appendChild(reportBtn);
-
-  // Copy cURL (Strictly in-scope GET requests without cookies)
-  const curlBtn = document.createElement('button');
-  curlBtn.className = 'lead-btn';
-  curlBtn.textContent = '💻 Copy cURL';
-  const isInScope = lead.scopeStatus === 'in-scope';
-  const isSafeUrl = typeof lead.url === 'string' && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
-  if (isInScope && isSafeUrl) {
-    curlBtn.title = 'Copy safe in-scope GET cURL command without cookies';
-    curlBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const curlCmd = `curl -s -i "${lead.url}"`;
-      void navigator.clipboard.writeText(curlCmd).then(() => {
-        const orig = curlBtn.textContent;
-        curlBtn.textContent = '✔ Copied!';
-        setTimeout(() => { curlBtn.textContent = orig; }, 1500);
-      });
-    });
-  } else {
-    curlBtn.disabled = true;
-    curlBtn.style.opacity = '0.5';
-    curlBtn.style.cursor = 'not-allowed';
-    curlBtn.title = 'cURL export only available for in-scope GET requests without cookies';
-  }
-  actions.appendChild(curlBtn);
-
-  card.appendChild(actions);
-
-  return card;
-}
-
-function focusLeadCard(leadId: string): void {
-  const card = document.getElementById(`lead-card-${leadId}`);
-  if (card) {
-    document.querySelectorAll('.lead-card').forEach((c) => c.classList.remove('focused-card'));
-    card.classList.add('focused-card');
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-/* ── Message type-guard ───────────────────────────────────────── */
-
-interface TabStateUpdateMsg {
-  type: 'TAB_STATE_UPDATE';
-  state: TabState;
-}
-
 interface StateResponseMsg {
   type: 'STATE_RESPONSE';
   state: TabState | null;
@@ -2264,6 +856,11 @@ function isStateResponse(msg: unknown): msg is StateResponseMsg {
     && msg !== null
     && (msg as Record<string, unknown>)['type'] === 'STATE_RESPONSE'
     && 'state' in msg;
+}
+
+interface TabStateUpdateMsg {
+  type: 'TAB_STATE_UPDATE';
+  state: TabState;
 }
 
 function isTabStateUpdate(msg: unknown): msg is TabStateUpdateMsg {

@@ -20,6 +20,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { test, expect, chromium } from '@playwright/test';
@@ -239,12 +240,27 @@ test.describe('Extension e2e (requires built dist/)', () => {
 // ==========================================================================
 
 test.describe('Extension Loading & Storage Redaction E2E', () => {
+  const tempDirs: string[] = [];
+
+  test.afterAll(() => {
+    for (const dir of tempDirs) {
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {
+          // Safe cleanup
+        }
+      }
+    }
+  });
+
   test('loads built extension in persistent context, renders UI, and verifies zero cookie canary leak in session storage', async () => {
-    const { server, baseUrl } = await startServer(3464, '127.0.0.1');
+    const { server, baseUrl } = await startServer(3465, '127.0.0.1');
 
     // Prepare a test extension directory with host permissions so Chromium's network layer
     // dispatches webRequest events during automated headless execution.
-    const testExtDir = path.resolve(__dirname, '../../dist-e2e-test');
+    const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-basic-'));
+    tempDirs.push(testExtDir);
     fs.cpSync(extensionPath, testExtDir, { recursive: true });
     const testManifestPath = path.join(testExtDir, 'manifest.json');
     const manifestJson = JSON.parse(fs.readFileSync(testManifestPath, 'utf8')) as {
@@ -422,12 +438,19 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
     } finally {
       if (context) await context.close();
       server.close();
-      fs.rmSync(testExtDir, { recursive: true, force: true });
+      try {
+        if (fs.existsSync(testExtDir)) {
+          fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+      } catch {
+        // Safe cleanup
+      }
     }
   });
 
   test('popup renders accessible tabs, handles switching without horizontal overflow', async () => {
-    const testExtDir = path.resolve(__dirname, `../../test-results/dist-popup-a11y-${Date.now()}`);
+    const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-a11y-'));
+    tempDirs.push(testExtDir);
     fs.cpSync(extensionPath, testExtDir, { recursive: true });
 
     let context;
@@ -499,7 +522,13 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       await popupPage.close();
     } finally {
       if (context) await context.close();
-      fs.rmSync(testExtDir, { recursive: true, force: true });
+      try {
+        if (fs.existsSync(testExtDir)) {
+          fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+      } catch {
+        // Safe cleanup
+      }
     }
   });
 });

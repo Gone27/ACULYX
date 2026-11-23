@@ -10,6 +10,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { test, expect, chromium } from '@playwright/test';
@@ -19,8 +20,23 @@ const __dirname = path.dirname(__filename);
 const extensionPath = path.resolve(__dirname, '../../dist');
 
 test.describe('Sidepanel Lead Verdict UI Regression E2E', () => {
+  const tempDirs: string[] = [];
+
+  test.afterAll(() => {
+    for (const dir of tempDirs) {
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {
+          // Safe cleanup
+        }
+      }
+    }
+  });
+
   test('unregistered rule renders "? Uncertain" badge with unreviewed assessment, not "Likely bug"', async () => {
-    const testExtDir = path.resolve(__dirname, '../../dist-e2e-sidepanel-test');
+    const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-sidepanel-'));
+    tempDirs.push(testExtDir);
     fs.cpSync(extensionPath, testExtDir, { recursive: true });
 
     let context;
@@ -185,7 +201,7 @@ test.describe('Sidepanel Lead Verdict UI Regression E2E', () => {
     } finally {
       if (fs.existsSync(testExtDir)) {
         try {
-          fs.rmSync(testExtDir, { recursive: true, force: true });
+          fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         } catch {
           // Ignore
         }

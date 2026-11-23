@@ -8,6 +8,7 @@
 import { test, expect, chromium } from '@playwright/test';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,8 +29,7 @@ test.describe('Hunter CORS probe Origin header (real Chromium)', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
 
-    const extDir = path.resolve(__dirname, '../../dist-e2e-origin');
-    fs.rmSync(extDir, { recursive: true, force: true });
+    const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-origin-'));
     fs.cpSync(hunterDist, extDir, { recursive: true });
     const manifestPath = path.join(extDir, 'manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { host_permissions?: string[] };
@@ -55,7 +55,13 @@ test.describe('Hunter CORS probe Origin header (real Chromium)', () => {
     } finally {
       if (context) await context.close();
       server.close();
-      fs.rmSync(extDir, { recursive: true, force: true });
+      try {
+        if (fs.existsSync(extDir)) {
+          fs.rmSync(extDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+      } catch {
+        // Safe cleanup
+      }
     }
   });
 });

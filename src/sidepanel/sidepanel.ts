@@ -1,11 +1,14 @@
 /**
- * sidepanel.ts — Attack Surface Graph & Lead Radar sidepanel controller.
+ * sidepanel.ts — Investigation Workspace & Attack Surface controller.
  *
- * Rules:
- *  - ZERO innerHTML / outerHTML / insertAdjacentHTML
- *  - Plain SVG and pure DOM manipulation
+ * Architecture:
+ *  - 4-tab investigation model: Overview, Findings, Surface, Activity
+ *  - Full functional parity: Graph, Radar, Leads, Chains, Recon, Timeline
+ *  - ZERO innerHTML / outerHTML / insertAdjacentHTML (pure DOM & SVG text APIs)
  *  - d3-force simulation layout for Attack Surface Graph
- *  - Leads radar, lead cards, attack chains, recon memory, and timeline views
+ *  - Accessible table alternative (#node-list-table) via #toggle-node-table-btn
+ *  - Security confirmation gates: Hunter 2-step gate, Credential liveness 4-step gate
+ *  - Safe in-scope cURL export
  *  - Keyboard shortcuts (Ctrl+K palette, j/k navigation, p pin, v triage)
  */
 
@@ -19,10 +22,21 @@ import {
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force';
-import type { GraphNode, GraphEdge, AttackSurfaceGraph, TabState, SettingsV2 } from '../shared/types';
+import type {
+  GraphNode,
+  GraphEdge,
+  AttackSurfaceGraph,
+  TabState,
+  SettingsV2,
+  ApiEndpointState,
+} from '../shared/types';
 import type { Lead, ChainRule, ReconMemory } from '../leads/types';
 import { sendToBackground } from '../shared/messaging';
-import type { LeadStateUpdateMessage } from '../shared/messaging';
+import type {
+  LeadStateUpdateMessage,
+  PlanCredentialCheckResponse,
+  ConfirmCredentialCheckResponse,
+} from '../shared/messaging';
 import { SIDEPANEL_PORT_NAME, DEFAULT_SETTINGS } from '../shared/constants';
 import { SettingsService } from '../shared/settings';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
@@ -69,8 +83,8 @@ let lastGraphKey = '';
 let currentSettings: SettingsV2 = { ...DEFAULT_SETTINGS };
 
 function graphTopologyKey(nodes: GraphNode[], edges: GraphEdge[]): string {
-  const nodeIds = nodes.map(n => n.hostname).sort().join(',');
-  const edgeIds = edges.map(e => `${e.source}>${e.target}`).sort().join(',');
+  const nodeIds = nodes.map((n) => n.hostname).sort().join(',');
+  const edgeIds = edges.map((e) => `${e.source}>${e.target}`).sort().join(',');
   return `${nodeIds}|${edgeIds}`;
 }
 
@@ -86,26 +100,83 @@ const FAMILIES: Array<{ id: string; name: string }> = [
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Navigation tabs
-  const tabGraph = getEl<HTMLButtonElement>('tab-graph');
-  const tabRadar = getEl<HTMLButtonElement>('tab-radar');
-  const tabLeads = getEl<HTMLButtonElement>('tab-leads');
-  const tabChains = getEl<HTMLButtonElement>('tab-chains');
-  const tabRecon = getEl<HTMLButtonElement>('tab-recon');
-  const tabTimeline = getEl<HTMLButtonElement>('tab-timeline');
+  // ── Primary Navigation Tabs ──────────────────────────────────
+  const tabOverview = getEl<HTMLButtonElement>('tab-overview');
+  const tabFindings = getEl<HTMLButtonElement>('tab-findings');
+  const tabSurface = getEl<HTMLButtonElement>('tab-surface');
+  const tabActivity = getEl<HTMLButtonElement>('tab-activity');
 
+  // Compatibility aliases for E2E tests
+  const tabLeads = getEl<HTMLButtonElement>('tab-leads');
+  const tabGraph = getEl<HTMLButtonElement>('tab-graph');
+
+  // Tab badges
   const tabLeadsBadge = getEl<HTMLSpanElement>('tab-leads-badge');
   const tabChainsBadge = getEl<HTMLSpanElement>('tab-chains-badge');
+  const tabActivityBadge = getEl<HTMLSpanElement>('tab-activity-badge');
+
+  // Views
+  const viewOverview = getEl<HTMLDivElement>('view-overview');
+  const viewFindings = getEl<HTMLDivElement>('view-findings');
+  const viewSurface = getEl<HTMLDivElement>('view-surface');
+  const viewActivity = getEl<HTMLDivElement>('view-activity');
 
   // Header controls
-  const viewToggleBtn = getEl<HTMLButtonElement>('view-toggle-btn');
   const tierBadge = getEl<HTMLSpanElement>('tier-badge');
   const refreshBtn = getEl<HTMLButtonElement>('refresh-btn');
   const optionsLink = getEl<HTMLAnchorElement>('options-link');
   const paletteOpenBtn = getEl<HTMLButtonElement>('palette-open-btn');
-  const evalBanner = getEl<HTMLDivElement>('eval-banner');
 
-  // Graph summary elements
+  // Overview elements
+  const overviewOriginVal = getEl<HTMLSpanElement>('overview-origin-val');
+  const overviewModePill = getEl<HTMLSpanElement>('overview-mode-pill');
+  const overviewApexVal = getEl<HTMLSpanElement>('overview-apex-val');
+  const overviewGradeBadge = getEl<HTMLDivElement>('overview-grade-badge');
+  const overviewScoreVal = getEl<HTMLSpanElement>('overview-score-val');
+  const overviewQualityVal = getEl<HTMLSpanElement>('overview-quality-val');
+
+  const overviewActionIcon = getEl<HTMLSpanElement>('overview-action-icon');
+  const overviewActionText = getEl<HTMLParagraphElement>('overview-action-text');
+  const overviewActionCta = getEl<HTMLButtonElement>('overview-action-cta');
+
+  const overviewCoverageStatus = getEl<HTMLSpanElement>('overview-coverage-status');
+  const overviewHopsVal = getEl<HTMLSpanElement>('overview-hops-val');
+  const overviewCacheVal = getEl<HTMLSpanElement>('overview-cache-val');
+  const overviewSwVal = getEl<HTMLSpanElement>('overview-sw-val');
+  const overviewScopeVal = getEl<HTMLSpanElement>('overview-scope-val');
+  const overviewBlindspotsContainer = getEl<HTMLDivElement>('overview-blindspots-container');
+  const overviewBlindspotsList = getEl<HTMLUListElement>('overview-blindspots-list');
+
+  const overviewHygieneCount = getEl<HTMLSpanElement>('overview-hygiene-count');
+  const overviewHygieneList = getEl<HTMLDivElement>('overview-hygiene-list');
+  const overviewHygieneEmpty = getEl<HTMLDivElement>('overview-hygiene-empty');
+
+  const radarSeverityFilter = getEl<HTMLSelectElement>('radar-severity-filter');
+  const spRadarRings = getSvgEl<SVGGElement>('sp-radar-rings');
+  const spRadarAxes = getSvgEl<SVGGElement>('sp-radar-axes');
+  const spRadarBlips = getSvgEl<SVGGElement>('sp-radar-blips');
+  const statCountCritical = getEl<HTMLSpanElement>('stat-count-critical');
+  const statCountHigh = getEl<HTMLSpanElement>('stat-count-high');
+  const statCountMedium = getEl<HTMLSpanElement>('stat-count-medium');
+  const statCountLow = getEl<HTMLSpanElement>('stat-count-low');
+  const statCountInfo = getEl<HTMLSpanElement>('stat-count-info');
+
+  // Surface Subnav & Lenses
+  const surfaceSubtabGraph = getEl<HTMLButtonElement>('surface-subtab-graph');
+  const surfaceSubtabChains = getEl<HTMLButtonElement>('surface-subtab-chains');
+  const surfaceSubtabRecon = getEl<HTMLButtonElement>('surface-subtab-recon');
+  const surfaceSubtabSubdomains = getEl<HTMLButtonElement>('surface-subtab-subdomains');
+  const surfaceChainsCount = getEl<HTMLSpanElement>('surface-chains-count');
+
+  const viewGraph = getEl<HTMLDivElement>('view-graph');
+  const viewChains = getEl<HTMLDivElement>('view-chains');
+  const viewRecon = getEl<HTMLDivElement>('view-recon');
+  const viewSubdomains = getEl<HTMLDivElement>('view-subdomains');
+
+  // Graph elements
+  const toggleNodeTableBtn = (document.getElementById('toggle-node-table-btn') ??
+    document.getElementById('view-toggle-btn')) as HTMLButtonElement;
+  const evalBanner = getEl<HTMLDivElement>('eval-banner');
   const apexDomainVal = getEl<HTMLSpanElement>('apex-domain-val');
   const nodesCountVal = getEl<HTMLSpanElement>('nodes-count-val');
   const edgesCountVal = getEl<HTMLSpanElement>('edges-count-val');
@@ -124,18 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const nodeScope = getEl<HTMLSpanElement>('node-scope');
   const nodeLastSeen = getEl<HTMLSpanElement>('node-last-seen');
 
-  // Radar elements
-  const radarSeverityFilter = getEl<HTMLSelectElement>('radar-severity-filter');
-  const spRadarRings = getSvgEl<SVGGElement>('sp-radar-rings');
-  const spRadarAxes = getSvgEl<SVGGElement>('sp-radar-axes');
-  const spRadarBlips = getSvgEl<SVGGElement>('sp-radar-blips');
-  const statCountCritical = getEl<HTMLSpanElement>('stat-count-critical');
-  const statCountHigh = getEl<HTMLSpanElement>('stat-count-high');
-  const statCountMedium = getEl<HTMLSpanElement>('stat-count-medium');
-  const statCountLow = getEl<HTMLSpanElement>('stat-count-low');
-  const statCountInfo = getEl<HTMLSpanElement>('stat-count-info');
-
-  // Leads elements
+  // Findings elements
   const leadsSearchInput = getEl<HTMLInputElement>('leads-search-input');
   const leadsFilterFamily = getEl<HTMLSelectElement>('leads-filter-family');
   const leadsFilterTier = getEl<HTMLSelectElement>('leads-filter-tier');
@@ -172,10 +232,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const reconHostsList = getEl<HTMLDivElement>('recon-hosts-list');
   const reconBucketsList = getEl<HTMLDivElement>('recon-buckets-list');
 
-  // Timeline elements
+  // Subdomain & API elements
+  const subdomainEscalationPill = getEl<HTMLSpanElement>('subdomain-escalation-pill');
+  const subdomainVectorsList = getEl<HTMLDivElement>('subdomain-vectors-list');
+  const subdomainVectorsEmpty = getEl<HTMLDivElement>('subdomain-vectors-empty');
+  const apiEndpointsCount = getEl<HTMLSpanElement>('api-endpoints-count');
+  const apiEndpointsList = getEl<HTMLDivElement>('api-endpoints-list');
+  const apiEndpointsEmpty = getEl<HTMLDivElement>('api-endpoints-empty');
+
+  // Activity subnav & streams
+  const activitySubtabTimeline = getEl<HTMLButtonElement>('activity-subtab-timeline');
+  const activitySubtabLedger = getEl<HTMLButtonElement>('activity-subtab-ledger');
+  const viewTimeline = getEl<HTMLDivElement>('view-timeline');
+  const viewLedger = getEl<HTMLDivElement>('view-ledger');
   const timelineCountBadge = getEl<HTMLSpanElement>('timeline-count-badge');
+  const ledgerCountBadge = getEl<HTMLSpanElement>('ledger-count-badge');
   const timelineEmpty = getEl<HTMLDivElement>('timeline-empty');
   const timelineStream = getEl<HTMLDivElement>('timeline-stream');
+  const ledgerEmpty = getEl<HTMLDivElement>('ledger-empty');
+  const ledgerStream = getEl<HTMLDivElement>('ledger-stream');
 
   // Command palette elements
   const cmdPaletteDialog = getEl<HTMLDialogElement>('command-palette-dialog');
@@ -188,65 +263,148 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeApexDomain: string = '';
   let activeOrigin: string = '';
   let isListView = false;
+  let currentTabState: TabState | null = null;
 
   let currentLeads: Lead[] = [];
   let activeChains: Array<{ chain: ChainRule; matchedLeads: Lead[] }> = [];
   let currentRecon: ReconMemory = { hosts: [], params: [], endpoints: [], buckets: [] };
-  let sidepanelRadarRendered = false;
   let selectedLeadIndex = -1;
 
-  // ── Tab Switching ───────────────────────────────────────────
+  // ── Navigation Tab Switching ─────────────────────────────────
   function switchTab(tabId: string): void {
-    const tabs = [
-      { btn: tabGraph, view: getEl<HTMLDivElement>('view-graph') },
-      { btn: tabRadar, view: getEl<HTMLDivElement>('view-radar') },
-      { btn: tabLeads, view: getEl<HTMLDivElement>('view-leads') },
-      { btn: tabChains, view: getEl<HTMLDivElement>('view-chains') },
-      { btn: tabRecon, view: getEl<HTMLDivElement>('view-recon') },
-      { btn: tabTimeline, view: getEl<HTMLDivElement>('view-timeline') },
-    ];
-
-    for (const t of tabs) {
-      if (t.btn.id === tabId) {
-        t.btn.classList.add('active');
-        t.btn.setAttribute('aria-selected', 'true');
-        t.view.hidden = false;
-        t.view.classList.add('active');
-      } else {
-        t.btn.classList.remove('active');
-        t.btn.setAttribute('aria-selected', 'false');
-        t.view.hidden = true;
-        t.view.classList.remove('active');
-      }
+    let resolvedId = tabId;
+    if (tabId === 'tab-leads') resolvedId = 'tab-findings';
+    if (tabId === 'tab-graph') resolvedId = 'tab-surface';
+    if (tabId === 'tab-radar') resolvedId = 'tab-overview';
+    if (tabId === 'tab-chains') {
+      resolvedId = 'tab-surface';
+      switchSurfaceSubtab('surface-subtab-chains');
+    }
+    if (tabId === 'tab-recon') {
+      resolvedId = 'tab-surface';
+      switchSurfaceSubtab('surface-subtab-recon');
+    }
+    if (tabId === 'tab-timeline') {
+      resolvedId = 'tab-activity';
+      switchActivitySubtab('activity-subtab-timeline');
     }
 
-    if (tabId === 'tab-radar') {
-      renderSidepanelRadar();
-    } else if (tabId === 'tab-leads') {
+    const primaryTabs = [
+      { id: 'tab-overview', btn: tabOverview, view: viewOverview, bodyClass: 'view-overview' },
+      { id: 'tab-findings', btn: tabFindings, view: viewFindings, bodyClass: 'view-findings' },
+      { id: 'tab-surface', btn: tabSurface, view: viewSurface, bodyClass: 'view-surface' },
+      { id: 'tab-activity', btn: tabActivity, view: viewActivity, bodyClass: 'view-activity' },
+    ];
+
+    for (const t of primaryTabs) {
+      const isSelected = t.id === resolvedId;
+      t.btn.classList.toggle('active', isSelected);
+      t.btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      t.view.hidden = !isSelected;
+      t.view.classList.toggle('active', isSelected);
+      document.body.classList.toggle(t.bodyClass, isSelected);
+    }
+
+    // Mirror attributes to compatibility aliases for Playwright E2E tests
+    const isFindingsActive = resolvedId === 'tab-findings';
+    tabLeads.classList.toggle('active', isFindingsActive);
+    tabLeads.setAttribute('aria-selected', isFindingsActive ? 'true' : 'false');
+
+    const isSurfaceActive = resolvedId === 'tab-surface';
+    tabGraph.classList.toggle('active', isSurfaceActive);
+    tabGraph.setAttribute('aria-selected', isSurfaceActive ? 'true' : 'false');
+
+    // Trigger rendering for activated view
+    if (resolvedId === 'tab-overview') {
+      renderOverviewView();
+    } else if (resolvedId === 'tab-findings') {
       renderLeadsList();
-    } else if (tabId === 'tab-chains') {
-      renderChainsView();
-    } else if (tabId === 'tab-recon') {
-      void fetchAndRenderRecon();
-    } else if (tabId === 'tab-timeline') {
+    } else if (resolvedId === 'tab-surface') {
+      const activeSurfaceLens = document.querySelector('.surface-subtab.active')?.id ?? 'surface-subtab-graph';
+      switchSurfaceSubtab(activeSurfaceLens);
+    } else if (resolvedId === 'tab-activity') {
       renderTimeline();
+      renderCoverageLedger();
     }
   }
 
-  tabGraph.addEventListener('click', () => switchTab('tab-graph'));
-  tabRadar.addEventListener('click', () => switchTab('tab-radar'));
-  tabLeads.addEventListener('click', () => switchTab('tab-leads'));
-  tabChains.addEventListener('click', () => switchTab('tab-chains'));
-  tabRecon.addEventListener('click', () => switchTab('tab-recon'));
-  tabTimeline.addEventListener('click', () => switchTab('tab-timeline'));
+  tabOverview.addEventListener('click', () => switchTab('tab-overview'));
+  tabFindings.addEventListener('click', () => switchTab('tab-findings'));
+  tabSurface.addEventListener('click', () => switchTab('tab-surface'));
+  tabActivity.addEventListener('click', () => switchTab('tab-activity'));
+
+  // Alias click events
+  tabLeads.addEventListener('click', () => switchTab('tab-findings'));
+  tabGraph.addEventListener('click', () => {
+    switchTab('tab-surface');
+    switchSurfaceSubtab('surface-subtab-graph');
+  });
+
+  // ── Surface Subtabs ──────────────────────────────────────────
+  function switchSurfaceSubtab(subtabId: string): void {
+    const subtabs = [
+      { id: 'surface-subtab-graph', btn: surfaceSubtabGraph, panel: viewGraph },
+      { id: 'surface-subtab-chains', btn: surfaceSubtabChains, panel: viewChains },
+      { id: 'surface-subtab-recon', btn: surfaceSubtabRecon, panel: viewRecon },
+      { id: 'surface-subtab-subdomains', btn: surfaceSubtabSubdomains, panel: viewSubdomains },
+    ];
+
+    for (const st of subtabs) {
+      const isActive = st.id === subtabId;
+      st.btn.classList.toggle('active', isActive);
+      st.btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      st.panel.hidden = !isActive;
+      st.panel.classList.toggle('active', isActive);
+    }
+
+    if (subtabId === 'surface-subtab-graph') {
+      if (activeApexDomain.length > 0) {
+        void fetchAndRenderGraph(activeApexDomain, activeTabId);
+      }
+    } else if (subtabId === 'surface-subtab-chains') {
+      renderChainsView();
+    } else if (subtabId === 'surface-subtab-recon') {
+      void fetchAndRenderRecon();
+    } else if (subtabId === 'surface-subtab-subdomains') {
+      renderSubdomainTrustAndApis();
+    }
+  }
+
+  surfaceSubtabGraph.addEventListener('click', () => switchSurfaceSubtab('surface-subtab-graph'));
+  surfaceSubtabChains.addEventListener('click', () => switchSurfaceSubtab('surface-subtab-chains'));
+  surfaceSubtabRecon.addEventListener('click', () => switchSurfaceSubtab('surface-subtab-recon'));
+  surfaceSubtabSubdomains.addEventListener('click', () => switchSurfaceSubtab('surface-subtab-subdomains'));
+
+  // ── Activity Subtabs ─────────────────────────────────────────
+  function switchActivitySubtab(subtabId: string): void {
+    const isTimeline = subtabId === 'activity-subtab-timeline';
+    activitySubtabTimeline.classList.toggle('active', isTimeline);
+    activitySubtabTimeline.setAttribute('aria-selected', isTimeline ? 'true' : 'false');
+    viewTimeline.hidden = !isTimeline;
+    viewTimeline.classList.toggle('active', isTimeline);
+
+    activitySubtabLedger.classList.toggle('active', !isTimeline);
+    activitySubtabLedger.setAttribute('aria-selected', !isTimeline ? 'true' : 'false');
+    viewLedger.hidden = isTimeline;
+    viewLedger.classList.toggle('active', !isTimeline);
+
+    if (isTimeline) {
+      renderTimeline();
+    } else {
+      renderCoverageLedger();
+    }
+  }
+
+  activitySubtabTimeline.addEventListener('click', () => switchActivitySubtab('activity-subtab-timeline'));
+  activitySubtabLedger.addEventListener('click', () => switchActivitySubtab('activity-subtab-ledger'));
 
   // ── View Toggle (Graph vs List for graph view) ───────────────
-  viewToggleBtn.addEventListener('click', () => {
+  toggleNodeTableBtn.addEventListener('click', () => {
     isListView = !isListView;
     document.body.classList.toggle('view-graph', !isListView);
     document.body.classList.toggle('view-list', isListView);
-    viewToggleBtn.textContent = isListView ? 'Graph view' : 'List view';
-    viewToggleBtn.setAttribute('aria-pressed', isListView ? 'true' : 'false');
+    toggleNodeTableBtn.textContent = isListView ? 'Graph view' : 'List view';
+    toggleNodeTableBtn.setAttribute('aria-pressed', isListView ? 'true' : 'false');
   });
 
   optionsLink.addEventListener('click', (e) => {
@@ -262,6 +420,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     void fetchLeads();
     void fetchAndRenderRecon();
+    if (activeTabId !== null) {
+      port.postMessage({ type: 'REQUEST_STATE', tabId: activeTabId });
+    }
   });
 
   closeDetailsBtn.addEventListener('click', () => {
@@ -276,6 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (newSettings !== undefined) {
         currentSettings = newSettings;
         applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
+        renderOverviewView();
         renderLeadsList();
       }
       return;
@@ -303,6 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
   void SettingsService.getSettings()
     .then((s) => {
       currentSettings = s;
+      renderOverviewView();
       renderLeadsList();
     })
     .catch(() => {
@@ -329,6 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
         void fetchAndRenderGraph(cleanApex, activeTabId);
         void fetchLeads();
         void fetchAndRenderRecon();
+        renderOverviewView();
         return;
       }
 
@@ -352,20 +516,24 @@ document.addEventListener('DOMContentLoaded', () => {
         void fetchAndRenderGraph(apex, tab.id);
         void fetchLeads();
         void fetchAndRenderRecon();
+        renderOverviewView();
       } else {
         graphLoading.hidden = true;
         graphEmpty.textContent = 'No inspectable tab active. Open a website to view its attack surface graph.';
         graphEmpty.hidden = false;
+        renderOverviewView();
       }
     } catch {
       graphLoading.hidden = true;
       graphEmpty.textContent = 'Unable to query active tab.';
       graphEmpty.hidden = false;
+      renderOverviewView();
     }
   })();
 
   function handleTabState(state: TabState): void {
     try {
+      currentTabState = state;
       activeTabId = state.tabId;
       activeOrigin = state.origin;
       const host = new URL(state.origin).hostname;
@@ -376,6 +544,9 @@ document.addEventListener('DOMContentLoaded', () => {
         void fetchLeads();
         void fetchAndRenderRecon();
       }
+      renderOverviewView();
+      renderSubdomainTrustAndApis();
+      renderCoverageLedger();
     } catch {
       // Ignore URL parsing errors
     }
@@ -388,26 +559,36 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentLeads.length > 0) {
       tabLeadsBadge.textContent = currentLeads.length.toString();
       tabLeadsBadge.hidden = false;
+      tabActivityBadge.textContent = currentLeads.length.toString();
+      tabActivityBadge.hidden = false;
+      timelineCountBadge.textContent = currentLeads.length.toString();
     } else {
       tabLeadsBadge.hidden = true;
+      tabActivityBadge.hidden = true;
+      timelineCountBadge.textContent = '0';
     }
 
     if (activeChains.length > 0) {
       tabChainsBadge.textContent = activeChains.length.toString();
       tabChainsBadge.hidden = false;
+      surfaceChainsCount.textContent = activeChains.length.toString();
     } else {
       tabChainsBadge.hidden = true;
+      surfaceChainsCount.textContent = '0';
     }
 
-    // Update active view
+    // Update active views
+    renderOverviewView();
+
     const activeTabEl = document.querySelector('.nav-tab.active');
-    if (activeTabEl?.id === 'tab-radar') {
-      renderSidepanelRadar();
-    } else if (activeTabEl?.id === 'tab-leads') {
+    if (activeTabEl?.id === 'tab-findings') {
       renderLeadsList();
-    } else if (activeTabEl?.id === 'tab-chains') {
-      renderChainsView();
-    } else if (activeTabEl?.id === 'tab-timeline') {
+    } else if (activeTabEl?.id === 'tab-surface') {
+      const activeSurfaceSubtab = document.querySelector('.surface-subtab.active')?.id;
+      if (activeSurfaceSubtab === 'surface-subtab-chains') {
+        renderChainsView();
+      }
+    } else if (activeTabEl?.id === 'tab-activity') {
       renderTimeline();
     }
   }
@@ -424,6 +605,211 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch {
       // SW might be warming up
+    }
+  }
+
+  // ── Overview View Rendering ──────────────────────────────────
+  function renderOverviewView(): void {
+    // 1. Monitored origin, apex, mode
+    overviewOriginVal.textContent = activeOrigin.length > 0 ? activeOrigin : '—';
+    overviewApexVal.textContent = activeApexDomain.length > 0 ? `Apex: ${activeApexDomain}` : 'Apex: —';
+
+    const mode = currentSettings.monitoringMode ?? 'per-site';
+    overviewModePill.textContent = mode === 'all-sites' ? 'All-sites' : mode === 'off' ? 'Off' : 'Per-site';
+    overviewModePill.className = `posture-mode-pill mode-${mode}`;
+
+    // 2. Grade and Scores
+    const grade = currentTabState?.grade ?? '?';
+    overviewGradeBadge.textContent = grade;
+    overviewGradeBadge.className = `grade-badge-circle grade-${grade.toLowerCase()}`;
+
+    overviewScoreVal.textContent = currentTabState?.score !== undefined ? `${currentTabState.score}/100` : '—/100';
+    overviewQualityVal.textContent =
+      currentTabState?.qualityScore !== undefined
+        ? `Quality: ${currentTabState.qualityScore}/100`
+        : 'Quality: —';
+
+    // 3. Coverage status
+    if (currentTabState?.coverage) {
+      const cov = currentTabState.coverage;
+      overviewHopsVal.textContent = `${cov.hopsCaptured} / ${cov.hopsExpected}`;
+      overviewCacheVal.textContent = cov.hasCache ? 'Active (Cached)' : 'None';
+      overviewSwVal.textContent = cov.hasServiceWorker
+        ? cov.serviceWorkerStatus === 'controlled'
+          ? 'Controlled'
+          : 'Active'
+        : 'None';
+      overviewScopeVal.textContent = currentTabState.scopeStatus ?? 'Unknown';
+
+      overviewCoverageStatus.textContent = cov.isRestricted
+        ? 'Restricted URL'
+        : cov.hopsCaptured < cov.hopsExpected
+          ? 'Partial Capture'
+          : 'Full Capture';
+      overviewCoverageStatus.className = `status-indicator-pill ${
+        cov.isRestricted || cov.hopsCaptured < cov.hopsExpected ? 'pill-warning' : 'pill-success'
+      }`;
+
+      // Blind spots list
+      while (overviewBlindspotsList.firstChild) {
+        overviewBlindspotsList.removeChild(overviewBlindspotsList.firstChild);
+      }
+      if (cov.blindSpots && cov.blindSpots.length > 0) {
+        overviewBlindspotsContainer.hidden = false;
+        for (const spot of cov.blindSpots) {
+          const li = document.createElement('li');
+          li.textContent = spot;
+          overviewBlindspotsList.appendChild(li);
+        }
+      } else {
+        overviewBlindspotsContainer.hidden = true;
+      }
+    } else {
+      overviewHopsVal.textContent = '0 / 0';
+      overviewCacheVal.textContent = 'None';
+      overviewSwVal.textContent = 'None';
+      overviewScopeVal.textContent = 'Unknown';
+      overviewCoverageStatus.textContent = 'Awaiting Capture';
+      overviewCoverageStatus.className = 'status-indicator-pill pill-neutral';
+      overviewBlindspotsContainer.hidden = true;
+    }
+
+    // 4. Key Hygiene Findings (CSP, HSTS, Cookie security)
+    while (overviewHygieneList.firstChild) {
+      overviewHygieneList.removeChild(overviewHygieneList.firstChild);
+    }
+
+    const findings = currentTabState?.findings ?? [];
+    const hygieneRules = findings.filter(
+      (f) =>
+        (f.category === 'header' || f.category === 'cookie' || f.category === 'transport') &&
+        f.severity !== 'pass' &&
+        f.outcome !== 'pass'
+    );
+
+    overviewHygieneCount.textContent = hygieneRules.length.toString();
+
+    if (hygieneRules.length === 0) {
+      overviewHygieneEmpty.hidden = false;
+      overviewHygieneList.appendChild(overviewHygieneEmpty);
+    } else {
+      overviewHygieneEmpty.hidden = true;
+      const topHygiene = hygieneRules.slice(0, 4);
+      for (const h of topHygiene) {
+        const item = document.createElement('div');
+        item.className = 'hygiene-item';
+
+        const head = document.createElement('div');
+        head.className = 'hygiene-item-head';
+
+        const sev = document.createElement('span');
+        sev.className = `hygiene-sev-pill sev-${h.severity}`;
+        sev.textContent = h.severity.toUpperCase();
+        head.appendChild(sev);
+
+        const ruleSpan = document.createElement('span');
+        ruleSpan.className = 'hygiene-rule-id';
+        ruleSpan.textContent = h.ruleId;
+        head.appendChild(ruleSpan);
+
+        item.appendChild(head);
+
+        const title = document.createElement('div');
+        title.className = 'hygiene-item-title';
+        title.textContent = h.title;
+        item.appendChild(title);
+
+        if (h.recommendation && h.recommendation.length > 0) {
+          const rec = document.createElement('div');
+          rec.className = 'hygiene-item-rec';
+          rec.textContent = h.recommendation;
+          item.appendChild(rec);
+        }
+
+        overviewHygieneList.appendChild(item);
+      }
+    }
+
+    // 5. Radar statistics & Polar SVG
+    let crit = 0;
+    let high = 0;
+    let med = 0;
+    let low = 0;
+    let info = 0;
+
+    for (const lead of currentLeads) {
+      if (lead.potential === 'critical') crit++;
+      else if (lead.potential === 'high') high++;
+      else if (lead.potential === 'medium') med++;
+      else if (lead.potential === 'low') low++;
+      else if (lead.potential === 'info') info++;
+    }
+
+    statCountCritical.textContent = crit.toString();
+    statCountHigh.textContent = high.toString();
+    statCountMedium.textContent = med.toString();
+    statCountLow.textContent = low.toString();
+    statCountInfo.textContent = info.toString();
+
+    const overviewRadarTotal = document.getElementById('overview-radar-total');
+    if (overviewRadarTotal) {
+      overviewRadarTotal.textContent = `${currentLeads.length} lead${currentLeads.length === 1 ? '' : 's'}`;
+    }
+
+    renderSidepanelRadar();
+
+    // 6. Dynamic Next Recommended Action Callout
+    const criticalInScopeLeads = currentLeads.filter(
+      (l) => l.potential === 'critical' && l.scopeStatus === 'in-scope'
+    );
+    const hasActiveChains = activeChains.length > 0;
+    const isBlindSpot =
+      currentTabState?.coverage?.hasCache === true ||
+      currentTabState?.coverage?.hasServiceWorker === true ||
+      (currentTabState?.coverage?.blindSpots !== undefined && currentTabState.coverage.blindSpots.length > 0);
+
+    if (criticalInScopeLeads.length > 0) {
+      overviewActionIcon.textContent = '🚨';
+      overviewActionText.textContent = `${criticalInScopeLeads.length} critical in-scope lead(s) identified. Immediate verification recommended.`;
+      overviewActionCta.textContent = 'Review In Findings →';
+      overviewActionCta.hidden = false;
+      overviewActionCta.onclick = () => {
+        switchTab('tab-findings');
+      };
+    } else if (hasActiveChains) {
+      overviewActionIcon.textContent = '⛓';
+      overviewActionText.textContent = `${activeChains.length} attack vector chain(s) active with correlated leads. Explore multi-stage exploit paths.`;
+      overviewActionCta.textContent = 'Inspect Chains in Surface →';
+      overviewActionCta.hidden = false;
+      overviewActionCta.onclick = () => {
+        switchTab('tab-surface');
+        switchSurfaceSubtab('surface-subtab-chains');
+      };
+    } else if (isBlindSpot) {
+      overviewActionIcon.textContent = '⚠️';
+      overviewActionText.textContent =
+        'Page response was served from cache or service worker. Perform a hard refresh to capture wire response headers.';
+      overviewActionCta.textContent = 'Reload Monitored Tab 🔄';
+      overviewActionCta.hidden = false;
+      overviewActionCta.onclick = () => {
+        if (activeTabId !== null) {
+          void chrome.tabs.reload(activeTabId, { bypassCache: true });
+        }
+      };
+    } else if (hygieneRules.length > 0) {
+      overviewActionIcon.textContent = '🛡';
+      overviewActionText.textContent = `${hygieneRules.length} security hygiene violation(s) observed on headers and cookies.`;
+      overviewActionCta.textContent = 'Explore Hygiene Findings →';
+      overviewActionCta.hidden = false;
+      overviewActionCta.onclick = () => {
+        switchTab('tab-findings');
+      };
+    } else {
+      overviewActionIcon.textContent = '💡';
+      overviewActionText.textContent =
+        'Security posture baseline captured. Continue browsing the target application to accumulate attack surface intelligence.';
+      overviewActionCta.hidden = true;
+      overviewActionCta.onclick = null;
     }
   }
 
@@ -662,9 +1048,10 @@ document.addEventListener('DOMContentLoaded', () => {
     nodeHostname.textContent = node.hostname;
     nodeRole.textContent = node.isApex ? '👑 Apex Domain (Central Authority)' : 'Subdomain';
     nodeDiscoveredVia.textContent = node.discoveredVia.join(', ');
-    nodeGrade.textContent = node.grade !== undefined && node.score !== undefined
-      ? `${node.grade} (${node.score}/100)`
-      : 'Passive discovery (no direct visit yet)';
+    nodeGrade.textContent =
+      node.grade !== undefined && node.score !== undefined
+        ? `${node.grade} (${node.score}/100)`
+        : 'Passive discovery (no direct visit yet)';
     nodeScope.textContent = node.scopeStatus !== undefined ? node.scopeStatus : '—';
     nodeLastSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
     nodeDetails.hidden = false;
@@ -692,9 +1079,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const tdGrade = document.createElement('td');
       tdGrade.className = 'grade-cell';
-      tdGrade.textContent = node.grade !== undefined && node.score !== undefined
-        ? `${node.grade} (${node.score})`
-        : '—';
+      tdGrade.textContent =
+        node.grade !== undefined && node.score !== undefined ? `${node.grade} (${node.score})` : '—';
 
       const tdSeen = document.createElement('td');
       tdSeen.textContent = new Date(node.lastSeen).toLocaleTimeString();
@@ -704,98 +1090,86 @@ document.addEventListener('DOMContentLoaded', () => {
       tr.appendChild(tdGrade);
       tr.appendChild(tdSeen);
 
+      tr.addEventListener('click', () => {
+        for (const r of Array.from(tbody.rows)) {
+          r.setAttribute('aria-selected', 'false');
+        }
+        tr.setAttribute('aria-selected', 'true');
+        showNodeDetails(node);
+      });
+
       tr.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          showNodeDetails(node);
-          tbody.querySelectorAll('tr').forEach(r => r.setAttribute('aria-selected', 'false'));
-          tr.setAttribute('aria-selected', 'true');
+          tr.click();
         }
-      });
-      tr.addEventListener('click', () => {
-        showNodeDetails(node);
-        tbody.querySelectorAll('tr').forEach(r => r.setAttribute('aria-selected', 'false'));
-        tr.setAttribute('aria-selected', 'true');
       });
 
       tbody.appendChild(tr);
     }
   }
 
-  // ── Radar View Implementation ────────────────────────────────
+  // ── Polar Radar Implementation ───────────────────────────────
   function renderSidepanelRadar(): void {
-    if (!sidepanelRadarRendered) {
-      sidepanelRadarRendered = true;
-      while (spRadarRings.firstChild) spRadarRings.removeChild(spRadarRings.firstChild);
-      while (spRadarAxes.firstChild) spRadarAxes.removeChild(spRadarAxes.firstChild);
+    while (spRadarRings.firstChild) spRadarRings.removeChild(spRadarRings.firstChild);
+    while (spRadarAxes.firstChild) spRadarAxes.removeChild(spRadarAxes.firstChild);
+    while (spRadarBlips.firstChild) spRadarBlips.removeChild(spRadarBlips.firstChild);
 
-      const rings = [25, 50, 75, 100];
-      for (const r of rings) {
-        const circle = document.createElementNS(SVG_NS, 'circle');
-        circle.setAttribute('cx', '0');
-        circle.setAttribute('cy', '0');
-        circle.setAttribute('r', String(r));
-        circle.setAttribute('stroke', r === 100 ? 'rgba(138, 43, 226, 0.45)' : 'rgba(138, 43, 226, 0.2)');
-        circle.setAttribute('stroke-width', '1');
-        circle.setAttribute('fill', 'none');
-        spRadarRings.appendChild(circle);
-      }
+    const radii = [25, 50, 75, 100];
+    for (const r of radii) {
+      const circle = document.createElementNS(SVG_NS, 'circle');
+      circle.setAttribute('cx', '0');
+      circle.setAttribute('cy', '0');
+      circle.setAttribute('r', r.toString());
+      circle.setAttribute('class', 'radar-ring');
+      spRadarRings.appendChild(circle);
+    }
 
-      for (let i = 0; i < FAMILIES.length; i++) {
-        const angle = (i * 2 * Math.PI) / FAMILIES.length - Math.PI / 2;
-        const x2 = Math.round(105 * Math.cos(angle));
-        const y2 = Math.round(105 * Math.sin(angle));
+    for (let i = 0; i < 8; i++) {
+      const angle = (i * 45 * Math.PI) / 180;
+      const x2 = 100 * Math.cos(angle);
+      const y2 = 100 * Math.sin(angle);
 
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', '0');
-        line.setAttribute('y1', '0');
-        line.setAttribute('x2', String(x2));
-        line.setAttribute('y2', String(y2));
-        line.setAttribute('stroke', 'rgba(138, 43, 226, 0.25)');
-        line.setAttribute('stroke-width', '1');
-        spRadarAxes.appendChild(line);
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', '0');
+      line.setAttribute('y1', '0');
+      line.setAttribute('x2', x2.toString());
+      line.setAttribute('y2', y2.toString());
+      line.setAttribute('class', 'radar-axis');
+      spRadarAxes.appendChild(line);
 
-        const lx = Math.round(114 * Math.cos(angle));
-        const ly = Math.round(114 * Math.sin(angle) + 3);
+      const fam = FAMILIES[i];
+      if (fam) {
+        const lx = 112 * Math.cos(angle);
+        const ly = 112 * Math.sin(angle);
         const text = document.createElementNS(SVG_NS, 'text');
-        text.setAttribute('x', String(lx));
-        text.setAttribute('y', String(ly));
+        text.setAttribute('x', lx.toString());
+        text.setAttribute('y', (ly + 3).toString());
         text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('font-size', '8');
-        text.setAttribute('font-weight', '600');
-        text.setAttribute('fill', '#a78bfa');
-        text.textContent = FAMILIES[i]?.id ?? '';
+        text.setAttribute('class', 'radar-axis-label');
+        text.textContent = fam.id;
         spRadarAxes.appendChild(text);
       }
     }
 
-    // Stats
-    const stats = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-    for (const lead of currentLeads) {
-      if (lead.potential === 'critical') stats.critical++;
-      else if (lead.potential === 'high') stats.high++;
-      else if (lead.potential === 'medium') stats.medium++;
-      else if (lead.potential === 'low') stats.low++;
-      else if (lead.potential === 'info') stats.info++;
-    }
-
-    statCountCritical.textContent = stats.critical.toString();
-    statCountHigh.textContent = stats.high.toString();
-    statCountMedium.textContent = stats.medium.toString();
-    statCountLow.textContent = stats.low.toString();
-    statCountInfo.textContent = stats.info.toString();
-
-    // Blips
-    while (spRadarBlips.firstChild) {
-      spRadarBlips.removeChild(spRadarBlips.firstChild);
-    }
-
     const sevFilter = radarSeverityFilter.value;
-    const leadsToRender = sevFilter === 'all'
-      ? currentLeads
-      : currentLeads.filter(l => l.potential === sevFilter);
+    const leadsToPlot = currentLeads.filter((l) => {
+      if (sevFilter === 'all') return true;
+      return l.potential === sevFilter;
+    });
 
-    const potentialRadii: Record<Lead['potential'], number> = {
+    const angleMap: Record<string, number> = {
+      F1: 0,
+      F2: 45,
+      F3: 90,
+      F4: 135,
+      F5: 180,
+      F6: 225,
+      F7: 270,
+      F8: 315,
+    };
+
+    const radiusMap: Record<string, number> = {
       critical: 28,
       high: 48,
       medium: 68,
@@ -803,177 +1177,177 @@ document.addEventListener('DOMContentLoaded', () => {
       info: 96,
     };
 
-    for (const lead of leadsToRender) {
-      const famIndex = Math.max(0, FAMILIES.findIndex((f) => f.id === lead.family));
-      const baseAngle = (famIndex * 2 * Math.PI) / FAMILIES.length - Math.PI / 2;
-      const baseRadius = potentialRadii[lead.potential] ?? 70;
+    for (const lead of leadsToPlot) {
+      const baseAngleDeg = angleMap[lead.family] ?? 0;
+      const baseRadius = radiusMap[lead.potential] ?? 70;
 
       let hash = 0;
-      for (let c = 0; c < lead.id.length; c++) {
-        hash = ((hash << 5) - hash + lead.id.charCodeAt(c)) | 0;
+      for (let j = 0; j < lead.id.length; j++) {
+        hash = (hash * 31 + lead.id.charCodeAt(j)) & 0xffffffff;
       }
-      const angleOffset = (((Math.abs(hash) % 13) - 6) * Math.PI) / 60;
-      const radiusOffset = ((Math.abs(hash >> 3) % 9) - 4) * 2;
+      const angleJitter = ((hash % 100) / 100 - 0.5) * 20;
+      const radiusJitter = (((hash >> 8) % 100) / 100 - 0.5) * 12;
 
-      const angle = baseAngle + angleOffset;
-      const radius = Math.max(16, Math.min(102, baseRadius + radiusOffset));
+      const angleRad = ((baseAngleDeg + angleJitter) * Math.PI) / 180;
+      const radius = clamp(baseRadius + radiusJitter, 15, 100);
 
-      const cx = Math.round(radius * Math.cos(angle));
-      const cy = Math.round(radius * Math.sin(angle));
+      const bx = radius * Math.cos(angleRad);
+      const by = radius * Math.sin(angleRad);
 
-      const circle = document.createElementNS(SVG_NS, 'circle');
-      circle.setAttribute('cx', String(cx));
-      circle.setAttribute('cy', String(cy));
-      circle.setAttribute('r', '4');
-      circle.setAttribute('class', `radar-blip radar-blip-${lead.potential}`);
+      const blip = document.createElementNS(SVG_NS, 'circle');
+      blip.setAttribute('cx', bx.toFixed(1));
+      blip.setAttribute('cy', by.toFixed(1));
+      blip.setAttribute('r', '4');
+      blip.setAttribute('class', `radar-blip blip-${lead.potential}`);
 
       const title = document.createElementNS(SVG_NS, 'title');
-      title.textContent = `[${lead.potential.toUpperCase()}] ${lead.title} (${lead.ruleId})`;
-      circle.appendChild(title);
+      title.textContent = `[${lead.family}] ${lead.title} (${lead.potential})`;
+      blip.appendChild(title);
 
-      circle.addEventListener('click', () => {
-        switchTab('tab-leads');
+      blip.addEventListener('click', () => {
+        switchTab('tab-findings');
         focusLeadCardInSidepanel(lead.id);
       });
 
-      spRadarBlips.appendChild(circle);
+      spRadarBlips.appendChild(blip);
     }
   }
 
-  radarSeverityFilter.addEventListener('change', () => {
-    renderSidepanelRadar();
-  });
+  radarSeverityFilter.addEventListener('change', renderSidepanelRadar);
 
-  // ── Leads List View Implementation ───────────────────────────
+  // ── Leads View Filtering & Rendering ─────────────────────────
   function getFilteredLeads(): Lead[] {
-    const query = (leadsSearchInput.value || '').trim().toLowerCase();
+    const q = leadsSearchInput.value.toLowerCase().trim();
     const fam = leadsFilterFamily.value;
     const tier = leadsFilterTier.value;
     const scope = leadsFilterScope.value;
     const newOnly = leadsFilterNewOnly.checked;
     const chainOnly = leadsFilterChainOnly.checked;
 
-    return currentLeads.filter((lead) => {
-      if (fam !== 'all' && lead.family !== fam) return false;
-      if (tier !== 'all' && lead.tier !== tier) return false;
-      if (scope !== 'all' && lead.scopeStatus !== scope) return false;
-      if (newOnly && lead.novelty === false) return false;
-      if (chainOnly && (lead.chainIds === undefined || lead.chainIds.length === 0)) return false;
-      if (typeof query === 'string' && query.length > 0) {
-        const matchTitle = lead.title.toLowerCase().includes(query);
-        const matchRule = lead.ruleId.toLowerCase().includes(query);
-        const matchTags = lead.tags.some((t) => t.toLowerCase().includes(query));
-        const prevText = (lead.evidence !== undefined && typeof lead.evidence.preview === 'string') ? lead.evidence.preview : '';
-        const matchEvidence = prevText.toLowerCase().includes(query);
-        if (!matchTitle && !matchRule && !matchTags && !matchEvidence) return false;
-      }
-      return true;
-    });
+    return currentLeads
+      .filter((lead) => {
+        if (q.length > 0) {
+          const matchTitle = lead.title.toLowerCase().includes(q);
+          const matchRule = lead.ruleId.toLowerCase().includes(q);
+          const matchTag = lead.tags.some((t) => t.toLowerCase().includes(q));
+          if (!matchTitle && !matchRule && !matchTag) return false;
+        }
+        if (fam !== 'all' && lead.family !== fam) return false;
+        if (tier !== 'all' && lead.tier !== tier) return false;
+        if (scope !== 'all' && lead.scopeStatus !== scope) return false;
+        if (newOnly && lead.pinned === true) return false;
+        if (chainOnly && (!lead.chainIds || lead.chainIds.length === 0)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (a.pinned === true && b.pinned !== true) return -1;
+        if (b.pinned === true && a.pinned !== true) return 1;
+        const pOrder: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+        const pa = pOrder[a.potential] ?? 0;
+        const pb = pOrder[b.potential] ?? 0;
+        if (pb !== pa) return pb - pa;
+        return b.timestamp - a.timestamp;
+      });
   }
 
-  const VERDICT_LABELS: Record<NonNullable<Lead['verdict']>['status'], string> = {
-    confirmed: '✔ Confirmed bug',
-    likely: 'Likely bug',
-    uncertain: '? Uncertain',
-    informational: 'Info only',
-    false_positive: '✘ False positive',
-  };
-
   function renderLeadsList(): void {
-    const filtered = getFilteredLeads();
-
     while (spLeadsList.firstChild) {
       spLeadsList.removeChild(spLeadsList.firstChild);
     }
 
+    const filtered = getFilteredLeads();
+
     if (filtered.length === 0) {
       spLeadsEmpty.hidden = false;
-      spLeadsList.hidden = true;
       return;
     }
-
     spLeadsEmpty.hidden = true;
-    spLeadsList.hidden = false;
 
-    const sorted = [...filtered].sort((a, b) => {
-      const aPinned = a.pinned === true;
-      const bPinned = b.pinned === true;
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-      return (b.priority ?? 0) - (a.priority ?? 0);
+    filtered.forEach((lead, index) => {
+      const card = renderLeadCard(lead, index);
+      spLeadsList.appendChild(card);
     });
-
-    for (let i = 0; i < sorted.length; i++) {
-      const lead = sorted[i];
-      if (lead) {
-        spLeadsList.appendChild(createSidepanelLeadCard(lead, i));
-      }
-    }
   }
 
-  function createSidepanelLeadCard(lead: Lead, index: number): HTMLDivElement {
-    const card = document.createElement('div');
-    card.className = 'lead-card';
-    card.id = `sp-lead-card-${lead.id}`;
-    card.setAttribute('tabindex', '0');
-    if (lead.pinned === true) {
-      card.classList.add('card-pinned');
-    }
-    if (index === selectedLeadIndex) {
-      card.classList.add('focused-card');
-    }
+  leadsSearchInput.addEventListener('input', renderLeadsList);
+  leadsFilterFamily.addEventListener('change', renderLeadsList);
+  leadsFilterTier.addEventListener('change', renderLeadsList);
+  leadsFilterScope.addEventListener('change', renderLeadsList);
+  leadsFilterNewOnly.addEventListener('change', renderLeadsList);
+  leadsFilterChainOnly.addEventListener('change', renderLeadsList);
 
+  function renderLeadCard(lead: Lead, index: number): HTMLElement {
+    const card = document.createElement('div');
+    card.className = `lead-card lead-card-${lead.potential}`;
+    card.id = `sp-lead-card-${lead.id}`;
+    if (lead.pinned === true) card.classList.add('lead-pinned');
+
+    // Header line
     const header = document.createElement('div');
     header.className = 'lead-card-header';
 
-    const metaLeft = document.createElement('div');
-    metaLeft.className = 'lead-card-meta-left';
+    const badgesLeft = document.createElement('div');
+    badgesLeft.className = 'lead-badges-left';
 
-    const famIcon = document.createElement('span');
-    famIcon.className = 'lead-family-icon';
-    famIcon.textContent = lead.family;
-    famIcon.title = `Family ${lead.family}`;
-    metaLeft.appendChild(famIcon);
+    const famBadge = document.createElement('span');
+    famBadge.className = 'lead-family-icon';
+    famBadge.textContent = lead.family;
+    badgesLeft.appendChild(famBadge);
 
-    const tierBadge = document.createElement('span');
-    tierBadge.className = `lead-tier-badge tier-${lead.tier}`;
-    tierBadge.textContent = lead.tier;
-    metaLeft.appendChild(tierBadge);
+    const tierBadgeEl = document.createElement('span');
+    tierBadgeEl.className = `lead-tier-badge tier-${lead.tier}`;
+    tierBadgeEl.textContent = lead.tier;
+    badgesLeft.appendChild(tierBadgeEl);
 
-    const scopeBadge = document.createElement('span');
-    scopeBadge.className = `lead-scope-chip scope-${lead.scopeStatus}`;
-    scopeBadge.textContent = lead.scopeStatus === 'in-scope' ? 'In-Scope' : lead.scopeStatus === 'out-of-scope' ? 'Out-of-Scope' : 'Unknown Scope';
-    metaLeft.appendChild(scopeBadge);
-
-    header.appendChild(metaLeft);
-
-    if (lead.verdict !== undefined) {
-      const verdictBadge = document.createElement('span');
-      verdictBadge.className = `lead-verdict-badge verdict-${lead.verdict.status}`;
-      verdictBadge.textContent = VERDICT_LABELS[lead.verdict.status];
-      verdictBadge.title = lead.verdict.summary;
-      metaLeft.appendChild(verdictBadge);
+    if (lead.scopeStatus) {
+      const scopeBadge = document.createElement('span');
+      scopeBadge.className = `lead-scope-badge scope-${lead.scopeStatus}`;
+      scopeBadge.textContent = lead.scopeStatus;
+      badgesLeft.appendChild(scopeBadge);
     }
 
-    const potentialBadge = document.createElement('span');
-    potentialBadge.className = `lead-tier-badge dot-${lead.potential}`;
-    potentialBadge.textContent = lead.potential.toUpperCase();
-    header.appendChild(potentialBadge);
+    // Verdict Badge
+    if (lead.verdict !== undefined) {
+      const vBadge = document.createElement('span');
+      vBadge.className = `lead-verdict-badge verdict-${lead.verdict.status}`;
+      if (lead.verdict.status === 'uncertain') {
+        vBadge.textContent = '? Uncertain';
+      } else if (lead.verdict.status === 'likely') {
+        vBadge.textContent = 'Likely bug';
+      } else if (lead.verdict.status === 'confirmed') {
+        vBadge.textContent = '✔ Confirmed bug';
+      } else if (lead.verdict.status === 'informational') {
+        vBadge.textContent = 'Info only';
+      } else if (lead.verdict.status === 'false_positive') {
+        vBadge.textContent = '✘ False positive';
+      }
+      badgesLeft.appendChild(vBadge);
+    }
+
+    header.appendChild(badgesLeft);
+
+    const potDot = document.createElement('span');
+    potDot.className = `lead-tier-badge dot-${lead.potential}`;
+    potDot.textContent = lead.potential.toUpperCase();
+    header.appendChild(potDot);
 
     card.appendChild(header);
 
-    const title = document.createElement('div');
-    title.className = 'lead-card-title';
+    // Title
+    const title = document.createElement('h3');
+    title.className = 'lead-title';
     title.textContent = lead.title;
     card.appendChild(title);
 
+    // Evidence Preview
     if (lead.evidence !== undefined && typeof lead.evidence.preview === 'string' && lead.evidence.preview.length > 0) {
-      const pre = document.createElement('pre');
-      pre.className = 'lead-evidence-pre';
-      pre.textContent = lead.evidence.preview;
-      card.appendChild(pre);
+      const prev = document.createElement('pre');
+      prev.className = 'lead-evidence-preview';
+      prev.textContent = lead.evidence.preview;
+      card.appendChild(prev);
     }
 
+    // Location
     if (lead.evidence !== undefined && typeof lead.evidence.location === 'string' && lead.evidence.location.length > 0) {
       const locLine = document.createElement('div');
       locLine.className = 'lead-detail-line';
@@ -986,6 +1360,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(locLine);
     }
 
+    // Correlated Chain
     if (lead.chainIds !== undefined && lead.chainIds.length > 0) {
       const chainLine = document.createElement('div');
       chainLine.className = 'lead-detail-line';
@@ -998,6 +1373,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(chainLine);
     }
 
+    // Verdict details & dimensions line
     if (lead.verdict !== undefined) {
       const vLine = document.createElement('div');
       vLine.className = 'lead-detail-line lead-verdict-line';
@@ -1100,12 +1476,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const detailsSpan = document.createElement('span');
       detailsSpan.className = 'cred-details-text';
-      detailsSpan.textContent = ` — ${lead.credentialCheck.details} (${new Date(lead.credentialCheck.checkedAt).toLocaleTimeString()})`;
+      detailsSpan.textContent = ` — ${lead.credentialCheck.details} (${new Date(
+        lead.credentialCheck.checkedAt
+      ).toLocaleTimeString()})`;
       credLine.appendChild(detailsSpan);
 
       const disclaimerDiv = document.createElement('div');
       disclaimerDiv.className = 'cred-disclaimer-text';
-      disclaimerDiv.textContent = 'Notice: This reports only what the provider accepted at the time of the check. It does not establish the credential\'s full permissions, exploitability, or authorization to use it.';
+      disclaimerDiv.textContent =
+        "Notice: This reports only what the provider accepted at the time of the check. It does not establish the credential's full permissions, exploitability, or authorization to use it.";
       credLine.appendChild(disclaimerDiv);
 
       card.appendChild(credLine);
@@ -1124,7 +1503,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const checkBtn = document.createElement('button');
       checkBtn.className = 'lead-btn';
       checkBtn.textContent = '🔑 Check Liveness';
-      checkBtn.title = 'Send a 1-request authenticated check to the provider (GitHub, Stripe, Slack). Never runs automatically.';
+      checkBtn.title =
+        'Send a 1-request authenticated check to the provider (GitHub, Stripe, Slack). Never runs automatically.';
       checkBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         void performCredentialCheckFlow(lead, checkBtn);
@@ -1137,7 +1517,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const verifyBtn = document.createElement('button');
       verifyBtn.className = 'lead-btn';
       verifyBtn.textContent = '🔍 Verify';
-      verifyBtn.title = 'Send safe read-only requests (no cookies) to test this lead. Requires in-scope target and Hunter enabled.';
+      verifyBtn.title =
+        'Send safe read-only requests (no cookies) to test this lead. Requires in-scope target and Hunter enabled.';
       verifyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         void verifyLeadActively(lead, verifyBtn);
@@ -1159,7 +1540,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Triage
     const triageBtn = document.createElement('button');
     triageBtn.className = 'lead-btn';
-    const triageText = typeof lead.triageState === 'string' && lead.triageState.length > 0 ? lead.triageState : 'Triage';
+    const triageText =
+      typeof lead.triageState === 'string' && lead.triageState.length > 0 ? lead.triageState : 'Triage';
     triageBtn.textContent = `🎯 ${triageText}`;
     triageBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1177,7 +1559,9 @@ document.addEventListener('DOMContentLoaded', () => {
       void navigator.clipboard.writeText(md).then(() => {
         const orig = reportBtn.textContent;
         reportBtn.textContent = '✔ Copied!';
-        setTimeout(() => { reportBtn.textContent = orig; }, 1500);
+        setTimeout(() => {
+          reportBtn.textContent = orig;
+        }, 1500);
       });
     });
     actions.appendChild(reportBtn);
@@ -1186,18 +1570,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const curlBtn = document.createElement('button');
     curlBtn.className = 'lead-btn';
     curlBtn.textContent = '💻 Copy cURL';
-    const isInScope = lead.scopeStatus === 'in-scope';
-    const isSafeUrl = typeof lead.url === 'string' && (lead.url.startsWith('http://') || lead.url.startsWith('https://'));
-    if (isInScope && isSafeUrl) {
+    if (isSafeCurlLead(lead)) {
       curlBtn.title = 'Copy safe in-scope GET cURL command without cookies';
       curlBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const curlCmd = `curl -s -i "${lead.url}"`;
-        void navigator.clipboard.writeText(curlCmd).then(() => {
-          const orig = curlBtn.textContent;
-          curlBtn.textContent = '✔ Copied!';
-          setTimeout(() => { curlBtn.textContent = orig; }, 1500);
-        });
+        copySafeCurl(lead, curlBtn);
       });
     } else {
       curlBtn.disabled = true;
@@ -1211,28 +1588,278 @@ document.addEventListener('DOMContentLoaded', () => {
 
     card.addEventListener('click', () => {
       selectedLeadIndex = index;
-      document.querySelectorAll('#sp-leads-list .lead-card').forEach(c => c.classList.remove('focused-card'));
+      document.querySelectorAll('#sp-leads-list .lead-card').forEach((c) => c.classList.remove('focused-card'));
       card.classList.add('focused-card');
     });
 
     return card;
   }
 
+  function isSafeCurlLead(lead: Lead): boolean {
+    if (lead.scopeStatus !== 'in-scope') return false;
+    if (typeof lead.url !== 'string') return false;
+    // Reject newlines and null bytes
+    if (/[\r\n\0]/.test(lead.url)) return false;
+    try {
+      const parsed = new URL(lead.url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    } catch {
+      return false;
+    }
+    const leadMethod = (lead as unknown as { method?: string }).method;
+    if (leadMethod !== undefined && leadMethod.toUpperCase() !== 'GET') {
+      return false;
+    }
+    return true;
+  }
+
+  function copySafeCurl(lead: Lead, btn: HTMLButtonElement): void {
+    if (!isSafeCurlLead(lead)) return;
+    const safeUrl = lead.url.replace(/'/g, "'\\''");
+    const curlCmd = "curl -s -i '" + safeUrl + "'";
+    void navigator.clipboard.writeText(curlCmd).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = '✔ Copied!';
+      setTimeout(() => {
+        btn.textContent = orig;
+      }, 1500);
+    });
+  }
+
+  function promptHunterConfirmation(
+    plan: NonNullable<ReturnType<typeof planActiveProbe>>
+  ): Promise<boolean> {
+    const dialog = getEl<HTMLDialogElement>('hunter-confirm-dialog');
+    const descEl = getEl<HTMLElement>('hunter-plan-desc');
+    const urlEl = getEl<HTMLElement>('hunter-plan-url');
+    const methodEl = getEl<HTMLElement>('hunter-plan-method');
+    const requestsEl = getEl<HTMLElement>('hunter-plan-requests');
+    const originsRow = getEl<HTMLElement>('hunter-plan-origins-row');
+    const originsEl = getEl<HTMLElement>('hunter-plan-origins');
+    const check = getEl<HTMLInputElement>('hunter-confirm-check');
+    const submitBtn = getEl<HTMLButtonElement>('hunter-submit-btn');
+    const cancelBtn = getEl<HTMLButtonElement>('hunter-cancel-btn');
+    const closeBtn = document.getElementById('hunter-close-btn');
+
+    descEl.textContent = plan.description;
+    urlEl.textContent = plan.targetUrl;
+    methodEl.textContent = `${plan.method} (credentials: ${plan.credentials}, redirect: ${plan.redirect})`;
+    requestsEl.textContent = String(plan.maxRequests);
+
+    if (plan.testOrigins && plan.testOrigins.length > 0) {
+      originsRow.hidden = false;
+      originsEl.textContent = plan.testOrigins.join(', ');
+    } else {
+      originsRow.hidden = true;
+      originsEl.textContent = '';
+    }
+
+    check.checked = false;
+    submitBtn.disabled = true;
+
+    return new Promise<boolean>((resolve) => {
+      let resolved = false;
+
+      const onCheckChange = () => {
+        submitBtn.disabled = !check.checked;
+      };
+
+      const cleanup = () => {
+        check.removeEventListener('change', onCheckChange);
+        submitBtn.removeEventListener('click', onSubmit);
+        cancelBtn.removeEventListener('click', onCancel);
+        closeBtn?.removeEventListener('click', onCancel);
+        dialog.removeEventListener('close', onClose);
+        if (dialog.open) {
+          dialog.close();
+        }
+      };
+
+      const onSubmit = () => {
+        if (!check.checked) return;
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(true);
+      };
+
+      const onCancel = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(false);
+      };
+
+      const onClose = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(false);
+      };
+
+      check.addEventListener('change', onCheckChange);
+      submitBtn.addEventListener('click', onSubmit);
+      cancelBtn.addEventListener('click', onCancel);
+      closeBtn?.addEventListener('click', onCancel);
+      dialog.addEventListener('close', onClose);
+
+      dialog.showModal();
+    });
+  }
+
+  function promptCredentialLivenessWizard(
+    plan: NonNullable<PlanCredentialCheckResponse['plan']>
+  ): Promise<boolean> {
+    const dialog = getEl<HTMLDialogElement>('credential-liveness-dialog');
+    const closeBtn = document.getElementById('cred-close-btn');
+
+    // Steps
+    const step1 = getEl<HTMLDivElement>('cred-wizard-step-1');
+    const step2 = getEl<HTMLDivElement>('cred-wizard-step-2');
+    const step3 = getEl<HTMLDivElement>('cred-wizard-step-3');
+    const step4 = getEl<HTMLDivElement>('cred-wizard-step-4');
+
+    // Stepper indicators
+    const stepper1 = getEl<HTMLDivElement>('cred-stepper-1');
+    const stepper2 = getEl<HTMLDivElement>('cred-stepper-2');
+    const stepper3 = getEl<HTMLDivElement>('cred-stepper-3');
+    const stepper4 = getEl<HTMLDivElement>('cred-stepper-4');
+
+    // Step 1 fields
+    const providerVal = getEl<HTMLElement>('cred-provider-val');
+    const endpointVal = getEl<HTMLElement>('cred-endpoint-val');
+    const secretVal = getEl<HTMLElement>('cred-secret-val');
+    const tokenVal = getEl<HTMLElement>('cred-token-val');
+    const originVal = getEl<HTMLElement>('cred-origin-val');
+    const step1CancelBtn = getEl<HTMLButtonElement>('cred-step1-cancel-btn');
+    const step1NextBtn = getEl<HTMLButtonElement>('cred-step1-next-btn');
+
+    // Step 2 fields
+    const stripeBanner = getEl<HTMLElement>('cred-stripe-warning-banner');
+    const step2BackBtn = getEl<HTMLButtonElement>('cred-step2-back-btn');
+    const step2NextBtn = getEl<HTMLButtonElement>('cred-step2-next-btn');
+
+    // Step 3 fields
+    const authInput = getEl<HTMLInputElement>('cred-auth-phrase-input');
+    const step3BackBtn = getEl<HTMLButtonElement>('cred-step3-back-btn');
+    const step3NextBtn = getEl<HTMLButtonElement>('cred-step3-next-btn');
+
+    // Step 4 fields
+    const summaryTarget = getEl<HTMLElement>('cred-summary-target');
+    const summaryProvider = getEl<HTMLElement>('cred-summary-provider');
+    const step4BackBtn = getEl<HTMLButtonElement>('cred-step4-back-btn');
+    const submitBtn = getEl<HTMLButtonElement>('cred-submit-btn');
+
+    // Populate data
+    providerVal.textContent = plan.provider.toUpperCase();
+    endpointVal.textContent = `${plan.method} ${plan.endpointUrl}`;
+    secretVal.textContent = plan.maskedIdentity;
+    tokenVal.textContent = plan.tokenFamily;
+    originVal.textContent = plan.requiredOrigin;
+
+    if (plan.provider === 'stripe') {
+      stripeBanner.hidden = false;
+    } else {
+      stripeBanner.hidden = true;
+    }
+
+    summaryTarget.textContent = `${plan.method} ${plan.endpointUrl}`;
+    summaryProvider.textContent = `${plan.provider.toUpperCase()} (${plan.tokenFamily})`;
+
+    authInput.value = '';
+    step3NextBtn.disabled = true;
+
+    const setStep = (stepNumber: 1 | 2 | 3 | 4) => {
+      step1.hidden = stepNumber !== 1;
+      step2.hidden = stepNumber !== 2;
+      step3.hidden = stepNumber !== 3;
+      step4.hidden = stepNumber !== 4;
+
+      stepper1.classList.toggle('active', stepNumber === 1);
+      stepper2.classList.toggle('active', stepNumber === 2);
+      stepper3.classList.toggle('active', stepNumber === 3);
+      stepper4.classList.toggle('active', stepNumber === 4);
+    };
+
+    setStep(1);
+
+    return new Promise<boolean>((resolve) => {
+      let resolved = false;
+
+      const onAuthInput = () => {
+        step3NextBtn.disabled = authInput.value !== 'I AM AUTHORIZED';
+      };
+
+      const cleanup = () => {
+        authInput.removeEventListener('input', onAuthInput);
+        step1CancelBtn.removeEventListener('click', onCancel);
+        step1NextBtn.removeEventListener('click', toStep2);
+        step2BackBtn.removeEventListener('click', toStep1);
+        step2NextBtn.removeEventListener('click', toStep3);
+        step3BackBtn.removeEventListener('click', toStep2);
+        step3NextBtn.removeEventListener('click', toStep4);
+        step4BackBtn.removeEventListener('click', toStep3);
+        submitBtn.removeEventListener('click', onSubmit);
+        closeBtn?.removeEventListener('click', onCancel);
+        dialog.removeEventListener('close', onClose);
+        if (dialog.open) {
+          dialog.close();
+        }
+      };
+
+      const toStep1 = () => setStep(1);
+      const toStep2 = () => setStep(2);
+      const toStep3 = () => {
+        setStep(3);
+        setTimeout(() => authInput.focus(), 50);
+      };
+      const toStep4 = () => {
+        if (authInput.value !== 'I AM AUTHORIZED') return;
+        setStep(4);
+      };
+
+      const onSubmit = () => {
+        if (authInput.value !== 'I AM AUTHORIZED') return;
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(true);
+      };
+
+      const onCancel = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(false);
+      };
+
+      const onClose = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(false);
+      };
+
+      authInput.addEventListener('input', onAuthInput);
+      step1CancelBtn.addEventListener('click', onCancel);
+      step1NextBtn.addEventListener('click', toStep2);
+      step2BackBtn.addEventListener('click', toStep1);
+      step2NextBtn.addEventListener('click', toStep3);
+      step3BackBtn.addEventListener('click', toStep2);
+      step3NextBtn.addEventListener('click', toStep4);
+      step4BackBtn.addEventListener('click', toStep3);
+      submitBtn.addEventListener('click', onSubmit);
+      closeBtn?.addEventListener('click', onCancel);
+      dialog.addEventListener('close', onClose);
+
+      dialog.showModal();
+    });
+  }
+
   async function verifyLeadActively(lead: Lead, btn: HTMLButtonElement): Promise<void> {
     const plan = planActiveProbe(lead);
     if (!plan) return;
-    const originsNotice = plan.testOrigins && plan.testOrigins.length > 0
-      ? `\nTest Origins (${plan.testOrigins.length}):\n${plan.testOrigins.map((o) => `  • ${o}`).join('\n')}\n`
-      : '';
-    const ok = window.confirm(
-      `Verify this lead actively?\n\n` +
-      `${plan.description}\n\n` +
-      `Target URL: ${plan.targetUrl}\n` +
-      `Method: ${plan.method} (credentials: ${plan.credentials}, redirect: ${plan.redirect})\n` +
-      `Requests: up to ${plan.maxRequests}\n` +
-      originsNotice +
-      `\nRequires target to be in declared scope and Hunter mode enabled. Proceed?`
-    );
+    const ok = await promptHunterConfirmation(plan);
     if (!ok) return;
     btn.disabled = true;
     btn.textContent = '… verifying';
@@ -1267,7 +1894,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const planRes = (await sendToBackground({
         type: 'PLAN_CREDENTIAL_CHECK',
         leadId: lead.id,
-      })) as import('../shared/messaging').PlanCredentialCheckResponse | undefined;
+      })) as PlanCredentialCheckResponse | undefined;
 
       if (!planRes || !planRes.success || !planRes.plan) {
         alert(`Cannot check credential: ${planRes?.error ?? 'No plan available'}`);
@@ -1276,26 +1903,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const plan = planRes.plan;
 
-      const stripeWarning =
-        plan.provider === 'stripe'
-          ? '\n\nIMPORTANT (STRIPE): This check queries the Stripe balance endpoint. ACULYX discards all financial balance amounts and the full response body immediately, retaining only the validity status and live/test mode.' +
-            (plan.tokenFamily.startsWith('rk_')
-              ? ' Restricted keys (rk_) lacking balance permissions may return HTTP 403 (permission limited / validity unresolved).'
-              : '')
-          : '';
-
-      // Step 2: Show two-step confirmation with exact request parameters and safety warnings
-      const promptText =
-        `Perform authenticated credential liveness check?\n\n` +
-        `Provider: ${plan.provider.toUpperCase()}\n` +
-        `Endpoint: ${plan.method} ${plan.endpointUrl}\n` +
-        `Target Secret: ${plan.maskedIdentity}\n` +
-        `Token Family: ${plan.tokenFamily}\n` +
-        `Requests: 1 request (credentials: omit, redirects: manual, 5s timeout)\n\n` +
-        `WARNING: An authenticated request will be sent to ${plan.endpointUrl}. ACULYX discards all account IDs, response text, and raw secrets, persisting only the normalized provider status.${stripeWarning}\n\n` +
-        `Do you affirm that you are authorized to check this credential under applicable program rules and wish to proceed?`;
-
-      const affirmed = window.confirm(promptText);
+      // Step 2: Show confirmation wizard with exact request parameters, safety warnings, and authorization affirmation
+      const affirmed = await promptCredentialLivenessWizard(plan);
       if (!affirmed) return;
 
       // Step 3: Request runtime host permission if not already granted (fail closed if unavailable)
@@ -1326,7 +1935,7 @@ document.addEventListener('DOMContentLoaded', () => {
         planId: plan.planId,
         confirmedByUser: true,
         affirmAuthorized: true,
-      })) as import('../shared/messaging').ConfirmCredentialCheckResponse | undefined;
+      })) as ConfirmCredentialCheckResponse | undefined;
 
       if (!confirmRes || !confirmRes.success || !confirmRes.result) {
         alert(`Credential check failed: ${confirmRes?.error ?? 'Unknown error'}`);
@@ -1357,7 +1966,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function cycleTriageLead(lead: Lead): Promise<void> {
     const states: Array<NonNullable<Lead['triageState']>> = ['open', 'triaged', 'false_positive', 'resolved'];
-    const currentIdx = states.indexOf((lead.triageState ?? 'open'));
+    const currentIdx = states.indexOf(lead.triageState ?? 'open');
     const nextIdx = (currentIdx + 1) % states.length;
     const nextState = states[nextIdx] ?? 'open';
     lead.triageState = nextState;
@@ -1377,65 +1986,41 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('#sp-leads-list .lead-card').forEach((c) => c.classList.remove('focused-card'));
       card.classList.add('focused-card');
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      card.classList.add('highlight-pulse');
+      setTimeout(() => card.classList.remove('highlight-pulse'), 2000);
     }
   }
 
-  function updateSelectedLeadCard(filtered: Lead[]): void {
-    if (selectedLeadIndex < 0 || selectedLeadIndex >= filtered.length) return;
-    const lead = filtered[selectedLeadIndex];
-    if (lead) {
-      focusLeadCardInSidepanel(lead.id);
-    }
-  }
-
-  leadsSearchInput.addEventListener('input', () => renderLeadsList());
-  leadsFilterFamily.addEventListener('change', () => renderLeadsList());
-  leadsFilterTier.addEventListener('change', () => renderLeadsList());
-  leadsFilterScope.addEventListener('change', () => renderLeadsList());
-  leadsFilterNewOnly.addEventListener('change', () => renderLeadsList());
-  leadsFilterChainOnly.addEventListener('change', () => renderLeadsList());
-
+  // ── Leads Exports ────────────────────────────────────────────
   exportLeadsMdBtn.addEventListener('click', () => {
     const filtered = getFilteredLeads();
     const md = formatLeadsReportMarkdown(filtered);
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `aculyx-leads-${activeApexDomain || 'export'}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(md, `aculyx-leads-${Date.now()}.md`, 'text/markdown');
   });
 
   exportLeadsJsonBtn.addEventListener('click', () => {
     const filtered = getFilteredLeads();
     const json = formatLeadsReportJson(filtered);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `aculyx-leads-${activeApexDomain || 'export'}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(json, `aculyx-leads-${Date.now()}.json`, 'application/json');
   });
 
   exportLeadsSarifBtn.addEventListener('click', () => {
     const filtered = getFilteredLeads();
     const sarif = formatLeadsReportSarif(filtered);
-    const blob = new Blob([sarif], { type: 'application/json' });
+    downloadBlob(sarif, `aculyx-leads-${Date.now()}.sarif`, 'application/sarif+json');
+  });
+
+  function downloadBlob(content: string, filename: string, mimeType: string): void {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `aculyx-leads-${activeApexDomain || 'export'}.sarif`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  });
+  }
 
   // ── Chains View Implementation ───────────────────────────────
   function renderChainsView(): void {
@@ -1443,18 +2028,22 @@ document.addEventListener('DOMContentLoaded', () => {
       chainsListContainer.removeChild(chainsListContainer.firstChild);
     }
 
-    let activeCount = 0;
+    const activeMap = new Map<string, Lead[]>();
+    for (const item of activeChains) {
+      activeMap.set(item.chain.id, item.matchedLeads);
+    }
+
+    chainsActiveBadge.textContent = `${activeChains.length} Active`;
 
     for (const chain of CHAINS) {
-      const matched = activeChains.find((c) => c.chain.id === chain.id);
-      const isActive = matched !== undefined && matched.matchedLeads.length > 0;
-      if (isActive) activeCount++;
+      const isChainActive = activeMap.has(chain.id);
+      const matchedLeads = activeMap.get(chain.id) ?? [];
 
       const card = document.createElement('div');
-      card.className = `chain-card ${isActive ? 'chain-active' : ''}`;
+      card.className = `chain-card ${isChainActive ? 'chain-active' : 'chain-dormant'}`;
 
       const header = document.createElement('div');
-      header.className = 'chain-header';
+      header.className = 'chain-card-header';
 
       const idGroup = document.createElement('div');
       idGroup.className = 'chain-id-group';
@@ -1465,8 +2054,8 @@ document.addEventListener('DOMContentLoaded', () => {
       idGroup.appendChild(idBadge);
 
       const statusPill = document.createElement('span');
-      statusPill.className = `chain-status-pill ${isActive ? 'chain-status-active' : 'chain-status-dormant'}`;
-      statusPill.textContent = isActive ? 'Active Chain' : 'Dormant Template';
+      statusPill.className = `chain-status-pill ${isChainActive ? 'chain-status-active' : 'chain-status-dormant'}`;
+      statusPill.textContent = isChainActive ? 'Active Chain' : 'Dormant Template';
       idGroup.appendChild(statusPill);
 
       header.appendChild(idGroup);
@@ -1478,6 +2067,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       card.appendChild(header);
 
+      // Needs checklist
       const needsTitle = document.createElement('div');
       needsTitle.className = 'chain-step-title';
       needsTitle.textContent = 'Required Chain Nodes:';
@@ -1488,28 +2078,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
       for (const need of chain.needs) {
         const needItem = document.createElement('span');
-        const isMatched = isActive && matched?.matchedLeads.some((l) => l.tags.includes(need) || l.ruleId === need);
+        const isMatched = isChainActive && matchedLeads.some((l) => l.tags.includes(need) || l.ruleId === need);
         needItem.className = `chain-need-item ${isMatched ? 'matched' : ''}`;
         needItem.textContent = `${isMatched ? '✔ ' : '○ '}${need}`;
         needsList.appendChild(needItem);
       }
       card.appendChild(needsList);
 
-      if (isActive && matched !== undefined && matched.matchedLeads.length > 0) {
+      // Correlated leads
+      if (isChainActive && matchedLeads.length > 0) {
         const matchedTitle = document.createElement('div');
         matchedTitle.className = 'chain-step-title';
-        matchedTitle.textContent = `Correlated Leads (${matched.matchedLeads.length}):`;
+        matchedTitle.textContent = `Correlated Leads (${matchedLeads.length}):`;
         card.appendChild(matchedTitle);
 
         const matchedList = document.createElement('div');
         matchedList.className = 'chain-needs-list';
-        for (const lead of matched.matchedLeads) {
+        for (const lead of matchedLeads) {
           const leadPill = document.createElement('span');
           leadPill.className = 'chain-need-item matched';
           leadPill.textContent = `${lead.ruleId}: ${lead.title}`;
           leadPill.style.cursor = 'pointer';
           leadPill.addEventListener('click', () => {
-            switchTab('tab-leads');
+            switchTab('tab-findings');
             focusLeadCardInSidepanel(lead.id);
           });
           matchedList.appendChild(leadPill);
@@ -1517,6 +2108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         card.appendChild(matchedList);
       }
 
+      // Next steps
       if (chain.next !== undefined && chain.next.length > 0) {
         const nextTitle = document.createElement('div');
         nextTitle.className = 'chain-step-title';
@@ -1531,19 +2123,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
       chainsListContainer.appendChild(card);
     }
-
-    chainsActiveBadge.textContent = `${activeCount} Active`;
   }
 
   // ── Recon View Implementation ────────────────────────────────
   async function fetchAndRenderRecon(): Promise<void> {
     try {
-      const res = await sendToBackground({
+      const res = (await sendToBackground({
         type: 'RECON_GET',
         origin: typeof activeOrigin === 'string' && activeOrigin.length > 0 ? activeOrigin : undefined,
-      });
-      if (typeof res === 'object' && res !== null && res.type === 'RECON_GET_RESPONSE') {
-        currentRecon = (res).memory;
+      })) as { type?: string; memory?: ReconMemory } | undefined;
+
+      if (typeof res === 'object' && res !== null && res.type === 'RECON_GET_RESPONSE' && res.memory) {
+        currentRecon = res.memory;
         renderReconView();
       }
     } catch {
@@ -1552,10 +2143,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderReconView(): void {
-    reconHostsCount.textContent = (currentRecon.hosts.length).toString();
-    reconEndpointsCount.textContent = (currentRecon.endpoints.length).toString();
-    reconParamsCount.textContent = (currentRecon.params.length).toString();
-    reconBucketsCount.textContent = (currentRecon.buckets.length).toString();
+    reconHostsCount.textContent = currentRecon.hosts.length.toString();
+    reconEndpointsCount.textContent = currentRecon.endpoints.length.toString();
+    reconParamsCount.textContent = currentRecon.params.length.toString();
+    reconBucketsCount.textContent = currentRecon.buckets.length.toString();
 
     // Endpoints
     while (reconEndpointsList.firstChild) reconEndpointsList.removeChild(reconEndpointsList.firstChild);
@@ -1654,44 +2245,223 @@ document.addEventListener('DOMContentLoaded', () => {
     { btn: reconSubtabBuckets, sec: reconSectionBuckets },
   ];
 
-  for (const st of reconSubtabs) {
-    st.btn.addEventListener('click', () => {
-      for (const item of reconSubtabs) {
-        if (item.btn === st.btn) {
-          item.btn.classList.add('active');
-          item.sec.hidden = false;
-        } else {
-          item.btn.classList.remove('active');
-          item.sec.hidden = true;
-        }
+  for (const rst of reconSubtabs) {
+    rst.btn.addEventListener('click', () => {
+      for (const other of reconSubtabs) {
+        other.btn.classList.remove('active');
+        other.sec.hidden = true;
       }
+      rst.btn.classList.add('active');
+      rst.sec.hidden = false;
     });
   }
 
   downloadWordlistBtn.addEventListener('click', () => {
     const paramNames = currentRecon.params.map((p) => p.name);
     const endpointPaths = currentRecon.endpoints.map((e) => e.path);
-    const wordlist = generateNameOnlyWordlist(paramNames, endpointPaths);
-    const blob = new Blob([wordlist], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `aculyx-wordlist-${typeof activeApexDomain === 'string' && activeApexDomain.length > 0 ? activeApexDomain : 'recon'}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const list = generateNameOnlyWordlist(paramNames, endpointPaths);
+    downloadBlob(list, `aculyx-wordlist-${Date.now()}.txt`, 'text/plain');
   });
 
+  function promptGeneralConfirm(title: string, message: string): Promise<boolean> {
+    const dialog = getEl<HTMLDialogElement>('confirm-modal-dialog');
+    const titleEl = getEl<HTMLElement>('confirm-modal-title');
+    const msgEl = getEl<HTMLElement>('confirm-modal-message');
+    const confirmBtn = getEl<HTMLButtonElement>('confirm-modal-confirm-btn');
+    const cancelBtn = getEl<HTMLButtonElement>('confirm-modal-cancel-btn');
+    const closeBtn = document.getElementById('confirm-modal-close-btn');
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+
+    return new Promise<boolean>((resolve) => {
+      let resolved = false;
+
+      const cleanup = () => {
+        confirmBtn.removeEventListener('click', onConfirm);
+        cancelBtn.removeEventListener('click', onCancel);
+        closeBtn?.removeEventListener('click', onCancel);
+        dialog.removeEventListener('close', onClose);
+        if (dialog.open) {
+          dialog.close();
+        }
+      };
+
+      const onConfirm = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(true);
+      };
+
+      const onCancel = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(false);
+      };
+
+      const onClose = () => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(false);
+      };
+
+      confirmBtn.addEventListener('click', onConfirm);
+      cancelBtn.addEventListener('click', onCancel);
+      closeBtn?.addEventListener('click', onCancel);
+      dialog.addEventListener('close', onClose);
+
+      dialog.showModal();
+    });
+  }
+
   resetReconBtn.addEventListener('click', () => {
-    if (!confirm('Are you sure you want to reset all discovered recon memory?')) return;
-    void sendToBackground({ type: 'RECON_RESET' }).then(() => {
-      currentRecon = { hosts: [], params: [], endpoints: [], buckets: [] };
-      renderReconView();
+    void promptGeneralConfirm(
+      'Reset Recon Memory',
+      'Reset all remembered recon memory (hosts, endpoints, params, buckets) for this session?'
+    ).then((ok) => {
+      if (!ok) return;
+      void sendToBackground({ type: 'RECON_RESET' }).then(() => {
+        currentRecon = { hosts: [], params: [], endpoints: [], buckets: [] };
+        renderReconView();
+      });
     });
   });
 
-  // ── Timeline View Implementation ─────────────────────────────
+  // ── Subdomain Trust & APIs Implementation ────────────────────
+  function renderSubdomainTrustAndApis(): void {
+    // 1. Subdomain Trust Analysis
+    while (subdomainVectorsList.firstChild) {
+      subdomainVectorsList.removeChild(subdomainVectorsList.firstChild);
+    }
+
+    const trust = currentTabState?.subdomainTrust;
+    if (trust) {
+      const hasEscalation = trust.hasEscalationPath === true;
+      subdomainEscalationPill.textContent = hasEscalation ? 'Escalation Detected' : 'No Escalation';
+      subdomainEscalationPill.className = `status-pill ${hasEscalation ? 'pill-danger' : 'pill-safe'}`;
+
+      if (trust.vectors.length > 0) {
+        subdomainVectorsEmpty.hidden = true;
+        for (const vec of trust.vectors) {
+          const item = document.createElement('div');
+          item.className = 'subdomain-vector-item';
+
+          const topRow = document.createElement('div');
+          topRow.className = 'vector-top-row';
+
+          const titleSpan = document.createElement('span');
+          titleSpan.className = 'vector-title';
+          titleSpan.textContent = vec.label;
+          topRow.appendChild(titleSpan);
+
+          const riskBadge = document.createElement('span');
+          riskBadge.className = `risk-badge risk-${vec.risk}`;
+          riskBadge.textContent = vec.risk.toUpperCase();
+          topRow.appendChild(riskBadge);
+
+          const presentBadge = document.createElement('span');
+          if (vec.present === true) {
+            presentBadge.className = 'present-badge bridge-active';
+            presentBadge.textContent = '✔ Bridge Active';
+          } else if (vec.present === false) {
+            presentBadge.className = 'present-badge bridge-blocked';
+            presentBadge.textContent = '✘ Explicitly Blocked';
+          } else {
+            presentBadge.className = 'present-badge bridge-na';
+            presentBadge.textContent = '— N/A';
+          }
+          topRow.appendChild(presentBadge);
+
+          item.appendChild(topRow);
+
+          if (vec.detail) {
+            const detailDiv = document.createElement('div');
+            detailDiv.className = 'vector-detail-text';
+            detailDiv.textContent = vec.detail;
+            item.appendChild(detailDiv);
+          }
+
+          subdomainVectorsList.appendChild(item);
+        }
+      } else {
+        subdomainVectorsEmpty.hidden = false;
+        subdomainVectorsList.appendChild(subdomainVectorsEmpty);
+      }
+    } else {
+      subdomainEscalationPill.textContent = 'No Escalation';
+      subdomainEscalationPill.className = 'status-pill pill-neutral';
+      subdomainVectorsEmpty.hidden = false;
+      subdomainVectorsList.appendChild(subdomainVectorsEmpty);
+    }
+
+    // 2. API Subresource Endpoints
+    while (apiEndpointsList.firstChild) {
+      apiEndpointsList.removeChild(apiEndpointsList.firstChild);
+    }
+
+    const apiMap = currentTabState?.apiEndpoints;
+    let endpointEntries: ApiEndpointState[] = [];
+    if (apiMap instanceof Map) {
+      endpointEntries = Array.from(apiMap.values());
+    } else if (typeof apiMap === 'object' && apiMap !== null) {
+      endpointEntries = Object.values(apiMap);
+    }
+
+    apiEndpointsCount.textContent = endpointEntries.length.toString();
+
+    if (endpointEntries.length === 0) {
+      apiEndpointsEmpty.hidden = false;
+      apiEndpointsList.appendChild(apiEndpointsEmpty);
+    } else {
+      apiEndpointsEmpty.hidden = true;
+      for (const ep of endpointEntries) {
+        const item = document.createElement('div');
+        item.className = 'api-endpoint-item';
+
+        const row = document.createElement('div');
+        row.className = 'api-endpoint-row';
+
+        const methodBadge = document.createElement('span');
+        methodBadge.className = `api-method-badge method-${(ep.lastHop?.method ?? 'GET').toLowerCase()}`;
+        methodBadge.textContent = ep.lastHop?.method ?? 'GET';
+        row.appendChild(methodBadge);
+
+        const pathSpan = document.createElement('span');
+        pathSpan.className = 'api-path-text';
+        pathSpan.textContent = ep.normalizedPath;
+        pathSpan.title = ep.normalizedPath;
+        row.appendChild(pathSpan);
+
+        const partyBadge = document.createElement('span');
+        partyBadge.className = `party-badge ${ep.isFirstParty ? 'party-first' : 'party-third'}`;
+        partyBadge.textContent = ep.isFirstParty ? '1st-party' : '3rd-party';
+        row.appendChild(partyBadge);
+
+        if (ep.lastHop?.status !== undefined) {
+          const statusSpan = document.createElement('span');
+          statusSpan.className = 'api-status-code';
+          statusSpan.textContent = ep.lastHop.status.toString();
+          row.appendChild(statusSpan);
+        }
+
+        item.appendChild(row);
+
+        if (ep.findings.length > 0) {
+          const fCount = document.createElement('div');
+          fCount.className = 'api-findings-note';
+          fCount.textContent = `${ep.findings.length} finding(s) associated with this endpoint`;
+          item.appendChild(fCount);
+        }
+
+        apiEndpointsList.appendChild(item);
+      }
+    }
+  }
+
+  // ── Activity Timeline & Ledger Implementation ────────────────
   function renderTimeline(): void {
     while (timelineStream.firstChild) {
       timelineStream.removeChild(timelineStream.firstChild);
@@ -1700,13 +2470,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentLeads.length === 0) {
       timelineEmpty.hidden = false;
       timelineStream.hidden = true;
-      timelineCountBadge.textContent = '0 events';
+      timelineCountBadge.textContent = '0';
       return;
     }
 
     timelineEmpty.hidden = true;
     timelineStream.hidden = false;
-    timelineCountBadge.textContent = `${currentLeads.length} event${currentLeads.length === 1 ? '' : 's'}`;
+    timelineCountBadge.textContent = currentLeads.length.toString();
 
     const chronological = [...currentLeads].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -1739,7 +2509,11 @@ document.addEventListener('DOMContentLoaded', () => {
       title.textContent = `[${lead.ruleId}] ${lead.title}`;
       eventEl.appendChild(title);
 
-      if (lead.evidence !== undefined && typeof lead.evidence.preview === 'string' && lead.evidence.preview.length > 0) {
+      if (
+        lead.evidence !== undefined &&
+        typeof lead.evidence.preview === 'string' &&
+        lead.evidence.preview.length > 0
+      ) {
         const preview = document.createElement('div');
         preview.className = 'timeline-event-preview';
         preview.textContent = lead.evidence.preview;
@@ -1747,6 +2521,73 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       timelineStream.appendChild(eventEl);
+    }
+  }
+
+  function renderCoverageLedger(): void {
+    while (ledgerStream.firstChild) {
+      ledgerStream.removeChild(ledgerStream.firstChild);
+    }
+
+    const ledger = currentTabState?.coverage?.ledger ?? [];
+    ledgerCountBadge.textContent = ledger.length.toString();
+
+    if (ledger.length === 0) {
+      ledgerEmpty.hidden = false;
+      ledgerStream.hidden = true;
+      return;
+    }
+
+    ledgerEmpty.hidden = true;
+    ledgerStream.hidden = false;
+
+    const sorted = [...ledger].sort((a, b) => b.timestamp - a.timestamp);
+
+    for (const entry of sorted) {
+      const row = document.createElement('div');
+      row.className = 'ledger-event-item';
+
+      const header = document.createElement('div');
+      header.className = 'ledger-event-header';
+
+      const time = document.createElement('span');
+      time.className = 'ledger-event-time';
+      time.textContent = new Date(entry.timestamp).toLocaleTimeString();
+      header.appendChild(time);
+
+      const typeBadge = document.createElement('span');
+      typeBadge.className = `ledger-badge type-${entry.type}`;
+      typeBadge.textContent = entry.type;
+      header.appendChild(typeBadge);
+
+      const srcBadge = document.createElement('span');
+      srcBadge.className = `ledger-badge source-${entry.source}`;
+      srcBadge.textContent = entry.source;
+      header.appendChild(srcBadge);
+
+      if (entry.status !== undefined) {
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'ledger-status-code';
+        statusSpan.textContent = `HTTP ${entry.status}`;
+        header.appendChild(statusSpan);
+      }
+
+      row.appendChild(header);
+
+      const urlDiv = document.createElement('div');
+      urlDiv.className = 'ledger-event-url';
+      urlDiv.textContent = entry.url;
+      urlDiv.title = entry.url;
+      row.appendChild(urlDiv);
+
+      if (typeof entry.notes === 'string' && entry.notes.length > 0) {
+        const noteDiv = document.createElement('div');
+        noteDiv.className = 'ledger-event-notes';
+        noteDiv.textContent = entry.notes;
+        row.appendChild(noteDiv);
+      }
+
+      ledgerStream.appendChild(row);
     }
   }
 
@@ -1785,12 +2626,56 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const commands = [
-      { title: 'Switch to Attack Surface Graph', action: () => switchTab('tab-graph'), shortcut: 'Graph' },
-      { title: 'Switch to Vulnerability Radar', action: () => switchTab('tab-radar'), shortcut: 'Radar' },
-      { title: 'Switch to Leads List', action: () => switchTab('tab-leads'), shortcut: 'Leads' },
-      { title: 'Switch to Attack Chains', action: () => switchTab('tab-chains'), shortcut: 'Chains' },
-      { title: 'Switch to Reconnaissance', action: () => switchTab('tab-recon'), shortcut: 'Recon' },
-      { title: 'Switch to Discovery Timeline', action: () => switchTab('tab-timeline'), shortcut: 'Timeline' },
+      { title: 'Switch to Overview', action: () => switchTab('tab-overview'), shortcut: 'Overview' },
+      { title: 'Switch to Findings (Leads)', action: () => switchTab('tab-findings'), shortcut: 'Findings' },
+      {
+        title: 'Switch to Attack Surface Graph',
+        action: () => {
+          switchTab('tab-surface');
+          switchSurfaceSubtab('surface-subtab-graph');
+        },
+        shortcut: 'Graph',
+      },
+      {
+        title: 'Switch to Attack Vector Chains',
+        action: () => {
+          switchTab('tab-surface');
+          switchSurfaceSubtab('surface-subtab-chains');
+        },
+        shortcut: 'Chains',
+      },
+      {
+        title: 'Switch to Reconnaissance Intelligence',
+        action: () => {
+          switchTab('tab-surface');
+          switchSurfaceSubtab('surface-subtab-recon');
+        },
+        shortcut: 'Recon',
+      },
+      {
+        title: 'Switch to Subdomain Trust & APIs',
+        action: () => {
+          switchTab('tab-surface');
+          switchSurfaceSubtab('surface-subtab-subdomains');
+        },
+        shortcut: 'Trust',
+      },
+      {
+        title: 'Switch to Discovery Timeline',
+        action: () => {
+          switchTab('tab-activity');
+          switchActivitySubtab('activity-subtab-timeline');
+        },
+        shortcut: 'Timeline',
+      },
+      {
+        title: 'Switch to Coverage Ledger',
+        action: () => {
+          switchTab('tab-activity');
+          switchActivitySubtab('activity-subtab-ledger');
+        },
+        shortcut: 'Ledger',
+      },
       { title: 'Export Leads Report (Markdown)', action: () => exportLeadsMdBtn.click(), shortcut: 'MD' },
       { title: 'Export Leads Report (JSON)', action: () => exportLeadsJsonBtn.click(), shortcut: 'JSON' },
       { title: 'Export Leads Report (SARIF)', action: () => exportLeadsSarifBtn.click(), shortcut: 'SARIF' },
@@ -1841,6 +2726,19 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── Keyboard Shortcuts (Ctrl+K, j/k, p, v) ────────────────────
+  function updateSelectedLeadCard(filtered: Lead[]): void {
+    const cards = document.querySelectorAll<HTMLElement>('#sp-leads-list .lead-card');
+    cards.forEach((c) => c.classList.remove('focused-card'));
+    const targetLead = filtered[selectedLeadIndex];
+    if (targetLead) {
+      const el = document.getElementById(`sp-lead-card-${targetLead.id}`);
+      if (el) {
+        el.classList.add('focused-card');
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }
+
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault();
@@ -1859,7 +2757,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cmdPaletteDialog.open) return;
 
     const currentTabEl = document.querySelector('.nav-tab.active');
-    if (currentTabEl?.id !== 'tab-leads') return;
+    if (currentTabEl?.id !== 'tab-findings' && currentTabEl?.id !== 'tab-leads') return;
 
     const filtered = getFilteredLeads();
     if (filtered.length === 0) return;

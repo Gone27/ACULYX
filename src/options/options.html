@@ -155,32 +155,43 @@
       <section class="settings-section active" id="section-home" aria-labelledby="heading-home">
         <h1 class="section-title" id="heading-home">Overview</h1>
 
-        <!-- Status cards row -->
+        <!-- Status cards row: 6 core effective controls -->
         <div class="home-cards-row">
-          <!-- Monitoring mode card -->
-          <div class="home-card" id="home-card-mode">
-            <div class="home-card-label">Monitoring mode</div>
-            <div class="home-card-value" id="home-mode-value">—</div>
-          </div>
+          <!-- 1. Monitoring mode card -->
+          <button type="button" class="home-card" id="home-card-mode" data-goto="monitoring" data-focus="mode-per-site">
+            <span class="home-card-label">Monitoring mode</span>
+            <span class="home-card-value" id="home-mode-value">—</span>
+          </button>
 
-          <!-- Permission coverage card -->
-          <div class="home-card" id="home-card-perms">
-            <div class="home-card-label">Permission coverage</div>
-            <div class="home-card-value" id="home-perms-value">—</div>
-          </div>
+          <!-- 2. Active host grants card -->
+          <button type="button" class="home-card" id="home-card-perms" data-goto="monitoring" data-focus="section-allowlist">
+            <span class="home-card-label">Active host grants</span>
+            <span class="home-card-value" id="home-perms-value">—</span>
+          </button>
 
-          <!-- Lead Radar status card -->
-          <div class="home-card" id="home-card-leads">
-            <div class="home-card-label">Lead radar</div>
-            <div class="home-card-value home-card-value--accent" id="home-leads-value">—</div>
-          </div>
+          <!-- 3. Lead Radar status card -->
+          <button type="button" class="home-card" id="home-card-leads" data-goto="leads" data-focus="leads-enabled-toggle">
+            <span class="home-card-label">Lead radar</span>
+            <span class="home-card-value home-card-value--accent" id="home-leads-value">—</span>
+          </button>
 
-          <!-- Local analysis guarantee card -->
-          <div class="home-card home-card--privacy">
-            <div class="home-card-label">Data handling</div>
-            <div class="home-card-value home-card-value--accent">100% local</div>
-            <div class="home-card-sub">No telemetry · opt-in vendor checks only</div>
-          </div>
+          <!-- 4. Deep Mode status card -->
+          <button type="button" class="home-card" id="home-card-deep" data-goto="leads" data-focus="deep-mode-toggle">
+            <span class="home-card-label">Deep mode</span>
+            <span class="home-card-value" id="home-deep-value">—</span>
+          </button>
+
+          <!-- 5. Hunter Engine card -->
+          <button type="button" class="home-card" id="home-card-hunter" data-goto="leads" data-focus="hunter-enabled-toggle">
+            <span class="home-card-label">Hunter engine</span>
+            <span class="home-card-value" id="home-hunter-value">—</span>
+          </button>
+
+          <!-- 6. Credential Liveness card -->
+          <button type="button" class="home-card" id="home-card-creds" data-goto="leads" data-focus="credential-liveness-toggle">
+            <span class="home-card-label">Credential liveness</span>
+            <span class="home-card-value" id="home-creds-value">—</span>
+          </button>
         </div>
 
         <!-- Status callout: shown when action is needed -->
@@ -284,7 +295,7 @@
         </div>
 
         <!-- Per-site allowlist -->
-        <div id="section-allowlist">
+        <div id="section-allowlist" tabindex="-1">
           <h3 class="subsection-title">Per-site allowlist</h3>
           <p class="section-desc">Origins you have already granted access to. Click <em>Remove</em> to revoke.</p>
           <ul class="allowlist" id="allowlist" aria-label="Allowed origins"></ul>

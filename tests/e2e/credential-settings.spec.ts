@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
@@ -9,6 +10,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const extensionPath = path.resolve(__dirname, '../../dist');
 const fakeGithubToken = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+
+const tempDirs: string[] = [];
+
+test.afterAll(() => {
+  for (const dir of tempDirs) {
+    if (fs.existsSync(dir)) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch {
+        // Safe cleanup
+      }
+    }
+  }
+});
 
 interface BackgroundWindow {
   __SettingsService?: {
@@ -39,7 +54,8 @@ test('credential setting toggles update background state and invalidate candidat
   const port = 3471;
   const { server, baseUrl } = await startServer(port, '127.0.0.1');
 
-  const testExtDir = path.resolve(__dirname, `../../test-results/dist-e2e-credential-${Date.now()}`);
+  const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-cred-ext-'));
+  tempDirs.push(testExtDir);
   fs.cpSync(extensionPath, testExtDir, { recursive: true });
   const manifestPath = path.join(testExtDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
@@ -50,7 +66,8 @@ test('credential setting toggles update background state and invalidate candidat
   manifest.optional_host_permissions = (manifest.optional_host_permissions ?? []).filter((host) => host !== '<all_urls>');
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-  const userDataDir = path.resolve(__dirname, `../../test-results/playwright-credential-${Date.now()}`);
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-cred-user-'));
+  tempDirs.push(userDataDir);
   let context: BrowserContext | undefined;
   try {
     context = await chromium.launchPersistentContext(userDataDir, {
@@ -165,14 +182,27 @@ test('credential setting toggles update background state and invalidate candidat
   } finally {
     if (context !== undefined) await context.close();
     server.close();
-    fs.rmSync(testExtDir, { recursive: true, force: true });
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    try {
+      if (fs.existsSync(testExtDir)) {
+        fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    } catch {
+      // Safe cleanup
+    }
+    try {
+      if (fs.existsSync(userDataDir)) {
+        fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    } catch {
+      // Safe cleanup
+    }
   }
 });
 
 test('credential-liveness toggle alone marks settings dirty, exposes Discard, triggers unsaved navigation guard, and cleanly discards', async () => {
-  const userDataDir = path.resolve(__dirname, `../../test-results/playwright-cred-dirty-${Date.now()}`);
-  const testExtDir = path.resolve(__dirname, `../../test-results/dist-e2e-cred-dirty-${Date.now()}`);
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-cred-dirty-user-'));
+  const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-cred-dirty-ext-'));
+  tempDirs.push(testExtDir, userDataDir);
   fs.cpSync(extensionPath, testExtDir, { recursive: true });
 
   let context: BrowserContext | undefined;
@@ -249,7 +279,19 @@ test('credential-liveness toggle alone marks settings dirty, exposes Discard, tr
     await options.close();
   } finally {
     if (context !== undefined) await context.close();
-    fs.rmSync(testExtDir, { recursive: true, force: true });
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    try {
+      if (fs.existsSync(testExtDir)) {
+        fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    } catch {
+      // Safe cleanup
+    }
+    try {
+      if (fs.existsSync(userDataDir)) {
+        fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      }
+    } catch {
+      // Safe cleanup
+    }
   }
 });

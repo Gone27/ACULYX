@@ -48,15 +48,19 @@ if (manifest.optional_host_permissions && !manifest.optional_permissions) {
 }
 
 delete manifest.minimum_chrome_version;
-if (manifest.side_panel && manifest.action && !manifest.action.default_popup) {
-  manifest.action.default_popup = manifest.side_panel.default_path;
+if (!manifest.action) {
+  manifest.action = {};
 }
+manifest.action.default_popup = 'src/popup/popup.html';
 delete manifest.side_panel;
+delete manifest.sidePanel;
 delete manifest.sandbox;
 if (manifest.content_security_policy && manifest.content_security_policy.sandbox) {
   delete manifest.content_security_policy.sandbox;
 }
-manifest.permissions = manifest.permissions.filter((permission) => permission !== 'sidePanel');
+manifest.permissions = manifest.permissions.filter(
+  (permission) => permission !== 'sidePanel' && permission !== 'side_panel'
+);
 
 // 4. Save adjusted manifest
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');

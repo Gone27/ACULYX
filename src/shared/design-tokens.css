@@ -1,22 +1,22 @@
 :root {
   /* ─── Surfaces ─────────────────────────────────────────── */
-  --sc-bg:          #070c14;  /* deepest ink */
-  --sc-bg-card:     #0c1420;  /* card surface */
-  --sc-bg-raised:   #121c2c;  /* raised panel */
-  --sc-bg-hover:    #18263a;  /* hover/active state */
-  --sc-bg-input:    #0a101a;  /* form inputs */
+  --sc-bg:          #070611;  /* midnight obsidian */
+  --sc-bg-card:     #100E1C;  /* obsidian card */
+  --sc-bg-raised:   #191629;  /* raised panel */
+  --sc-bg-hover:    #221e38;  /* hover/active state */
+  --sc-bg-input:    #0c0a18;  /* form inputs */
 
   /* ─── Accent ────────────────────────────────────────────── */
-  --sc-accent:      #2dd4c4;  /* primary teal/cyan accent */
-  --sc-accent-dim:  #1a8a7e;  /* dimmed accent for borders */
-  --sc-accent-ink:  #061514;  /* text on accent background */
-  --sc-violet:      #7c6fcd;  /* selection / secondary accent */
-  --sc-magenta:     #b84592;  /* brand highlight — wordmark echo, never severity */
+  --sc-accent:      #9B4DFF;  /* restrained violet katana accent */
+  --sc-accent-dim:  #7932d4;  /* dimmed accent for borders */
+  --sc-accent-ink:  #ffffff;  /* text on accent background */
+  --sc-violet:      #9B4DFF;  /* selection / katana accent */
+  --sc-magenta:     #D56BFF;  /* brand highlight — rare magenta accent */
 
   /* ─── Borders ───────────────────────────────────────────── */
-  --sc-border:      #182335;  /* subtle borders */
-  --sc-border-focus:#2dd4c4;  /* focus ring = accent */
-  --sc-border-glint: linear-gradient(90deg, rgba(184, 69, 146, 0.5) 0%, rgba(124, 111, 205, 0.7) 35%, rgba(45, 212, 196, 0.6) 70%, transparent 100%); /* edge glint divider */
+  --sc-border:      #232038;  /* crisp steel divider */
+  --sc-border-focus:#9B4DFF;  /* focus ring = accent */
+  --sc-border-glint: linear-gradient(90deg, rgba(213, 107, 255, 0.5) 0%, rgba(155, 77, 255, 0.7) 35%, rgba(155, 77, 255, 0.3) 70%, transparent 100%); /* edge glint divider */
 
   /* ─── Typography ────────────────────────────────────────── */
   --sc-text:        #dce8f0;  /* primary text */
@@ -49,11 +49,11 @@
   --sc-gap-xs:      4px;
 
   /* ─── Elevation / Glow ──────────────────────────────────── */
-  --sc-glow-accent: 0 0 8px 0 rgba(45, 212, 196, 0.18);
+  --sc-glow-accent: 0 0 8px 0 rgba(155, 77, 255, 0.28);
   --sc-shadow-card: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
 
   /* ─── Typography & Badges Contrast ──────────────────────── */
-  --sc-text-on-accent:        #061514;
+  --sc-text-on-accent:        #ffffff;
   --sc-text-on-pill:          #ffffff;
   --sc-text-on-pill-dark:     #1a1a1a;
   --sc-grade-text-light:      #ffffff;
@@ -61,10 +61,10 @@
   --sc-grade-c-text:          #000000;
 
   /* ─── Interactive Accent States ─────────────────────────── */
-  --sc-accent-hover:          #3dd9c7;
-  --sc-accent-active:         #20b8a8;
-  --sc-accent-subtle:         rgba(45, 212, 196, 0.08);
-  --sc-accent-focus-ring:     rgba(45, 212, 196, 0.3);
+  --sc-accent-hover:          #ab68ff;
+  --sc-accent-active:         #8733f5;
+  --sc-accent-subtle:         rgba(155, 77, 255, 0.12);
+  --sc-accent-focus-ring:     rgba(155, 77, 255, 0.35);
 
   /* ─── Status Backgrounds & Borders ──────────────────────── */
   --sc-warn-bg:               rgba(243, 156, 18, 0.1);
@@ -86,12 +86,12 @@
   --sc-overlay-medium:        rgba(255, 255, 255, 0.1);
   --sc-divider-subtle:        rgba(255, 255, 255, 0.05);
   --sc-border-muted:          rgba(255, 255, 255, 0.08);
-  --sc-backdrop:              rgba(15, 23, 42, 0.6);
-  --sc-shadow-floating:       0 8px 24px rgba(0, 0, 0, 0.24);
+  --sc-backdrop:              rgba(7, 6, 17, 0.7);
+  --sc-shadow-floating:       0 8px 24px rgba(0, 0, 0, 0.4);
   --sc-shadow-bottom:         0 -4px 12px rgba(0, 0, 0, 0.3);
 
   /* ─── Graph & Sidepanel ─────────────────────────────────── */
-  --sc-graph-bg:              radial-gradient(circle at center, #1b2845 0%, #111827 100%);
+  --sc-graph-bg:              radial-gradient(circle at center, #191629 0%, #070611 100%);
   --sc-graph-edge-cookie:     #06b6d4;
   --sc-graph-edge-csp:        #a855f7;
   --sc-graph-edge-cors:       #f43f5e;
@@ -101,25 +101,25 @@
   --sc-graph-node-text:       #e2e8f0;
   --sc-graph-text-shadow:     0 1px 2px rgba(0, 0, 0, 0.8);
   --sc-graph-star:            #fbbf24;
-  --sc-badge-violet-bg:       rgba(139, 92, 246, 0.2);
-  --sc-badge-violet-text:     #a78bfa;
-  --sc-banner-violet-bg:      linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(79, 70, 229, 0.1));
-  --sc-banner-violet-border:  rgba(139, 92, 246, 0.3);
+  --sc-badge-violet-bg:       rgba(155, 77, 255, 0.2);
+  --sc-badge-violet-text:     #D56BFF;
+  --sc-banner-violet-bg:      linear-gradient(135deg, rgba(155, 77, 255, 0.15), rgba(121, 50, 212, 0.1));
+  --sc-banner-violet-border:  rgba(155, 77, 255, 0.3);
   --sc-gold:                  #fbbf24;
-  --sc-violet-light:          #c4b5fd;
-  --sc-sidepanel-header-bg:   rgba(22, 33, 62, 0.95);
+  --sc-violet-light:          #c495ff;
+  --sc-sidepanel-header-bg:   rgba(16, 14, 28, 0.95);
 
   /* ─── Options Page ──────────────────────────────────────── */
-  --sc-btn-primary-bg:        #0f3460;
-  --sc-btn-primary-border:    #1a5276;
-  --sc-btn-primary-hover-bg:  #154882;
-  --sc-btn-primary-hover-border: #2471a3;
-  --sc-btn-primary-active-bg: #0a2647;
-  --sc-accent-options:        #2471a3;
-  --sc-accent-options-light:  #5dade2;
+  --sc-btn-primary-bg:        #7932d4;
+  --sc-btn-primary-border:    #9B4DFF;
+  --sc-btn-primary-hover-bg:  #8733f5;
+  --sc-btn-primary-hover-border: #ab68ff;
+  --sc-btn-primary-active-bg: #6322b5;
+  --sc-accent-options:        #9B4DFF;
+  --sc-accent-options-light:  #D56BFF;
 
   /* ─── Motion ─────────────────────────────────────────────── */
-  --sc-duration-fast: 120ms;
+  --sc-duration-fast: 140ms;
   --sc-duration-std:  200ms;
   --sc-easing:        cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -139,13 +139,28 @@
   }
 }
 
+/* Application-level reduced motion preference */
+[data-motion="reduce"] {
+  --sc-duration-fast: 0ms;
+  --sc-duration-std:  0ms;
+}
+
+[data-motion="reduce"] *,
+[data-motion="reduce"] *::before,
+[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 :focus-visible {
   outline: 2px solid var(--sc-accent);
   outline-offset: 2px;
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     /* ─── Surfaces ─────────────────────────────────────────── */
     --sc-bg:          #f8fafc;
     --sc-bg-card:     #ffffff;
@@ -154,15 +169,16 @@
     --sc-bg-input:    #ffffff;
 
     /* ─── Accent ────────────────────────────────────────────── */
-    --sc-accent:      #0d9488;
-    --sc-accent-dim:  #14b8a6;
+    --sc-accent:      #7932d4;
+    --sc-accent-dim:  #9B4DFF;
     --sc-accent-ink:  #ffffff;
-    --sc-violet:      #6366f1;
-    --sc-magenta:     #9b2d6a;  /* brand highlight — light-mode variant */
+    --sc-violet:      #7932d4;
+    --sc-magenta:     #D56BFF;  /* brand highlight — rare magenta accent */
 
     /* ─── Borders ───────────────────────────────────────────── */
     --sc-border:      #cbd5e1;
-    --sc-border-focus:#0d9488;
+    --sc-border-focus:#7932d4;
+    --sc-border-glint: linear-gradient(90deg, rgba(213, 107, 255, 0.4) 0%, rgba(155, 77, 255, 0.6) 35%, rgba(121, 50, 212, 0.4) 70%, transparent 100%);
 
     /* ─── Typography ────────────────────────────────────────── */
     --sc-text:        #0f172a;
@@ -170,7 +186,7 @@
     --sc-text-code:   #0369a1;
 
     /* ─── Elevation / Glow ──────────────────────────────────── */
-    --sc-glow-accent: 0 0 8px 0 rgba(13, 148, 136, 0.15);
+    --sc-glow-accent: 0 0 8px 0 rgba(121, 50, 212, 0.2);
     --sc-shadow-card: 0 2px 8px 0 rgba(0, 0, 0, 0.08);
 
     /* ─── Typography & Badges Contrast ──────────────────────── */
@@ -182,10 +198,10 @@
     --sc-grade-c-text:          #000000;
 
     /* ─── Interactive Accent States ─────────────────────────── */
-    --sc-accent-hover:          #0f766e;
-    --sc-accent-active:         #115e59;
-    --sc-accent-subtle:         rgba(13, 148, 136, 0.08);
-    --sc-accent-focus-ring:     rgba(13, 148, 136, 0.3);
+    --sc-accent-hover:          #6322b5;
+    --sc-accent-active:         #501996;
+    --sc-accent-subtle:         rgba(121, 50, 212, 0.08);
+    --sc-accent-focus-ring:     rgba(121, 50, 212, 0.25);
 
     /* ─── Status Backgrounds & Borders ──────────────────────── */
     --sc-warn-bg:               rgba(245, 158, 11, 0.12);
@@ -217,26 +233,132 @@
     --sc-graph-edge-csp:        #9333ea;
     --sc-graph-edge-cors:       #e11d48;
     --sc-graph-edge-frame:      #2563eb;
-    --sc-graph-node-stroke:     #14b8a6;
-    --sc-graph-node-glow:       rgba(13, 148, 136, 0.25);
+    --sc-graph-node-stroke:     #7932d4;
+    --sc-graph-node-glow:       rgba(121, 50, 212, 0.25);
     --sc-graph-node-text:       #1e293b;
     --sc-graph-text-shadow:     0 1px 2px rgba(255, 255, 255, 0.8);
     --sc-graph-star:            #d97706;
-    --sc-badge-violet-bg:       rgba(139, 92, 246, 0.15);
-    --sc-badge-violet-text:     #6d28d9;
-    --sc-banner-violet-bg:      linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(79, 70, 229, 0.08));
-    --sc-banner-violet-border:  rgba(139, 92, 246, 0.25);
+    --sc-badge-violet-bg:       rgba(155, 77, 255, 0.15);
+    --sc-badge-violet-text:     #7932d4;
+    --sc-banner-violet-bg:      linear-gradient(135deg, rgba(155, 77, 255, 0.12), rgba(121, 50, 212, 0.08));
+    --sc-banner-violet-border:  rgba(155, 77, 255, 0.25);
     --sc-gold:                  #b45309;
-    --sc-violet-light:          #7c3aed;
+    --sc-violet-light:          #7932d4;
     --sc-sidepanel-header-bg:   rgba(255, 255, 255, 0.95);
 
     /* ─── Options Page ──────────────────────────────────────── */
-    --sc-btn-primary-bg:        #0284c7;
-    --sc-btn-primary-border:    #0369a1;
-    --sc-btn-primary-hover-bg:  #0369a1;
-    --sc-btn-primary-hover-border: #075985;
-    --sc-btn-primary-active-bg: #075985;
-    --sc-accent-options:        #0284c7;
-    --sc-accent-options-light:  #0369a1;
+    --sc-btn-primary-bg:        #7932d4;
+    --sc-btn-primary-border:    #6322b5;
+    --sc-btn-primary-hover-bg:  #6322b5;
+    --sc-btn-primary-hover-border: #501996;
+    --sc-btn-primary-active-bg: #501996;
+    --sc-accent-options:        #7932d4;
+    --sc-accent-options-light:  #9B4DFF;
+
+    /* ─── Motion ─────────────────────────────────────────────── */
+    --sc-duration-fast: 140ms;
+    --sc-duration-std:  200ms;
+    --sc-easing:        cubic-bezier(0.4, 0, 0.2, 1);
   }
+}
+
+:root[data-theme="light"] {
+  /* ─── Surfaces ─────────────────────────────────────────── */
+  --sc-bg:          #f8fafc;
+  --sc-bg-card:     #ffffff;
+  --sc-bg-raised:   #f1f5f9;
+  --sc-bg-hover:    #e2e8f0;
+  --sc-bg-input:    #ffffff;
+
+  /* ─── Accent ────────────────────────────────────────────── */
+  --sc-accent:      #7932d4;
+  --sc-accent-dim:  #9B4DFF;
+  --sc-accent-ink:  #ffffff;
+  --sc-violet:      #7932d4;
+  --sc-magenta:     #D56BFF;
+
+  /* ─── Borders ───────────────────────────────────────────── */
+  --sc-border:      #cbd5e1;
+  --sc-border-focus:#7932d4;
+  --sc-border-glint: linear-gradient(90deg, rgba(213, 107, 255, 0.4) 0%, rgba(155, 77, 255, 0.6) 35%, rgba(121, 50, 212, 0.4) 70%, transparent 100%);
+
+  /* ─── Typography ────────────────────────────────────────── */
+  --sc-text:        #0f172a;
+  --sc-text-muted:  #64748b;
+  --sc-text-code:   #0369a1;
+
+  /* ─── Elevation / Glow ──────────────────────────────────── */
+  --sc-glow-accent: 0 0 8px 0 rgba(121, 50, 212, 0.2);
+  --sc-shadow-card: 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+
+  /* ─── Typography & Badges Contrast ──────────────────────── */
+  --sc-text-on-accent:        #ffffff;
+  --sc-text-on-pill:          #ffffff;
+  --sc-text-on-pill-dark:     #1a1a1a;
+  --sc-grade-text-light:      #ffffff;
+  --sc-grade-text-dark:       #000000;
+  --sc-grade-c-text:          #000000;
+
+  /* ─── Interactive Accent States ─────────────────────────── */
+  --sc-accent-hover:          #6322b5;
+  --sc-accent-active:         #501996;
+  --sc-accent-subtle:         rgba(121, 50, 212, 0.08);
+  --sc-accent-focus-ring:     rgba(121, 50, 212, 0.25);
+
+  /* ─── Status Backgrounds & Borders ──────────────────────── */
+  --sc-warn-bg:               rgba(245, 158, 11, 0.12);
+  --sc-warn-border:           rgba(245, 158, 11, 0.35);
+  --sc-warn-text:             #92400e;
+  --sc-danger-bg:             rgba(239, 68, 68, 0.1);
+  --sc-danger-border:         rgba(239, 68, 68, 0.3);
+  --sc-danger-text:           #b91c1c;
+  --sc-success-bg:            rgba(34, 197, 94, 0.12);
+  --sc-success-border:        rgba(34, 197, 94, 0.35);
+  --sc-success-text:          #15803d;
+  --sc-info-bg:               rgba(2, 132, 199, 0.1);
+  --sc-info-border:           rgba(2, 132, 199, 0.25);
+  --sc-info-text:             #0284c7;
+
+  /* ─── Neutral Overlays & Dividers ───────────────────────── */
+  --sc-overlay-subtle:        rgba(0, 0, 0, 0.04);
+  --sc-overlay-light:         rgba(0, 0, 0, 0.06);
+  --sc-overlay-medium:        rgba(0, 0, 0, 0.08);
+  --sc-divider-subtle:        rgba(0, 0, 0, 0.08);
+  --sc-border-muted:          rgba(0, 0, 0, 0.1);
+  --sc-backdrop:              rgba(15, 23, 42, 0.3);
+  --sc-shadow-floating:       0 8px 24px rgba(0, 0, 0, 0.1);
+  --sc-shadow-bottom:         0 -4px 12px rgba(0, 0, 0, 0.06);
+
+  /* ─── Graph & Sidepanel ─────────────────────────────────── */
+  --sc-graph-bg:              radial-gradient(circle at center, #f8fafc 0%, #e2e8f0 100%);
+  --sc-graph-edge-cookie:     #0891b2;
+  --sc-graph-edge-csp:        #9333ea;
+  --sc-graph-edge-cors:       #e11d48;
+  --sc-graph-edge-frame:      #2563eb;
+  --sc-graph-node-stroke:     #7932d4;
+  --sc-graph-node-glow:       rgba(121, 50, 212, 0.25);
+  --sc-graph-node-text:       #1e293b;
+  --sc-graph-text-shadow:     0 1px 2px rgba(255, 255, 255, 0.8);
+  --sc-graph-star:            #d97706;
+  --sc-badge-violet-bg:       rgba(155, 77, 255, 0.15);
+  --sc-badge-violet-text:     #7932d4;
+  --sc-banner-violet-bg:      linear-gradient(135deg, rgba(155, 77, 255, 0.12), rgba(121, 50, 212, 0.08));
+  --sc-banner-violet-border:  rgba(155, 77, 255, 0.25);
+  --sc-gold:                  #b45309;
+  --sc-violet-light:          #7932d4;
+  --sc-sidepanel-header-bg:   rgba(255, 255, 255, 0.95);
+
+  /* ─── Options Page ──────────────────────────────────────── */
+  --sc-btn-primary-bg:        #7932d4;
+  --sc-btn-primary-border:    #6322b5;
+  --sc-btn-primary-hover-bg:  #6322b5;
+  --sc-btn-primary-hover-border: #501996;
+  --sc-btn-primary-active-bg: #501996;
+  --sc-accent-options:        #7932d4;
+  --sc-accent-options-light:  #9B4DFF;
+
+  /* ─── Motion ─────────────────────────────────────────────── */
+  --sc-duration-fast: 140ms;
+  --sc-duration-std:  200ms;
+  --sc-easing:        cubic-bezier(0.4, 0, 0.2, 1);
 }

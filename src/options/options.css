@@ -800,14 +800,20 @@ body {
 /* ── Home section ────────────────────────────────────────────────── */
 .home-cards-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 20px;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .home-cards-row {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .home-cards-row {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -817,6 +823,28 @@ body {
   border: 1px solid var(--sc-border, var(--border));
   border-radius: var(--sc-radius-lg);
   padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+button.home-card:hover {
+  background: var(--sc-bg-hover, var(--bg-hover));
+  border-color: var(--sc-accent-dim);
+  box-shadow: var(--sc-glow-accent);
+}
+
+button.home-card:focus-visible {
+  outline: 2px solid var(--sc-border-focus);
+  outline-offset: 2px;
 }
 
 .home-card--privacy {
@@ -825,6 +853,7 @@ body {
 }
 
 .home-card-label {
+  display: block;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -834,6 +863,7 @@ body {
 }
 
 .home-card-value {
+  display: block;
   font-size: 15px;
   font-weight: 700;
   color: var(--sc-text, var(--text));

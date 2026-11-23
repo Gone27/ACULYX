@@ -9,6 +9,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { test, expect, chromium } from '@playwright/test';
@@ -19,10 +20,25 @@ const __dirname = path.dirname(__filename);
 const extensionPath = path.resolve(__dirname, '../../dist');
 
 test.describe('Scope Profiles UI & Tab Reclassification E2E', () => {
+  const tempDirs: string[] = [];
+
+  test.afterAll(() => {
+    for (const dir of tempDirs) {
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {
+          // Safe cleanup
+        }
+      }
+    }
+  });
+
   test('creates, saves, and reloads scope profiles in options UI, immediately reclassifying open tab', async () => {
     const { server, baseUrl } = await startServer(3466, '127.0.0.1');
 
-    const testExtDir = path.resolve(__dirname, '../../dist-e2e-scope-test');
+    const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-scope-'));
+    tempDirs.push(testExtDir);
     fs.cpSync(extensionPath, testExtDir, { recursive: true });
     const testManifestPath = path.join(testExtDir, 'manifest.json');
     const manifestJson = JSON.parse(fs.readFileSync(testManifestPath, 'utf8')) as {
@@ -164,7 +180,13 @@ test.describe('Scope Profiles UI & Tab Reclassification E2E', () => {
     } finally {
       if (context) await context.close();
       server.close();
-      fs.rmSync(testExtDir, { recursive: true, force: true });
+      try {
+        if (fs.existsSync(testExtDir)) {
+          fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        }
+      } catch {
+        // Safe cleanup
+      }
     }
   });
 });

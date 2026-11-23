@@ -2301,3 +2301,47 @@ if (
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Chrome Toolbar Action & Dual-Browser Entry (R1)
+// ---------------------------------------------------------------------------
+
+interface SidePanelApi {
+  open: (options: { tabId?: number; windowId?: number }) => Promise<void>;
+}
+
+export function openWorkspaceTabFallback(tab: chrome.tabs.Tab): void {
+  let apex = '';
+  if (
+    tab.url !== undefined &&
+    tab.url.length > 0 &&
+    !tab.url.startsWith('chrome-extension://') &&
+    !tab.url.startsWith('moz-extension://') &&
+    !tab.url.startsWith('about:')
+  ) {
+    try {
+      const u = new URL(tab.url);
+      apex = registrableDomain(u.hostname) ?? u.hostname;
+    } catch {
+      // Fall back to empty apex
+    }
+  }
+  const tabParam = tab.id !== undefined ? `&tabId=${tab.id}` : '';
+  const url = chrome.runtime.getURL(`src/sidepanel/sidepanel.html?apex=${encodeURIComponent(apex)}${tabParam}`);
+  void chrome.tabs.create({ url });
+}
+
+if (typeof chrome !== 'undefined' && chrome.action?.onClicked !== undefined) {
+  chrome.action.onClicked.addListener((tab: chrome.tabs.Tab) => {
+    const sp = (chrome as unknown as { sidePanel?: SidePanelApi }).sidePanel;
+    if (sp !== undefined && typeof sp.open === 'function' && tab.windowId !== undefined) {
+      // Synchronously call chrome.sidePanel.open within user gesture turn
+      sp.open({ windowId: tab.windowId }).catch(() => {
+        openWorkspaceTabFallback(tab);
+      });
+    } else {
+      openWorkspaceTabFallback(tab);
+    }
+  });
+}
+

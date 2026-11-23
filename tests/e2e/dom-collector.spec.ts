@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { test, expect, chromium, type BrowserContext } from '@playwright/test';
@@ -27,10 +28,25 @@ interface BackgroundWindow {
 }
 
 test.describe('P0 DOM Collector Content Script E2E Verification', () => {
+  const tempDirs: string[] = [];
+
+  test.afterAll(() => {
+    for (const dir of tempDirs) {
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {
+          // Safe cleanup
+        }
+      }
+    }
+  });
+
   test('executes standalone classic dom-collector in browser page, extracting leads with zero injection failures', async () => {
     const { server, baseUrl } = await startServer(3460, '127.0.0.1');
 
-    const testExtDir = path.resolve(__dirname, `../../test-results/dist-e2e-dom-${Date.now()}`);
+    const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-dom-ext-'));
+    tempDirs.push(testExtDir);
     fs.cpSync(extensionPath, testExtDir, { recursive: true });
     const testManifestPath = path.join(testExtDir, 'manifest.json');
     const manifestJson = JSON.parse(fs.readFileSync(testManifestPath, 'utf8')) as {
@@ -42,7 +58,8 @@ test.describe('P0 DOM Collector Content Script E2E Verification', () => {
     delete manifestJson.optional_host_permissions;
     fs.writeFileSync(testManifestPath, JSON.stringify(manifestJson, null, 2));
 
-    const userDataDir = path.join(__dirname, `../../test-results/playwright-dom-${Date.now()}`);
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-dom-user-'));
+    tempDirs.push(userDataDir);
     let context: BrowserContext | undefined;
 
     try {
@@ -125,14 +142,14 @@ test.describe('P0 DOM Collector Content Script E2E Verification', () => {
       server.close();
       if (fs.existsSync(userDataDir)) {
         try {
-          fs.rmSync(userDataDir, { recursive: true, force: true });
+          fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         } catch {
           // ignore cleanup errors
         }
       }
       if (fs.existsSync(testExtDir)) {
         try {
-          fs.rmSync(testExtDir, { recursive: true, force: true });
+          fs.rmSync(testExtDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         } catch {
           // ignore cleanup errors
         }

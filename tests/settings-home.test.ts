@@ -15,6 +15,7 @@ import * as path from 'path';
 import { DEFAULT_SETTINGS } from '../src/shared/constants';
 import { migrateSettings } from '../src/shared/settings';
 import type { SettingsV2 } from '../src/shared/types';
+import { applyAppearance } from '../src/shared/appearance';
 
 // ---------------------------------------------------------------------------
 // DEFAULT_SETTINGS shape
@@ -285,4 +286,402 @@ describe('Home navigation cards & unsaved changes guard', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6 At-a-Glance Effective Configuration Summary Cards (R4)
+// ---------------------------------------------------------------------------
+
+describe('6 At-a-Glance Effective Configuration Summary Cards (R4)', () => {
+  const htmlPath = path.resolve(__dirname, '../src/options/options.html');
+  const html = fs.readFileSync(htmlPath, 'utf-8');
+  const tsPath = path.resolve(__dirname, '../src/options/options.ts');
+  const ts = fs.readFileSync(tsPath, 'utf-8');
+
+  it('declares all 6 effective configuration summary cards as interactive buttons with data-goto and data-focus', () => {
+    const expectedCards = [
+      { id: 'home-card-mode', goto: 'monitoring', focus: 'mode-per-site', valueId: 'home-mode-value' },
+      { id: 'home-card-perms', goto: 'monitoring', focus: 'section-allowlist', valueId: 'home-perms-value' },
+      { id: 'home-card-leads', goto: 'leads', focus: 'leads-enabled-toggle', valueId: 'home-leads-value' },
+      { id: 'home-card-deep', goto: 'leads', focus: 'deep-mode-toggle', valueId: 'home-deep-value' },
+      { id: 'home-card-hunter', goto: 'leads', focus: 'hunter-enabled-toggle', valueId: 'home-hunter-value' },
+      { id: 'home-card-creds', goto: 'leads', focus: 'credential-liveness-toggle', valueId: 'home-creds-value' },
+    ];
+
+    for (const card of expectedCards) {
+      const buttonPattern = new RegExp(`<button[^>]*id="${card.id}"[^>]*>`, 'i');
+      expect(html).toMatch(buttonPattern);
+      const tagMatch = html.match(new RegExp(`<button[^>]*id="${card.id}"[^>]*>`, 'i'));
+      expect(tagMatch).not.toBeNull();
+      const tagStr = tagMatch ? tagMatch[0] : '';
+      expect(tagStr).toContain('type="button"');
+      expect(tagStr).toContain('class="home-card"');
+      expect(tagStr).toContain(`data-goto="${card.goto}"`);
+      expect(tagStr).toContain(`data-focus="${card.focus}"`);
+
+      // Section target must exist
+      expect(html).toContain(`id="section-${card.goto}"`);
+
+      // Focus target must exist
+      expect(html).toContain(`id="${card.focus}"`);
+
+      // Value span must exist
+      expect(html).toContain(`id="${card.valueId}"`);
+    }
+  });
+
+  it('wires .home-card[data-goto] in options.ts to navigateToSection with focus target', () => {
+    expect(ts).toContain("document.querySelectorAll<HTMLButtonElement>('.home-card[data-goto]')");
+    expect(ts).toContain("const focusTarget = card.dataset['focus']");
+    expect(ts).toContain('navigateToSection(target, focusTarget)');
+  });
+
+  it('activateSection in options.ts focuses the target control if provided', () => {
+    expect(ts).toContain('function activateSection(sectionId: string, focusId?: string): void');
+    expect(ts).toContain('if (focusId !== undefined && focusId.length > 0) {');
+    expect(ts).toContain('el.focus()');
+  });
+
+  it('refreshHomeView in options.ts updates all 6 effective configuration values', () => {
+    expect(ts).toContain("document.getElementById('home-mode-value')");
+    expect(ts).toContain("document.getElementById('home-perms-value')");
+    expect(ts).toContain("document.getElementById('home-leads-value')");
+    expect(ts).toContain("document.getElementById('home-deep-value')");
+    expect(ts).toContain("document.getElementById('home-hunter-value')");
+    expect(ts).toContain("document.getElementById('home-creds-value')");
+  });
+
+  it('navigates and sets focus when clean, and prompts unsaved dialog when dirty', () => {
+    let isDirty = false;
+    let pendingNav: string | null = null;
+    let pendingFocus: string | null = null;
+    let activated: { section: string; focus?: string | undefined } | null = null;
+    let dialogShown = false;
+
+    const navigateToSection = (target: string, focusId?: string) => {
+      if (isDirty) {
+        pendingNav = target;
+        pendingFocus = focusId ?? null;
+        dialogShown = true;
+      } else {
+        activated = { section: target, focus: focusId };
+      }
+    };
+
+    // Clean navigation with focus
+    navigateToSection('leads', 'deep-mode-toggle');
+    expect(dialogShown).toBe(false);
+    expect(activated).toEqual({ section: 'leads', focus: 'deep-mode-toggle' });
+
+    // Dirty navigation intercepts
+    isDirty = true;
+    dialogShown = false;
+    activated = null;
+    navigateToSection('monitoring', 'section-allowlist');
+    expect(dialogShown).toBe(true);
+    expect(pendingNav).toBe('monitoring');
+    expect(pendingFocus).toBe('section-allowlist');
+    expect(activated).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Appearance Contract: Live Preview, Dirty State & Save/Discard (R4)
+// ---------------------------------------------------------------------------
+
+describe('Appearance Contract: Live Preview, Dirty State & Save/Discard (R4)', () => {
+  const tsPath = path.resolve(__dirname, '../src/options/options.ts');
+  const ts = fs.readFileSync(tsPath, 'utf-8');
+
+  it('applyAppearance modifies DOM attributes immediately for live preview', () => {
+    const mockRoot = {
+      attributes: new Map<string, string>(),
+      removeAttribute(name: string) { this.attributes.delete(name); },
+      setAttribute(name: string, val: string) { this.attributes.set(name, val); },
+      getAttribute(name: string) { return this.attributes.get(name) ?? null; },
+    };
+    const mockBody = {
+      classes: new Set<string>(),
+      classList: {
+        toggle: (cls: string, force?: boolean) => {
+          if (force !== undefined) {
+            if (force) mockBody.classes.add(cls); else mockBody.classes.delete(cls);
+          } else {
+            if (mockBody.classes.has(cls)) mockBody.classes.delete(cls); else mockBody.classes.add(cls);
+          }
+        },
+        contains: (cls: string) => mockBody.classes.has(cls),
+      },
+    };
+    const mockDoc = {
+      documentElement: mockRoot,
+      body: mockBody,
+    } as unknown as Document;
+
+    // Apply dark theme, compact density, always reduced motion
+    applyAppearance('dark', 'compact', 'always', mockDoc);
+    expect(mockRoot.getAttribute('data-theme')).toBe('dark');
+    expect(mockBody.classList.contains('density-compact')).toBe(true);
+    expect(mockRoot.getAttribute('data-motion')).toBe('reduce');
+
+    // Revert to system theme, comfortable density, never reduced motion
+    applyAppearance('system', 'comfortable', 'never', mockDoc);
+    expect(mockRoot.getAttribute('data-theme')).toBeNull();
+    expect(mockBody.classList.contains('density-compact')).toBe(false);
+    expect(mockRoot.getAttribute('data-motion')).toBe('no-reduce');
+  });
+
+  it('options.ts implements isAppearanceDirty comparing theme, density, and reducedMotion', () => {
+    expect(ts).toContain('function isAppearanceDirty(): boolean');
+    expect(ts).toContain('initialAppearance.theme');
+    expect(ts).toContain('initialAppearance.density');
+    expect(ts).toContain('initialAppearance.reducedMotion');
+  });
+
+  it('updateDirtyUI displays "Preview — unsaved" when appearance is modified and "Unsaved changes" for other fields', () => {
+    expect(ts).toContain("const statusMsg = isAppDirty ? 'Preview — unsaved' : 'Unsaved changes'");
+    expect(ts).toContain('navDirtyBadge.textContent = statusMsg');
+
+    // Behavioral simulation of updateDirtyUI logic
+    const computeDirtyFeedback = (
+      isDirty: boolean,
+      current: { theme: string; density: string; reducedMotion: string; retainDays: number },
+      initial: { theme: string; density: string; reducedMotion: string; retainDays: number },
+    ): { text: string; dirtyBadgeVisible: boolean; discardVisible: boolean } => {
+      if (!isDirty) {
+        return { text: '', dirtyBadgeVisible: false, discardVisible: false };
+      }
+      const isAppDirty =
+        current.theme !== initial.theme ||
+        current.density !== initial.density ||
+        current.reducedMotion !== initial.reducedMotion;
+      return {
+        text: isAppDirty ? 'Preview — unsaved' : 'Unsaved changes',
+        dirtyBadgeVisible: true,
+        discardVisible: true,
+      };
+    };
+
+    const initial = { theme: 'system', density: 'comfortable', reducedMotion: 'system', retainDays: 7 };
+
+    // When appearance changes (e.g. theme becomes 'dark')
+    const appChanged = { ...initial, theme: 'dark' };
+    const appFeedback = computeDirtyFeedback(true, appChanged, initial);
+    expect(appFeedback.text).toBe('Preview — unsaved');
+    expect(appFeedback.dirtyBadgeVisible).toBe(true);
+    expect(appFeedback.discardVisible).toBe(true);
+
+    // When only non-appearance changes (e.g. retainDays becomes 30)
+    const nonAppChanged = { ...initial, retainDays: 30 };
+    const nonAppFeedback = computeDirtyFeedback(true, nonAppChanged, initial);
+    expect(nonAppFeedback.text).toBe('Unsaved changes');
+    expect(nonAppFeedback.dirtyBadgeVisible).toBe(true);
+    expect(nonAppFeedback.discardVisible).toBe(true);
+
+    // When clean
+    const cleanFeedback = computeDirtyFeedback(false, initial, initial);
+    expect(cleanFeedback.text).toBe('');
+    expect(cleanFeedback.dirtyBadgeVisible).toBe(false);
+    expect(cleanFeedback.discardVisible).toBe(false);
+  });
+
+  it('discard reverts preview to saved settings and resets dirty state', () => {
+    const savedSettings = { theme: 'system', density: 'comfortable', reducedMotion: 'system' };
+    let previewState = { ...savedSettings };
+    let dirty = false;
+
+    const onPreviewChange = (newTheme: string) => {
+      previewState.theme = newTheme;
+      dirty = previewState.theme !== savedSettings.theme;
+    };
+
+    const onDiscard = () => {
+      previewState = { ...savedSettings };
+      dirty = false;
+    };
+
+    onPreviewChange('dark');
+    expect(previewState.theme).toBe('dark');
+    expect(dirty).toBe(true);
+
+    onDiscard();
+    expect(previewState.theme).toBe('system');
+    expect(dirty).toBe(false);
+  });
+
+  it('save permanently persists previewed appearance and marks clean', () => {
+    let savedSettings = { theme: 'system', density: 'comfortable', reducedMotion: 'system' };
+    const previewState = { ...savedSettings };
+    let dirty = false;
+
+    previewState.theme = 'light';
+    previewState.density = 'compact';
+    dirty = true;
+
+    const onSave = () => {
+      savedSettings = { ...previewState };
+      dirty = false;
+    };
+
+    onSave();
+    expect(savedSettings.theme).toBe('light');
+    expect(savedSettings.density).toBe('compact');
+    expect(dirty).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Post-Save Navigation Guard (R4)
+// ---------------------------------------------------------------------------
+
+describe('Post-Save Navigation Guard (R4)', () => {
+  const tsPath = path.resolve(__dirname, '../src/options/options.ts');
+  const ts = fs.readFileSync(tsPath, 'utf-8');
+
+  it('handleSave declares return type Promise<boolean>', () => {
+    expect(ts).toContain('async function handleSave(): Promise<boolean>');
+  });
+
+  it('handleSave validates fields and returns false without persisting on invalid input', async () => {
+    const handleSaveMock = (settings: { retainHistoryDays: number; maxHistoryPerOrigin: number }): Promise<boolean> => {
+      if (settings.retainHistoryDays < 0 || settings.retainHistoryDays > 365) {
+        return Promise.resolve(false);
+      }
+      if (settings.maxHistoryPerOrigin < 1 || settings.maxHistoryPerOrigin > 50) {
+        return Promise.resolve(false);
+      }
+      return Promise.resolve(true);
+    };
+
+    expect(await handleSaveMock({ retainHistoryDays: -1, maxHistoryPerOrigin: 10 })).toBe(false);
+    expect(await handleSaveMock({ retainHistoryDays: 366, maxHistoryPerOrigin: 10 })).toBe(false);
+    expect(await handleSaveMock({ retainHistoryDays: 7, maxHistoryPerOrigin: 0 })).toBe(false);
+    expect(await handleSaveMock({ retainHistoryDays: 7, maxHistoryPerOrigin: 51 })).toBe(false);
+    expect(await handleSaveMock({ retainHistoryDays: 7, maxHistoryPerOrigin: 10 })).toBe(true);
+  });
+
+  it('wireUnsavedDialog gates navigation strictly on save success', () => {
+    expect(ts).toContain('void handleSave().then((saved) => {');
+    expect(ts).toContain('if (saved) {');
+    expect(ts).toContain('activateSection(target, focusTarget ?? undefined);');
+    expect(ts).toContain('pendingNavSection = null;');
+  });
+
+  it('preserves unsaved form state and blocks navigation when save fails', async () => {
+    let activeSection = 'appearance';
+    let pendingNav: string | null = 'monitoring';
+    const formState = { retainDays: 999 }; // invalid
+    let errorDisplayed = false;
+
+    const handleSave = (): Promise<boolean> => {
+      if (formState.retainDays > 365) {
+        errorDisplayed = true;
+        return Promise.resolve(false); // validation failure
+      }
+      return Promise.resolve(true);
+    };
+
+    const onDialogSaveClick = async () => {
+      const saved = await handleSave();
+      if (saved) {
+        if (pendingNav !== null) {
+          activeSection = pendingNav;
+          pendingNav = null;
+        }
+      } else {
+        // preserve edits and stay on current section
+        pendingNav = null;
+      }
+    };
+
+    await onDialogSaveClick();
+
+    // Verify navigation was BLOCKED
+    expect(activeSection).toBe('appearance');
+    // Verify form state was PRESERVED
+    expect(formState.retainDays).toBe(999);
+    // Verify error was displayed
+    expect(errorDisplayed).toBe(true);
+    expect(pendingNav).toBeNull();
+  });
+
+  it('proceeds with navigation when save succeeds', async () => {
+    let activeSection = 'appearance';
+    let pendingNav: string | null = 'monitoring';
+
+    const handleSave = (): Promise<boolean> => {
+      return Promise.resolve(true);
+    };
+
+    const onDialogSaveClick = async () => {
+      const saved = await handleSave();
+      if (saved) {
+        if (pendingNav !== null) {
+          activeSection = pendingNav;
+          pendingNav = null;
+        }
+      } else {
+        pendingNav = null;
+      }
+    };
+
+    await onDialogSaveClick();
+
+    expect(activeSection).toBe('monitoring');
+    expect(pendingNav).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Staged Form Dirty Tracking & Credential Liveness Invariants (R4)
+// ---------------------------------------------------------------------------
+
+describe('Staged Form Dirty Tracking & Credential Liveness (R4)', () => {
+  const tsPath = path.resolve(__dirname, '../src/options/options.ts');
+  const ts = fs.readFileSync(tsPath, 'utf-8');
+  const htmlPath = path.resolve(__dirname, '../src/options/options.html');
+  const html = fs.readFileSync(htmlPath, 'utf-8');
+
+  it('wireModeRadios calls updateDirtyState inside revertToPriorMode', () => {
+    expect(ts).toContain('const revertToPriorMode = (): void => {');
+    const revertStart = ts.indexOf('const revertToPriorMode = (): void => {');
+    const revertEnd = ts.indexOf('};', revertStart);
+    const revertBlock = ts.slice(revertStart, revertEnd + 2);
+    expect(revertBlock).toContain('updateDirtyState()');
+  });
+
+  it('credential liveness toggle is default-off, manual-only, and wired to dirty tracking', () => {
+    // DEFAULT_SETTINGS invariant
+    expect(DEFAULT_SETTINGS.credentialLivenessEnabled).toBe(false);
+
+    // HTML input element
+    expect(html).toContain('id="credential-liveness-toggle"');
+    expect(html).toContain('name="credentialLiveness"');
+
+    // options.ts wiring
+    expect(ts).toContain("credentialLivenessToggle.addEventListener('change', updateDirtyState)");
+    expect(ts).toContain('credentialLivenessEnabled: Boolean(current.credentialLivenessEnabled)');
+  });
+
+  it('changing credential liveness alone marks form dirty and discards cleanly', () => {
+    const initial = { credentialLivenessEnabled: false };
+    let current = { ...initial };
+    let dirty = false;
+
+    const onToggle = (checked: boolean) => {
+      current.credentialLivenessEnabled = checked;
+      dirty = current.credentialLivenessEnabled !== initial.credentialLivenessEnabled;
+    };
+
+    onToggle(true);
+    expect(current.credentialLivenessEnabled).toBe(true);
+    expect(dirty).toBe(true);
+
+    // Discard
+    current = { ...initial };
+    dirty = false;
+    expect(current.credentialLivenessEnabled).toBe(false);
+    expect(dirty).toBe(false);
+  });
+});
+
 

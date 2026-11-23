@@ -42,6 +42,7 @@ export default defineConfig({
     target: 'es2022',
     rollupOptions: {
       input: {
+        popup: path.resolve(__dirname, 'src/popup/popup.html'),
         panel: path.resolve(__dirname, 'src/devtools/panel.html'),
         'dom-collector': path.resolve(__dirname, 'src/content/dom-collector.ts'),
         'main-world-hooks': path.resolve(__dirname, 'src/content/main-world-hooks.ts'),

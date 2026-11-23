@@ -59,6 +59,13 @@ let hunterCustomHeaders: HTMLTextAreaElement;
 let credentialLivenessToggle: HTMLInputElement;
 let currentMode: Settings['monitoringMode'] = 'per-site';
 let pendingNavSection: string | null = null;
+let pendingFocusId: string | null = null;
+
+let initialAppearance = {
+  theme: 'system',
+  density: 'comfortable',
+  reducedMotion: 'system',
+};
 
 /** In-memory working copy of the allowedOrigins array. */
 let workingOrigins: string[] = [];
@@ -150,12 +157,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const SECTION_IDS = ['home', 'monitoring', 'findings', 'cookies', 'history', 'scope', 'leads', 'appearance', 'advanced', 'about'];
 
-function navigateToSection(target: string): void {
+function navigateToSection(target: string, focusId?: string): void {
   if (isDirty) {
     pendingNavSection = target;
+    pendingFocusId = focusId ?? null;
     showUnsavedDialog();
   } else {
-    activateSection(target);
+    activateSection(target, focusId);
   }
 }
 
@@ -178,6 +186,15 @@ function wireNavCards(): void {
     });
   });
 
+  const effectiveCards = document.querySelectorAll<HTMLButtonElement>('.home-card[data-goto]');
+  effectiveCards.forEach((card) => {
+    card.addEventListener('click', () => {
+      const target = card.dataset['goto'] ?? 'home';
+      const focusTarget = card.dataset['focus'];
+      navigateToSection(target, focusTarget);
+    });
+  });
+
   // Home callout action button
   const calloutAction = document.getElementById('home-callout-action');
   if (calloutAction) {
@@ -187,7 +204,7 @@ function wireNavCards(): void {
   }
 }
 
-function activateSection(sectionId: string): void {
+function activateSection(sectionId: string, focusId?: string): void {
   const target = SECTION_IDS.includes(sectionId) ? sectionId : 'home';
 
   // Show/hide sections
@@ -220,6 +237,18 @@ function activateSection(sectionId: string): void {
     void refreshHomeView();
   } else if (target === 'leads') {
     void refreshReconCounts();
+  }
+
+  // Focus target control if provided
+  if (focusId !== undefined && focusId.length > 0) {
+    const el = document.getElementById(focusId);
+    if (el) {
+      if (!el.hasAttribute('tabindex') && el.tagName !== 'BUTTON' && el.tagName !== 'INPUT' && el.tagName !== 'SELECT' && el.tagName !== 'TEXTAREA' && el.tagName !== 'A') {
+        el.setAttribute('tabindex', '-1');
+      }
+      el.focus();
+      el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    }
   }
 }
 
@@ -261,6 +290,27 @@ async function refreshHomeView(): Promise<void> {
     } else {
       leadsEl.classList.remove('home-card-value--accent');
     }
+  }
+
+  const deepEl = document.getElementById('home-deep-value');
+  if (deepEl) {
+    const isDeep = settings.deepModeEnabled === true;
+    deepEl.textContent = isDeep ? 'Active' : 'Disabled';
+    deepEl.classList.toggle('home-card-value--accent', isDeep);
+  }
+
+  const hunterEl = document.getElementById('home-hunter-value');
+  if (hunterEl) {
+    const isHunter = settings.hunterConfig?.enabled === true;
+    hunterEl.textContent = isHunter ? 'Active' : 'Disabled';
+    hunterEl.classList.toggle('home-card-value--accent', isHunter);
+  }
+
+  const credsEl = document.getElementById('home-creds-value');
+  if (credsEl) {
+    const isCreds = settings.credentialLivenessEnabled === true;
+    credsEl.textContent = isCreds ? 'Active' : 'Disabled';
+    credsEl.classList.toggle('home-card-value--accent', isCreds);
   }
 
   // Permissions coverage
@@ -366,6 +416,15 @@ async function loadAndPopulate(): Promise<void> {
   applyTheme(settings.theme ?? 'system');
   applyDensity(settings.density ?? 'comfortable');
   applyMotion(settings.reducedMotion ?? 'system');
+
+  const loadedTheme = settings.theme ?? DEFAULT_SETTINGS.theme ?? 'system';
+  const loadedDensity = settings.density ?? DEFAULT_SETTINGS.density ?? 'comfortable';
+  const loadedMotion = settings.reducedMotion ?? DEFAULT_SETTINGS.reducedMotion ?? 'system';
+  initialAppearance = {
+    theme: loadedTheme,
+    density: loadedDensity,
+    reducedMotion: loadedMotion,
+  };
 
   // Allowlist
   try {
@@ -474,16 +533,18 @@ function wireDiscardButton(): void {
   discardBtn.addEventListener('click', () => { void loadAndPopulate(); });
 }
 
-async function handleSave(): Promise<void> {
+async function handleSave(): Promise<boolean> {
   clearStatus();
 
   const settings = readFormValues();
 
   if (settings.retainHistoryDays < 0 || settings.retainHistoryDays > 365) {
-    setStatus('Retain days must be between 0 and 365.', true); return;
+    setStatus('Retain days must be between 0 and 365.', true);
+    return false;
   }
   if (settings.maxHistoryPerOrigin < 1 || settings.maxHistoryPerOrigin > 50) {
-    setStatus('Max history per origin must be between 1 and 50.', true); return;
+    setStatus('Max history per origin must be between 1 and 50.', true);
+    return false;
   }
 
   saveBtn.disabled = true;
@@ -499,20 +560,26 @@ async function handleSave(): Promise<void> {
       throw new Error(resp.error ?? 'Failed to apply settings transition');
     }
     initialSettingsSnapshot = getFormStateString();
+    initialAppearance = {
+      theme: settings.theme ?? 'system',
+      density: settings.density ?? 'comfortable',
+      reducedMotion: settings.reducedMotion ?? 'system',
+    };
     isDirty = false;
     updateDirtyUI();
     setStatus('Settings saved ✓', false);
+    setTimeout(() => {
+      if (getFormStateString() === initialSettingsSnapshot) clearStatus();
+    }, 3000);
+    return true;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to save settings.';
     setStatus(`Failed to save settings: ${errorMsg}`, true);
+    return false;
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = 'Save settings';
   }
-
-  setTimeout(() => {
-    if (getFormStateString() === initialSettingsSnapshot) clearStatus();
-  }, 3000);
 }
 
 /* ================================================================
@@ -700,6 +767,7 @@ function wireModeRadios(): void {
           updateAllowlistVisibility(currentMode);
           void checkAndRenderBroadConflict();
           setStatus('All-sites monitoring requires permission for all URLs. Kept previous mode.', true);
+          updateDirtyState();
         };
 
         if (typeof chrome !== 'undefined' && typeof chrome.permissions !== 'undefined') {
@@ -853,6 +921,15 @@ function getFormStateString(): string {
   });
 }
 
+function isAppearanceDirty(): boolean {
+  const current = readFormValues();
+  return (
+    (current.theme ?? 'system') !== initialAppearance.theme ||
+    (current.density ?? 'comfortable') !== initialAppearance.density ||
+    (current.reducedMotion ?? 'system') !== initialAppearance.reducedMotion
+  );
+}
+
 function updateDirtyState(): void {
   if (!initialSettingsSnapshot) return;
   isDirty = getFormStateString() !== initialSettingsSnapshot;
@@ -864,7 +941,10 @@ function updateDirtyUI(): void {
   navDirtyBadge.setAttribute('aria-hidden', String(!isDirty));
   discardBtn.hidden = !isDirty;
   if (isDirty) {
-    setStatus('Unsaved changes', false, true);
+    const isAppDirty = isAppearanceDirty();
+    const statusMsg = isAppDirty ? 'Preview — unsaved' : 'Unsaved changes';
+    setStatus(statusMsg, false, true);
+    navDirtyBadge.textContent = statusMsg;
   } else if (saveStatus.classList.contains('dirty')) {
     clearStatus();
   }
@@ -903,11 +983,18 @@ function wireUnsavedDialog(): void {
 
   dialogSave.addEventListener('click', () => {
     unsavedDialog.close();
-    void handleSave().then(() => {
-      if (pendingNavSection !== null) {
-        const target = pendingNavSection;
+    void handleSave().then((saved) => {
+      if (saved) {
+        if (pendingNavSection !== null) {
+          const target = pendingNavSection;
+          const focusTarget = pendingFocusId;
+          pendingNavSection = null;
+          pendingFocusId = null;
+          activateSection(target, focusTarget ?? undefined);
+        }
+      } else {
         pendingNavSection = null;
-        activateSection(target);
+        pendingFocusId = null;
       }
     });
   });
@@ -917,8 +1004,10 @@ function wireUnsavedDialog(): void {
     void loadAndPopulate().then(() => {
       if (pendingNavSection !== null) {
         const target = pendingNavSection;
+        const focusTarget = pendingFocusId;
         pendingNavSection = null;
-        activateSection(target);
+        pendingFocusId = null;
+        activateSection(target, focusTarget ?? undefined);
       }
     });
   });
@@ -926,6 +1015,7 @@ function wireUnsavedDialog(): void {
   dialogCancel.addEventListener('click', () => {
     unsavedDialog.close();
     pendingNavSection = null;
+    pendingFocusId = null;
   });
 }
 
