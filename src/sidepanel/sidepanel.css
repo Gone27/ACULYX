@@ -63,12 +63,26 @@ body {
 }
 
 .header-wordmark {
-  max-height: 22px;
-  width: auto;
-  max-width: 130px;
+  width: 125px;
+  height: auto;
+  max-height: 48px;
+  max-width: 140px;
+  aspect-ratio: 1024 / 395;
   object-fit: contain;
   display: block;
   filter: drop-shadow(0 0 6px rgba(155, 77, 255, 0.35));
+}
+
+@media (max-width: 340px) {
+  .brand-katana-icon {
+    display: none;
+  }
+  .tier-badge {
+    display: none;
+  }
+  .header-wordmark {
+    width: 110px;
+  }
 }
 
 .sidepanel-title {

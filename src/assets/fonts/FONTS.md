@@ -1,18 +1,18 @@
 # ACULYX Typography Assets
 
-ACULYX uses modern, clean typography designed for security research operations:
+ACULYX bundles modern, clean typography designed for security research operations directly in the extension for full offline privacy:
 
 1. **Space Grotesk** (Display & Headings)
    - Designer: Florian Karsten
    - License: SIL Open Font License, Version 1.1 (OFL-1.1)
    - Source: https://github.com/floriankarsten/space-grotesk
-   - Weights used: Regular (400), Bold (700)
+   - Weights bundled: Regular (400, `SpaceGrotesk-Regular.woff2`), Bold (700, `SpaceGrotesk-Bold.woff2`)
 
 2. **IBM Plex Mono** (Code, Endpoints, Monospace Data)
    - Designer: Mike Abbink, Bold Monday
    - License: SIL Open Font License, Version 1.1 (OFL-1.1)
    - Source: https://github.com/IBM/plex
-   - Weights used: Regular (400), SemiBold (600)
+   - Weights bundled: Regular (400, `IBMPlexMono-Regular.woff2`), SemiBold (600, `IBMPlexMono-SemiBold.woff2`)
 
 ## OFL-1.1 License Summary
 

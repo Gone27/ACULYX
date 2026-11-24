@@ -1,8 +1,7 @@
 /* ─── @font-face Declarations ─────────────────────────────────────
-   NOTE: WOFF2 font files must be manually placed in src/assets/fonts/.
-   Download Space Grotesk (400, 700) and IBM Plex Mono (400, 600) WOFF2
-   from Google Fonts or the official repositories and place them here.
-   Licenses: Space Grotesk — OFL 1.1, IBM Plex Mono — OFL 1.1.
+   Local WOFF2 fonts bundled under src/assets/fonts/ for offline privacy.
+   Space Grotesk (Display / Headings) & IBM Plex Mono (Code / Data).
+   Licenses: SIL Open Font License 1.1 (OFL-1.1). See FONTS.md.
    ─────────────────────────────────────────────────────────────────── */
 @font-face {
   font-family: 'Space Grotesk';

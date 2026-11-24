@@ -692,6 +692,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  window.addEventListener('aculyx-test-inject-leads', (e: Event) => {
+    const detail = (e as CustomEvent<Lead[]>).detail;
+    if (Array.isArray(detail)) {
+      handleLeadStateUpdate({ type: 'LEAD_STATE_UPDATE', origin: 'test', leads: detail });
+    }
+  });
+
   void SettingsService.getSettings()
     .then((s) => {
       currentSettings = s;
