@@ -21,7 +21,7 @@
           </linearGradient>
         </defs>
       </svg>
-      <span class="sidepanel-title">ACULYX Intelligence</span>
+      <img class="header-wordmark" src="../assets/aculyx-wordmark.png" alt="ACULYX" width="130" height="20">
       <span class="tier-badge" id="tier-badge">Standard</span>
     </div>
     <div class="header-actions">
@@ -124,6 +124,17 @@
         </div>
         <div class="hygiene-items-list" id="overview-hygiene-list">
           <div class="empty-hint" id="overview-hygiene-empty">No security header or cookie hygiene violations observed.</div>
+        </div>
+      </section>
+
+      <!-- Recent Findings Card -->
+      <section class="overview-card recent-findings-card" aria-label="Recent Findings">
+        <div class="card-header-row">
+          <h3 class="overview-card-title">Recent Findings</h3>
+          <span class="section-count-badge" id="overview-recent-count">0</span>
+        </div>
+        <div id="overview-recent-list">
+          <div class="empty-hint" id="overview-recent-empty">No findings yet</div>
         </div>
       </section>
 
@@ -472,6 +483,124 @@
             <p class="empty-desc">Network hops, redirects, and service worker receipts will log here.</p>
           </div>
           <div id="ledger-stream" class="ledger-stream"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 5: In-Panel Settings Overlay -->
+    <div id="view-settings" class="settings-panel-overlay" role="region" aria-label="Sidepanel Settings" hidden>
+      <div class="settings-panel-header">
+        <h2 class="settings-panel-title">
+          <span aria-hidden="true">⚙</span> Settings
+        </h2>
+        <button type="button" class="settings-panel-close-btn" id="settings-close-btn" aria-label="Close Settings">✕</button>
+      </div>
+      <div class="settings-panel-body">
+        <!-- Monitoring Mode Section -->
+        <section class="settings-panel-section">
+          <h3 class="settings-section-title">Monitoring Mode</h3>
+          <div class="settings-radio-group">
+            <label class="settings-radio-option">
+              <input type="radio" name="sp-monitoring-mode" value="per-site" id="sp-mode-per-site">
+              <div class="settings-radio-meta">
+                <span class="settings-radio-title">Per-site (Default)</span>
+                <span class="settings-field-desc">Analyze and probe only explicitly enabled target origins.</span>
+              </div>
+            </label>
+            <label class="settings-radio-option">
+              <input type="radio" name="sp-monitoring-mode" value="all-sites" id="sp-mode-all-sites">
+              <div class="settings-radio-meta">
+                <span class="settings-radio-title">All sites</span>
+                <span class="settings-field-desc">Automatically monitor headers, cookies, and attack surface on all origins.</span>
+              </div>
+            </label>
+            <label class="settings-radio-option">
+              <input type="radio" name="sp-monitoring-mode" value="off" id="sp-mode-off">
+              <div class="settings-radio-meta">
+                <span class="settings-radio-title">Off</span>
+                <span class="settings-field-desc">Sensors disabled; no background request monitoring or lead detection.</span>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <!-- Detection & Investigation Features -->
+        <section class="settings-panel-section">
+          <h3 class="settings-section-title">Investigation Features</h3>
+          <div class="settings-field-group">
+            <div class="settings-field-row">
+              <div>
+                <label for="sp-setting-leads" class="settings-field-label">Lead Detection Engine</label>
+                <p class="settings-field-desc">Identify actionable security leads across 8 vulnerability families.</p>
+              </div>
+              <input type="checkbox" id="sp-setting-leads">
+            </div>
+            <div class="settings-field-row">
+              <div>
+                <label for="sp-setting-deep" class="settings-field-label">Deep Parameter Analysis</label>
+                <p class="settings-field-desc">Inspect request parameters, JSON bodies, and hydration state for secrets.</p>
+              </div>
+              <input type="checkbox" id="sp-setting-deep">
+            </div>
+            <div class="settings-field-row">
+              <div>
+                <label for="sp-setting-cred" class="settings-field-label">Credential Liveness Check</label>
+                <p class="settings-field-desc">Permit gated active authorization checks on exposed API keys.</p>
+              </div>
+              <input type="checkbox" id="sp-setting-cred">
+            </div>
+            <div class="settings-field-row">
+              <div>
+                <label for="sp-setting-hunter" class="settings-field-label">Active Hunter Probing</label>
+                <p class="settings-field-desc">Enable synthetic confirmation probes (requires explicit per-probe gate).</p>
+              </div>
+              <input type="checkbox" id="sp-setting-hunter">
+            </div>
+          </div>
+        </section>
+
+        <!-- Appearance Section -->
+        <section class="settings-panel-section">
+          <h3 class="settings-section-title">Appearance</h3>
+          <div class="settings-field-group">
+            <div class="settings-field-row">
+              <label for="sp-setting-theme" class="settings-field-label">Color Theme</label>
+              <select id="sp-setting-theme" class="panel-select">
+                <option value="system">System (Follow OS)</option>
+                <option value="dark">Midnight Obsidian (Dark)</option>
+                <option value="light">Steel Frost (Light)</option>
+              </select>
+            </div>
+            <div class="settings-field-row">
+              <label for="sp-setting-density" class="settings-field-label">Interface Density</label>
+              <select id="sp-setting-density" class="panel-select">
+                <option value="comfortable">Comfortable</option>
+                <option value="compact">Compact</option>
+              </select>
+            </div>
+            <div class="settings-field-row">
+              <label for="sp-setting-motion" class="settings-field-label">Motion &amp; Animations</label>
+              <select id="sp-setting-motion" class="panel-select">
+                <option value="system">System (Respect OS)</option>
+                <option value="always">Always Enabled</option>
+                <option value="never">Reduced (Disabled)</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <!-- Link to Full Options Page -->
+        <button type="button" class="settings-open-options-link" id="sp-open-full-options-btn">
+          Open Full Settings &amp; Scope Profiles →
+        </button>
+      </div>
+
+      <!-- Action Footer -->
+      <div class="settings-panel-footer">
+        <span class="settings-status-text" id="sp-settings-status" hidden>Saved</span>
+        <div class="settings-footer-actions">
+          <button type="button" class="btn-secondary" id="sp-settings-discard-btn">Discard</button>
+          <button type="button" class="btn-primary" id="sp-settings-save-btn">Save Changes</button>
         </div>
       </div>
     </div>

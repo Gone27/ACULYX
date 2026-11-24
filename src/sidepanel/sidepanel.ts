@@ -258,6 +258,45 @@ document.addEventListener('DOMContentLoaded', () => {
   const cmdPaletteInput = getEl<HTMLInputElement>('cmd-palette-input');
   const cmdPaletteResults = getEl<HTMLUListElement>('cmd-palette-results');
 
+  // In-Panel Settings elements
+  const viewSettings = getEl<HTMLDivElement>('view-settings');
+  const settingsCloseBtn = getEl<HTMLButtonElement>('settings-close-btn');
+  const spSettingsSaveBtn = getEl<HTMLButtonElement>('sp-settings-save-btn');
+  const spSettingsDiscardBtn = getEl<HTMLButtonElement>('sp-settings-discard-btn');
+  const spSettingsStatus = getEl<HTMLSpanElement>('sp-settings-status');
+  const spOpenFullOptionsBtn = getEl<HTMLButtonElement>('sp-open-full-options-btn');
+  const spModePerSite = getEl<HTMLInputElement>('sp-mode-per-site');
+  const spModeAllSites = getEl<HTMLInputElement>('sp-mode-all-sites');
+  const spModeOff = getEl<HTMLInputElement>('sp-mode-off');
+  const spSettingLeads = getEl<HTMLInputElement>('sp-setting-leads');
+  const spSettingDeep = getEl<HTMLInputElement>('sp-setting-deep');
+  const spSettingCred = getEl<HTMLInputElement>('sp-setting-cred');
+  const spSettingHunter = getEl<HTMLInputElement>('sp-setting-hunter');
+  const spSettingTheme = getEl<HTMLSelectElement>('sp-setting-theme');
+  const spSettingDensity = getEl<HTMLSelectElement>('sp-setting-density');
+  const spSettingMotion = getEl<HTMLSelectElement>('sp-setting-motion');
+
+  // In-Panel Settings state
+  interface InPanelSettingsSnapshot {
+    monitoringMode: 'per-site' | 'all-sites' | 'off';
+    leadsEnabled: boolean;
+    deepMode: boolean;
+    credentialLivenessEnabled: boolean;
+    hunterEnabled: boolean;
+    theme: 'system' | 'dark' | 'light';
+    density: 'comfortable' | 'compact';
+    reducedMotion: 'system' | 'always' | 'never';
+  }
+
+  let inPanelSettingsSnapshot: InPanelSettingsSnapshot | null = null;
+  let initialAppearanceSnapshot = {
+    theme: 'system' as 'system' | 'dark' | 'light',
+    density: 'comfortable' as 'comfortable' | 'compact',
+    reducedMotion: 'system' as 'system' | 'always' | 'never',
+  };
+  let lastActiveTabBeforeSettings: string = 'tab-overview';
+  let lastFocusedElementBeforeSettings: HTMLElement | null = null;
+
   // State
   let activeTabId: number | null = null;
   let activeApexDomain: string = '';
@@ -304,6 +343,9 @@ document.addEventListener('DOMContentLoaded', () => {
       t.view.classList.toggle('active', isSelected);
       document.body.classList.toggle(t.bodyClass, isSelected);
     }
+
+    viewSettings.hidden = true;
+    optionsLink.classList.remove('active');
 
     // Mirror attributes to compatibility aliases for Playwright E2E tests
     const isFindingsActive = resolvedId === 'tab-findings';
@@ -407,10 +449,198 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleNodeTableBtn.setAttribute('aria-pressed', isListView ? 'true' : 'false');
   });
 
-  optionsLink.addEventListener('click', (e) => {
-    e.preventDefault();
+  function getInPanelFormState(): InPanelSettingsSnapshot {
+    let mode: 'per-site' | 'all-sites' | 'off' = 'per-site';
+    if (spModeAllSites.checked) mode = 'all-sites';
+    else if (spModeOff.checked) mode = 'off';
+
+    return {
+      monitoringMode: mode,
+      leadsEnabled: spSettingLeads.checked,
+      deepMode: spSettingDeep.checked,
+      credentialLivenessEnabled: spSettingCred.checked,
+      hunterEnabled: spSettingHunter.checked,
+      theme: (spSettingTheme.value as 'system' | 'dark' | 'light') || 'system',
+      density: (spSettingDensity.value as 'comfortable' | 'compact') || 'comfortable',
+      reducedMotion: (spSettingMotion.value as 'system' | 'always' | 'never') || 'system',
+    };
+  }
+
+  function setInPanelFormState(state: InPanelSettingsSnapshot): void {
+    if (state.monitoringMode === 'all-sites') spModeAllSites.checked = true;
+    else if (state.monitoringMode === 'off') spModeOff.checked = true;
+    else spModePerSite.checked = true;
+
+    spSettingLeads.checked = state.leadsEnabled;
+    spSettingDeep.checked = state.deepMode;
+    spSettingCred.checked = state.credentialLivenessEnabled;
+    spSettingHunter.checked = state.hunterEnabled;
+    spSettingTheme.value = state.theme;
+    spSettingDensity.value = state.density;
+    spSettingMotion.value = state.reducedMotion;
+  }
+
+  function isInPanelSettingsDirty(): boolean {
+    if (!inPanelSettingsSnapshot) return false;
+    const current = getInPanelFormState();
+    return JSON.stringify(current) !== JSON.stringify(inPanelSettingsSnapshot);
+  }
+
+  async function openInPanelSettings(): Promise<void> {
+    lastFocusedElementBeforeSettings = document.activeElement as HTMLElement | null;
+    const currentActiveTabEl = document.querySelector('.nav-tab.active');
+    lastActiveTabBeforeSettings = currentActiveTabEl?.id ?? 'tab-overview';
+
+    try {
+      currentSettings = await SettingsService.getSettings();
+    } catch {
+      // fallback to in-memory currentSettings
+    }
+
+    const snapshot: InPanelSettingsSnapshot = {
+      monitoringMode: currentSettings.monitoringMode ?? 'per-site',
+      leadsEnabled: currentSettings.leadsEnabled ?? true,
+      deepMode: currentSettings.deepModeEnabled ?? false,
+      credentialLivenessEnabled: currentSettings.credentialLivenessEnabled ?? false,
+      hunterEnabled: currentSettings.hunterConfig?.enabled ?? false,
+      theme: currentSettings.theme ?? 'system',
+      density: currentSettings.density ?? 'comfortable',
+      reducedMotion: currentSettings.reducedMotion ?? 'system',
+    };
+
+    inPanelSettingsSnapshot = snapshot;
+    initialAppearanceSnapshot = {
+      theme: snapshot.theme,
+      density: snapshot.density,
+      reducedMotion: snapshot.reducedMotion,
+    };
+
+    setInPanelFormState(snapshot);
+    spSettingsStatus.hidden = true;
+
+    viewOverview.hidden = true;
+    viewFindings.hidden = true;
+    viewSurface.hidden = true;
+    viewActivity.hidden = true;
+    viewSettings.hidden = false;
+    optionsLink.classList.add('active');
+    settingsCloseBtn.focus();
+  }
+
+  function closeInPanelSettingsView(): void {
+    viewSettings.hidden = true;
+    optionsLink.classList.remove('active');
+    switchTab(lastActiveTabBeforeSettings);
+    if (lastFocusedElementBeforeSettings && typeof lastFocusedElementBeforeSettings.focus === 'function') {
+      lastFocusedElementBeforeSettings.focus();
+    }
+  }
+
+  function discardInPanelSettings(): void {
+    if (inPanelSettingsSnapshot) {
+      setInPanelFormState(inPanelSettingsSnapshot);
+    }
+    applyAppearance(
+      initialAppearanceSnapshot.theme,
+      initialAppearanceSnapshot.density,
+      initialAppearanceSnapshot.reducedMotion,
+    );
+    closeInPanelSettingsView();
+  }
+
+  async function saveInPanelSettings(): Promise<void> {
+    const form = getInPanelFormState();
+    const updated: SettingsV2 = {
+      ...currentSettings,
+      monitoringMode: form.monitoringMode,
+      leadsEnabled: form.leadsEnabled,
+      deepModeEnabled: form.deepMode,
+      credentialLivenessEnabled: form.credentialLivenessEnabled,
+      hunterConfig: {
+        ...(currentSettings.hunterConfig ?? { maxRequestsPerSecond: 1 }),
+        enabled: form.hunterEnabled,
+      },
+      theme: form.theme,
+      density: form.density,
+      reducedMotion: form.reducedMotion,
+    };
+
+    try {
+      await SettingsService.updateSettings(updated);
+      await sendToBackground({ type: 'SETTINGS_CHANGED', settings: updated });
+      currentSettings = { ...currentSettings, ...updated };
+      inPanelSettingsSnapshot = form;
+      initialAppearanceSnapshot = {
+        theme: form.theme,
+        density: form.density,
+        reducedMotion: form.reducedMotion,
+      };
+
+      spSettingsStatus.textContent = 'Saved';
+      spSettingsStatus.hidden = false;
+      setTimeout(() => {
+        spSettingsStatus.hidden = true;
+        closeInPanelSettingsView();
+      }, 350);
+    } catch {
+      spSettingsStatus.textContent = 'Save failed';
+      spSettingsStatus.hidden = false;
+    }
+  }
+
+  async function handleCloseSettings(): Promise<void> {
+    if (isInPanelSettingsDirty()) {
+      const confirmDiscard = await promptGeneralConfirm(
+        'Discard Unsaved Settings?',
+        'You have unsaved changes in Settings. Do you want to discard them?'
+      );
+      if (confirmDiscard) {
+        discardInPanelSettings();
+      }
+    } else {
+      closeInPanelSettingsView();
+    }
+  }
+
+  // Appearance live preview on change
+  const previewAppearance = () => {
+    const themeVal =
+      spSettingTheme.value === 'dark' || spSettingTheme.value === 'light'
+        ? spSettingTheme.value
+        : 'system';
+    const densityVal =
+      spSettingDensity.value === 'compact' ? 'compact' : 'comfortable';
+    const motionVal =
+      spSettingMotion.value === 'always' || spSettingMotion.value === 'never'
+        ? spSettingMotion.value
+        : 'system';
+    applyAppearance(themeVal, densityVal, motionVal);
+  };
+  spSettingTheme.addEventListener('change', previewAppearance);
+  spSettingDensity.addEventListener('change', previewAppearance);
+  spSettingMotion.addEventListener('change', previewAppearance);
+
+  settingsCloseBtn.addEventListener('click', () => {
+    void handleCloseSettings();
+  });
+  spSettingsDiscardBtn.addEventListener('click', () => {
+    discardInPanelSettings();
+  });
+  spSettingsSaveBtn.addEventListener('click', () => {
+    void saveInPanelSettings();
+  });
+  spOpenFullOptionsBtn.addEventListener('click', () => {
     if (chrome.runtime.openOptionsPage !== undefined) {
       void chrome.runtime.openOptionsPage();
+    }
+  });
+
+  optionsLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (viewSettings.hidden) {
+      void openInPanelSettings();
+    } else {
+      void handleCloseSettings();
     }
   });
 
@@ -811,6 +1041,70 @@ document.addEventListener('DOMContentLoaded', () => {
       overviewActionCta.hidden = true;
       overviewActionCta.onclick = null;
     }
+
+    renderRecentFindings(currentLeads);
+  }
+
+  function renderRecentFindings(leads: Lead[]): void {
+    const container = document.getElementById('overview-recent-list');
+    const countBadge = document.getElementById('overview-recent-count');
+    if (container === null || countBadge === null) return;
+
+    countBadge.textContent = leads.length.toString();
+    while (container.firstChild) container.removeChild(container.firstChild);
+
+    if (leads.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-hint';
+      empty.id = 'overview-recent-empty';
+      empty.textContent = 'No findings yet';
+      container.appendChild(empty);
+      return;
+    }
+
+    const recent = [...leads].slice(-3).reverse();
+    const list = document.createElement('div');
+    list.className = 'recent-findings-list';
+
+    for (const lead of recent) {
+      const item = document.createElement('div');
+      item.className = 'recent-finding-item';
+      item.setAttribute('tabindex', '0');
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `View finding: ${lead.title}`);
+
+      const sevPill = document.createElement('span');
+      sevPill.className = `hygiene-sev-pill sev-${lead.potential}`;
+      sevPill.textContent = lead.potential.toUpperCase();
+
+      const famBadge = document.createElement('span');
+      famBadge.className = 'lead-family-icon';
+      famBadge.textContent = lead.family;
+
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'recent-finding-title';
+      titleSpan.textContent = lead.title;
+
+      item.appendChild(sevPill);
+      item.appendChild(famBadge);
+      item.appendChild(titleSpan);
+
+      const onSelect = () => {
+        switchTab('tab-findings');
+        focusLeadCardInSidepanel(lead.id);
+      };
+      item.addEventListener('click', onSelect);
+      item.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      });
+
+      list.appendChild(item);
+    }
+
+    container.appendChild(list);
   }
 
   // ── Attack Surface Graph Implementation ──────────────────────
@@ -1122,6 +1416,10 @@ document.addEventListener('DOMContentLoaded', () => {
       circle.setAttribute('cy', '0');
       circle.setAttribute('r', r.toString());
       circle.setAttribute('class', 'radar-ring');
+      // Defensive SVG paint — complement CSS in case stylesheets fail to load
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', '#232038');
+      circle.setAttribute('stroke-width', r === 100 ? '1.2' : '1');
       spRadarRings.appendChild(circle);
     }
 
@@ -1136,6 +1434,10 @@ document.addEventListener('DOMContentLoaded', () => {
       line.setAttribute('x2', x2.toString());
       line.setAttribute('y2', y2.toString());
       line.setAttribute('class', 'radar-axis');
+      // Defensive SVG paint
+      line.setAttribute('stroke', '#232038');
+      line.setAttribute('stroke-width', '0.5');
+      line.setAttribute('stroke-opacity', '0.5');
       spRadarAxes.appendChild(line);
 
       const fam = FAMILIES[i];
@@ -1147,6 +1449,9 @@ document.addEventListener('DOMContentLoaded', () => {
         text.setAttribute('y', (ly + 3).toString());
         text.setAttribute('text-anchor', 'middle');
         text.setAttribute('class', 'radar-axis-label');
+        // Defensive SVG fill for labels
+        text.setAttribute('fill', '#7e9ab0');
+        text.setAttribute('font-size', '8');
         text.textContent = fam.id;
         spRadarAxes.appendChild(text);
       }
@@ -1199,6 +1504,10 @@ document.addEventListener('DOMContentLoaded', () => {
       blip.setAttribute('cy', by.toFixed(1));
       blip.setAttribute('r', '4');
       blip.setAttribute('class', `radar-blip blip-${lead.potential}`);
+      // Keyboard-focusable blips with accessible names
+      blip.setAttribute('tabindex', '0');
+      blip.setAttribute('role', 'button');
+      blip.setAttribute('aria-label', `${lead.potential} ${lead.family}: ${lead.title}`);
 
       const title = document.createElementNS(SVG_NS, 'title');
       title.textContent = `[${lead.family}] ${lead.title} (${lead.potential})`;
@@ -1208,12 +1517,63 @@ document.addEventListener('DOMContentLoaded', () => {
         switchTab('tab-findings');
         focusLeadCardInSidepanel(lead.id);
       });
+      blip.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          switchTab('tab-findings');
+          focusLeadCardInSidepanel(lead.id);
+        }
+      });
 
       spRadarBlips.appendChild(blip);
+    }
+
+    // Show empty-state when no blips match filter
+    const radarContainer = document.querySelector('.radar-panel-container');
+    if (radarContainer !== null) {
+      let emptyEl = radarContainer.querySelector<HTMLElement>('.radar-empty-state');
+      if (leadsToPlot.length === 0) {
+        if (emptyEl === null) {
+          emptyEl = document.createElement('div');
+          emptyEl.className = 'radar-empty-state';
+          const icon = document.createElement('span');
+          icon.className = 'radar-empty-icon';
+          icon.textContent = '📡';
+          emptyEl.appendChild(icon);
+          const text = document.createElement('span');
+          text.className = 'radar-empty-text';
+          emptyEl.appendChild(text);
+          radarContainer.appendChild(emptyEl);
+        }
+        const textEl = emptyEl.querySelector<HTMLElement>('.radar-empty-text');
+        if (textEl !== null) {
+          textEl.textContent =
+            sevFilter !== 'all'
+              ? `No ${sevFilter} leads to display. Try adjusting the severity filter.`
+              : 'No leads detected yet. Browse the target application to accumulate attack surface intelligence.';
+        }
+        emptyEl.hidden = false;
+      } else if (emptyEl !== null) {
+        emptyEl.hidden = true;
+      }
     }
   }
 
   radarSeverityFilter.addEventListener('change', renderSidepanelRadar);
+
+  // ── Radar sweep pause when hidden or inactive ────────────────
+  const radarSweepEl = document.getElementById('sp-radar-sweep');
+  function updateRadarSweepState(): void {
+    if (!radarSweepEl) return;
+    const overviewVisible =
+      !viewOverview.hidden && document.visibilityState === 'visible';
+    radarSweepEl.style.animationPlayState = overviewVisible ? 'running' : 'paused';
+  }
+  document.addEventListener('visibilitychange', updateRadarSweepState);
+  // Monitor Overview visibility via MutationObserver on the hidden attribute
+  const radarViewObserver = new MutationObserver(updateRadarSweepState);
+  radarViewObserver.observe(viewOverview, { attributes: true, attributeFilter: ['hidden'] });
+  updateRadarSweepState();
 
   // ── Leads View Filtering & Rendering ─────────────────────────
   function getFilteredLeads(): Lead[] {
@@ -2740,6 +3100,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !viewSettings.hidden) {
+      e.preventDefault();
+      void handleCloseSettings();
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault();
       openCommandPalette();
