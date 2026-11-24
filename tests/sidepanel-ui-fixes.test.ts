@@ -61,6 +61,10 @@ describe('ACULYX UI Fix Plan — Sidepanel Verification', () => {
       expect(ts).toContain("document.addEventListener('visibilitychange'");
       expect(ts).toContain('radarSweepEl.style.animationPlayState');
     });
+
+    it('includes info option in radar severity filter matching all five displayed severities', () => {
+      expect(html).toContain('<option value="info">Info</option>');
+    });
   });
 
   describe('2. In-Panel Settings Overlay', () => {
@@ -135,6 +139,8 @@ describe('ACULYX UI Fix Plan — Sidepanel Verification', () => {
     it('sets min-height: 0 on views-container and panel-view for flex scrolling', () => {
       expect(css).toMatch(/\.views-container\s*\{[^}]*min-height:\s*0/);
       expect(css).toMatch(/\.panel-view\s*\{[^}]*min-height:\s*0/);
+      expect(css).toContain('overscroll-behavior: contain');
+      expect(css).toContain('.panel-view::-webkit-scrollbar');
     });
 
     it('includes recent findings card in sidepanel.html', () => {

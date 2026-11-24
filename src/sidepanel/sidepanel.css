@@ -240,6 +240,24 @@ body {
   overflow-x: hidden;
   max-width: 100%;
   min-height: 0; /* Enable flex-based scrolling */
+  overscroll-behavior: contain;
+}
+
+.panel-view::-webkit-scrollbar {
+  width: 6px;
+}
+
+.panel-view::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-view::-webkit-scrollbar-thumb {
+  background: var(--border, #232038);
+  border-radius: 3px;
+}
+
+.panel-view::-webkit-scrollbar-thumb:hover {
+  background: var(--sc-accent-dim, #7932d4);
 }
 
 .panel-view[hidden] {
