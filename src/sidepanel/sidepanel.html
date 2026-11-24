@@ -11,17 +11,7 @@
   <!-- Header bar -->
   <header class="sidepanel-header" role="banner">
     <div class="header-main">
-      <svg class="brand-katana-icon" viewBox="0 0 24 24" aria-hidden="true" width="16" height="16">
-        <path d="M3 21l6-6m0 0l11-11a2 2 0 0 0-2.83-2.83L6.17 12.17M9 15l-3 3" stroke="url(#katana-grad-sp)" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-        <defs>
-          <linearGradient id="katana-grad-sp" x1="0%" y1="100%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#D56BFF"/>
-            <stop offset="50%" stop-color="#9B4DFF"/>
-            <stop offset="100%" stop-color="#2dd4c4"/>
-          </linearGradient>
-        </defs>
-      </svg>
-      <img class="header-wordmark" src="../assets/aculyx-wordmark.png" alt="ACULYX" width="125" height="48">
+      <img class="header-wordmark" src="../assets/aculyx-header-wordmark.svg" alt="ACULYX" width="140" height="32">
       <span class="tier-badge" id="tier-badge">Standard</span>
     </div>
     <div class="header-actions">
@@ -45,10 +35,6 @@
     <button class="nav-tab" id="tab-activity" role="tab" aria-selected="false" aria-controls="view-activity">
       Activity <span class="tab-badge" id="tab-activity-badge" hidden>0</span>
     </button>
-
-    <!-- Compatibility aliases for Playwright E2E tests and backward integration -->
-    <button class="nav-tab nav-tab-alias" id="tab-leads" role="tab" aria-selected="false" aria-controls="view-leads" tabindex="-1" aria-label="Leads (alias for Findings)">Leads</button>
-    <button class="nav-tab nav-tab-alias" id="tab-graph" role="tab" aria-selected="false" aria-controls="view-graph" tabindex="-1" aria-label="Graph (alias for Surface)">Graph</button>
   </nav>
 
   <!-- Views Container -->

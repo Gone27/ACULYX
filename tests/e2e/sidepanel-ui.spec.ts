@@ -1,12 +1,13 @@
 /**
  * @file sidepanel-ui.spec.ts
  * Playwright E2E UI tests for ACULYX UI Fix Plan:
- *  - Wordmark branding in header (responsive, alt text, no header collision)
- *  - Bundled OFL font loading verification (Space Grotesk & IBM Plex Mono)
+ *  - Wordmark branding in header (responsive, alt text, crisp subtitle, no collision)
+ *  - Bundled OFL font loading verification (Space Grotesk & IBM Plex Mono strictly true)
  *  - Radar legibility, paint attributes, zero state, filter-empty state, and sweep pause
  *  - In-panel Settings overlay with full dirty-state lifecycle, Esc handler, and appearance preview/revert
  *  - Overview Recent Findings card and container scroll layout (min-height: 0, sole vertical scroller)
- *  - Animation frame budget profiling (<16.7ms target) and reduced-motion compliance
+ *  - Interactive animation frame profiling under transitions (<16.7ms 60fps budget)
+ *  - Separate reduced-motion compliance verification
  *  - Visual screenshots in Dark/Light themes and narrow viewports
  */
 
@@ -81,8 +82,8 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       const wordmarkBox = await wordmark.boundingBox();
       expect(wordmarkBox).not.toBeNull();
       if (wordmarkBox) {
-        expect(wordmarkBox.width).toBeGreaterThanOrEqual(100);
-        expect(wordmarkBox.width).toBeLessThanOrEqual(180);
+        expect(wordmarkBox.width).toBeGreaterThanOrEqual(110);
+        expect(wordmarkBox.width).toBeLessThanOrEqual(160);
       }
 
       // Check collision with right-side header controls
@@ -96,6 +97,10 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       // ─── 2. Font Hierarchy & Bundled OFL Font Loading ───────────────
       await sidepanelPage.evaluate(async () => {
         await document.fonts.ready;
+        await Promise.all([
+          document.fonts.load('16px "Space Grotesk"'),
+          document.fonts.load('14px "IBM Plex Mono"'),
+        ]);
       });
       const fontsLoaded = await sidepanelPage.evaluate(() => {
         return {
@@ -103,9 +108,24 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
           ibmPlexMono: document.fonts.check('14px "IBM Plex Mono"'),
         };
       });
-      expect(fontsLoaded).toBeDefined();
+      // Assert both font families are verified true
+      expect(fontsLoaded.spaceGrotesk).toBe(true);
+      expect(fontsLoaded.ibmPlexMono).toBe(true);
 
-      // ─── 3. Radar Legibility, Defensive Paint & Empty States ────────
+      // ─── 3. Navigation Hit Target & Semantic Verification ───────────
+      // Verify visible Findings tab has direct click target with no invisible alias overlay
+      await expect(sidepanelPage.locator('#tab-leads')).toHaveCount(0);
+      await expect(sidepanelPage.locator('#tab-graph')).toHaveCount(0);
+      const findingsNavTab = sidepanelPage.locator('#tab-findings');
+      await expect(findingsNavTab).toBeVisible();
+      await findingsNavTab.click();
+      await expect(sidepanelPage.locator('#view-findings')).toBeVisible();
+
+      // Return to overview
+      await sidepanelPage.locator('#tab-overview').click();
+      await expect(sidepanelPage.locator('#view-overview')).toBeVisible();
+
+      // ─── 4. Radar Legibility, Defensive Paint & Empty States ────────
       const radarSvg = sidepanelPage.locator('#sidepanel-radar-svg');
       await expect(radarSvg).toBeVisible();
       const ringsGroup = sidepanelPage.locator('#sp-radar-rings');
@@ -130,7 +150,7 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       await expect(sevFilter).toBeVisible();
       await expect(sevFilter.locator('option[value="info"]')).toBeAttached();
 
-      // ─── 4. In-Panel Settings Route & Lifecycle ────────────────────
+      // ─── 5. In-Panel Settings Route & Lifecycle ────────────────────
       const settingsBtn = sidepanelPage.locator('#options-link');
       await settingsBtn.click();
 
@@ -194,7 +214,7 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       await expect(saveStatus).toContainText('Saved');
       await expect(settingsOverlay).toBeHidden({ timeout: 5000 });
 
-      // ─── 5. Overview Layout, Scrolling & Recent Findings ──────────
+      // ─── 6. Overview Layout, Scrolling & Recent Findings ──────────
       const recentFindingsCard = sidepanelPage.locator('.recent-findings-card');
       await expect(recentFindingsCard).toBeVisible();
       await expect(sidepanelPage.locator('#overview-recent-empty')).toBeVisible();
@@ -220,7 +240,7 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       expect(layoutStyles.panelMinHeight).toBe('0px');
       expect(layoutStyles.panelOverflowY).toBe('auto');
 
-      // Inject test leads to verify Recent Findings list population, radar blips, and scrollability
+      // Inject test leads via production runtime messaging (zero test hooks in production code)
       const mockLeads = [
         {
           id: 'LD-E2E-1',
@@ -278,19 +298,53 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
         },
       ];
 
-      await sidepanelPage.evaluate((leads) => {
-        window.dispatchEvent(new CustomEvent('aculyx-test-inject-leads', { detail: leads }));
+      // Broadcast via service worker to all extension views
+      await background.evaluate(async (leads) => {
+        const clients = (self as unknown as { clients?: { matchAll: () => Promise<Array<{ postMessage: (msg: unknown) => void }>> } }).clients;
+        if (clients) {
+          const all = await clients.matchAll();
+          for (const c of all) {
+            c.postMessage({
+              type: 'LEAD_STATE_UPDATE',
+              origin: 'https://test.example',
+              leads: leads,
+            });
+          }
+        }
+        void chrome.runtime.sendMessage({
+          type: 'LEAD_STATE_UPDATE',
+          origin: 'https://test.example',
+          leads: leads,
+        });
       }, mockLeads);
 
-      // Verify Recent Findings rendered
+      // Verify Recent Findings rendered (latest 3)
       const recentItems = sidepanelPage.locator('.recent-finding-item');
       await expect(recentItems).toHaveCount(3);
       await expect(recentItems.first()).toContainText('Missing Subresource Integrity on CDN Script');
       await expect(recentItems.last()).toContainText('Exposed Hardcoded AWS API Key In Script');
 
-      // Verify Radar Blips rendered
+      // Verify Radar Blips rendered and empty state is properly hidden
+      await expect(emptyState).toBeHidden();
       const blips = sidepanelPage.locator('.radar-blip');
       await expect(blips).toHaveCount(3);
+
+      // Verify blips stay within SVG viewport bounds after entrance animation
+      await sidepanelPage.waitForTimeout(250);
+      const radarBox = await radarSvg.boundingBox();
+      expect(radarBox).not.toBeNull();
+      if (radarBox) {
+        for (let i = 0; i < 3; i++) {
+          const bBox = await blips.nth(i).boundingBox();
+          expect(bBox).not.toBeNull();
+          if (bBox) {
+            expect(bBox.x).toBeGreaterThanOrEqual(radarBox.x - 4);
+            expect(bBox.x + bBox.width).toBeLessThanOrEqual(radarBox.x + radarBox.width + 4);
+            expect(bBox.y).toBeGreaterThanOrEqual(radarBox.y - 4);
+            expect(bBox.y + bBox.height).toBeLessThanOrEqual(radarBox.y + radarBox.height + 4);
+          }
+        }
+      }
 
       // Verify Blip keyboard accessibility (tabindex="0", role="button", Enter key navigates to findings)
       const firstBlip = blips.first();
@@ -303,63 +357,110 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       await sidepanelPage.locator('#tab-overview').click();
       await expect(sidepanelPage.locator('#view-overview')).toBeVisible();
 
-      // ─── 6. Performance & Animation Frame Profiling ───────────────
-      const frameMetrics = await sidepanelPage.evaluate(async () => {
-        return new Promise<{ totalFrames: number; under17ms: number; maxFrameTime: number; avgFrameTime: number }>((resolve) => {
-          const frameTimes: number[] = [];
-          let lastTime = performance.now();
-          let frameCount = 0;
+      // ─── 7. Interactive Animation Frame Profiling (16.7ms 60fps Budget) ───
+      // Profile frames during representative user interaction (transitions between views and settings)
+      await sidepanelPage.evaluate(() => {
+        (window as unknown as { __profilingDeltas: number[]; __profilingActive: boolean }).__profilingDeltas = [];
+        (window as unknown as { __profilingDeltas: number[]; __profilingActive: boolean }).__profilingActive = true;
+        let last = performance.now();
+        function loop(now: number) {
+          if (!(window as unknown as { __profilingActive: boolean }).__profilingActive) return;
+          const delta = now - last;
+          last = now;
+          (window as unknown as { __profilingDeltas: number[] }).__profilingDeltas.push(delta);
+          requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+      });
 
-          function recordFrame(now: number) {
-            const delta = now - lastTime;
-            lastTime = now;
-            frameTimes.push(delta);
-            frameCount++;
+      // Representative user navigation transitions:
+      await sidepanelPage.click('#tab-findings');
+      await sidepanelPage.waitForTimeout(140);
+      await sidepanelPage.click('#tab-surface');
+      await sidepanelPage.waitForTimeout(140);
+      await sidepanelPage.click('#tab-activity');
+      await sidepanelPage.waitForTimeout(140);
+      await sidepanelPage.click('#tab-overview');
+      await sidepanelPage.waitForTimeout(140);
 
-            if (frameCount < 40) {
-              requestAnimationFrame(recordFrame);
-            } else {
-              const samples = frameTimes.slice(1);
-              const under17ms = samples.filter((t) => t <= 20).length;
-              const maxFrameTime = Math.max(...samples);
-              const avgFrameTime = samples.reduce((a, b) => a + b, 0) / samples.length;
-              resolve({
-                totalFrames: samples.length,
-                under17ms,
-                maxFrameTime,
-                avgFrameTime,
-              });
-            }
-          }
+      // Representative in-panel Settings transition:
+      await settingsBtn.click();
+      await expect(settingsOverlay).toBeVisible();
+      await sidepanelPage.waitForTimeout(140);
+      await sidepanelPage.click('#settings-close-btn');
+      await expect(settingsOverlay).toBeHidden();
+      await sidepanelPage.waitForTimeout(140);
 
-          requestAnimationFrame(recordFrame);
-        });
+      const frameMetrics = await sidepanelPage.evaluate(() => {
+        (window as unknown as { __profilingActive: boolean }).__profilingActive = false;
+        const allDeltas = (window as unknown as { __profilingDeltas: number[] }).__profilingDeltas;
+        const samples = allDeltas.slice(1);
+        const under16_7ms = samples.filter((t) => t <= 16.7).length;
+        const maxFrameTime = Math.max(...samples);
+        const avgFrameTime = samples.reduce((a, b) => a + b, 0) / samples.length;
+        const longTasks = samples.filter((t) => t > 50).length;
+        return {
+          totalFrames: samples.length,
+          under16_7ms,
+          ratioUnder16_7ms: samples.length > 0 ? under16_7ms / samples.length : 0,
+          maxFrameTime,
+          avgFrameTime,
+          longTasks,
+        };
       });
 
       expect(frameMetrics.totalFrames).toBeGreaterThanOrEqual(30);
-      expect(frameMetrics.under17ms / frameMetrics.totalFrames).toBeGreaterThanOrEqual(0.85);
+      expect(frameMetrics.avgFrameTime).toBeLessThanOrEqual(16.7);
+      expect(frameMetrics.ratioUnder16_7ms).toBeGreaterThanOrEqual(0.85);
+      expect(frameMetrics.longTasks).toBe(0);
 
-      // ─── 7. Visual Screenshots Capture ────────────────────────────
+      // ─── 8. Separate Reduced-Motion Behavior Verification ──────────
+      await sidepanelPage.evaluate(() => {
+        document.documentElement.setAttribute('data-motion', 'reduce');
+      });
+      const reducedMotionComputed = await sidepanelPage.evaluate(() => {
+        const view = document.querySelector('.panel-view') as HTMLElement;
+        const style = window.getComputedStyle(view);
+        return {
+          animationName: style.animationName,
+          animationDuration: style.animationDuration,
+        };
+      });
+      expect(reducedMotionComputed.animationName === 'none' || reducedMotionComputed.animationDuration === '0s').toBe(true);
+
+      await sidepanelPage.evaluate(() => {
+        document.documentElement.removeAttribute('data-motion');
+      });
+
+      // ─── 9. Visual Screenshots Capture ────────────────────────────
       try {
+        // Ensure explicit dark theme and allow entrance animations to settle before capture
+        await sidepanelPage.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+        await sidepanelPage.waitForTimeout(260);
+
         // Screenshot 1: Dark Mode Overview with Wordmark, Posture, Radar with Blips, and Recent Findings
         await sidepanelPage.screenshot({ path: path.join(artifactsScreenshotDir, 'sidepanel-dark-overview.png') });
 
         // Screenshot 2: In-Panel Settings View
         await settingsBtn.click();
         await expect(settingsOverlay).toBeVisible();
+        await sidepanelPage.waitForTimeout(260);
         await sidepanelPage.screenshot({ path: path.join(artifactsScreenshotDir, 'sidepanel-inpanel-settings.png') });
         await sidepanelPage.keyboard.press('Escape');
         await expect(settingsOverlay).toBeHidden();
+        await sidepanelPage.waitForTimeout(260);
 
-        // Screenshot 3: Narrow 320px Viewport
+        // Screenshot 3: Narrow 320px Viewport (Dark Mode)
         await sidepanelPage.setViewportSize({ width: 320, height: 600 });
+        await sidepanelPage.waitForTimeout(100);
         await sidepanelPage.screenshot({ path: path.join(artifactsScreenshotDir, 'sidepanel-narrow-320px.png') });
 
         // Screenshot 4: Light Mode Preview
         await sidepanelPage.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+        await sidepanelPage.waitForTimeout(260);
         await sidepanelPage.screenshot({ path: path.join(artifactsScreenshotDir, 'sidepanel-light-overview.png') });
       } catch {
-        // Screenshot capture notice
+        // Safe screenshot notice
       }
 
       await sidepanelPage.close();

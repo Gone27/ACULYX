@@ -106,10 +106,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabSurface = getEl<HTMLButtonElement>('tab-surface');
   const tabActivity = getEl<HTMLButtonElement>('tab-activity');
 
-  // Compatibility aliases for E2E tests
-  const tabLeads = getEl<HTMLButtonElement>('tab-leads');
-  const tabGraph = getEl<HTMLButtonElement>('tab-graph');
-
   // Tab badges
   const tabLeadsBadge = getEl<HTMLSpanElement>('tab-leads-badge');
   const tabChainsBadge = getEl<HTMLSpanElement>('tab-chains-badge');
@@ -347,15 +343,6 @@ document.addEventListener('DOMContentLoaded', () => {
     viewSettings.hidden = true;
     optionsLink.classList.remove('active');
 
-    // Mirror attributes to compatibility aliases for Playwright E2E tests
-    const isFindingsActive = resolvedId === 'tab-findings';
-    tabLeads.classList.toggle('active', isFindingsActive);
-    tabLeads.setAttribute('aria-selected', isFindingsActive ? 'true' : 'false');
-
-    const isSurfaceActive = resolvedId === 'tab-surface';
-    tabGraph.classList.toggle('active', isSurfaceActive);
-    tabGraph.setAttribute('aria-selected', isSurfaceActive ? 'true' : 'false');
-
     // Trigger rendering for activated view
     if (resolvedId === 'tab-overview') {
       renderOverviewView();
@@ -374,13 +361,6 @@ document.addEventListener('DOMContentLoaded', () => {
   tabFindings.addEventListener('click', () => switchTab('tab-findings'));
   tabSurface.addEventListener('click', () => switchTab('tab-surface'));
   tabActivity.addEventListener('click', () => switchTab('tab-activity'));
-
-  // Alias click events
-  tabLeads.addEventListener('click', () => switchTab('tab-findings'));
-  tabGraph.addEventListener('click', () => {
-    switchTab('tab-surface');
-    switchSurfaceSubtab('surface-subtab-graph');
-  });
 
   // ── Surface Subtabs ──────────────────────────────────────────
   function switchSurfaceSubtab(subtabId: string): void {
@@ -689,13 +669,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'LEAD_STATE_UPDATE') {
       handleLeadStateUpdate(msg as LeadStateUpdateMessage);
       sendResponse({ received: true });
-    }
-  });
-
-  window.addEventListener('aculyx-test-inject-leads', (e: Event) => {
-    const detail = (e as CustomEvent<Lead[]>).detail;
-    if (Array.isArray(detail)) {
-      handleLeadStateUpdate({ type: 'LEAD_STATE_UPDATE', origin: 'test', leads: detail });
     }
   });
 
@@ -3130,7 +3103,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cmdPaletteDialog.open) return;
 
     const currentTabEl = document.querySelector('.nav-tab.active');
-    if (currentTabEl?.id !== 'tab-findings' && currentTabEl?.id !== 'tab-leads') return;
+    if (currentTabEl?.id !== 'tab-findings') return;
 
     const filtered = getFilteredLeads();
     if (filtered.length === 0) return;

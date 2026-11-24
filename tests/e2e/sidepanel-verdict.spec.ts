@@ -61,9 +61,9 @@ test.describe('Sidepanel Lead Verdict UI Regression E2E', () => {
       const sidepanelPage = await context.newPage();
       await sidepanelPage.goto(`chrome-extension://${extensionId}/src/sidepanel/sidepanel.html`);
 
-      // Switch to Leads tab
-      await sidepanelPage.click('#tab-leads');
-      await expect(sidepanelPage.locator('#view-leads')).toBeVisible();
+      // Switch to Findings tab
+      await sidepanelPage.click('#tab-findings');
+      await expect(sidepanelPage.locator('#view-findings')).toBeVisible();
 
       // Broadcast lead state from background service worker to the sidepanel
       await background.evaluate(async () => {
@@ -184,12 +184,12 @@ test.describe('Sidepanel Lead Verdict UI Regression E2E', () => {
       await expect(registeredDims).toContainText('Scope: in-scope');
 
       // 3. Verify sidepanel nav tabs have proper roles and keyboard focus attributes
-      const graphTab = sidepanelPage.locator('#tab-graph');
-      const leadsTab = sidepanelPage.locator('#tab-leads');
-      await expect(graphTab).toHaveAttribute('role', 'tab');
-      await expect(leadsTab).toHaveAttribute('role', 'tab');
-      await expect(leadsTab).toHaveAttribute('aria-selected', 'true');
-      await expect(graphTab).toHaveAttribute('aria-selected', 'false');
+      const surfaceTab = sidepanelPage.locator('#tab-surface');
+      const findingsTab = sidepanelPage.locator('#tab-findings');
+      await expect(surfaceTab).toHaveAttribute('role', 'tab');
+      await expect(findingsTab).toHaveAttribute('role', 'tab');
+      await expect(findingsTab).toHaveAttribute('aria-selected', 'true');
+      await expect(surfaceTab).toHaveAttribute('aria-selected', 'false');
 
       // Verify no horizontal overflow in sidepanel body
       const sidepanelNoHScroll = await sidepanelPage.evaluate(() => {
