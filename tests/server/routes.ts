@@ -116,6 +116,29 @@ function handleHstsShort(_req: Request, res: Response): void {
   res.status(200).end(htmlPage('/hsts-short'));
 }
 
+function handleHstsAbsent(_req: Request, res: Response): void {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).end(htmlPage('/hsts-absent'));
+}
+
+function handleHstsNoSubdomains(_req: Request, res: Response): void {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).end(htmlPage('/hsts-no-subdomains'));
+}
+
+function handleHstsPreloadIncomplete(_req: Request, res: Response): void {
+  res.setHeader('Strict-Transport-Security', 'max-age=86400; preload');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).end(htmlPage('/hsts-preload-incomplete'));
+}
+
+function handleHstsPreloadValid(_req: Request, res: Response): void {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).end(htmlPage('/hsts-preload-valid'));
+}
+
 // --------------------------------------------------------------------------
 // Route: GET /xss-in-headers
 // Returns header values that contain XSS payloads.
@@ -155,6 +178,10 @@ export function registerRoutes(app: Express): void {
   app.get('/cookie-test', handleCookieTest);
   app.get('/version-leak', handleVersionLeak);
   app.get('/hsts-short', handleHstsShort);
+  app.get('/hsts-absent', handleHstsAbsent);
+  app.get('/hsts-no-subdomains', handleHstsNoSubdomains);
+  app.get('/hsts-preload-incomplete', handleHstsPreloadIncomplete);
+  app.get('/hsts-preload-valid', handleHstsPreloadValid);
   app.get('/xss-in-headers', handleXssInHeaders);
   registerLeadLabRoutes(app);
 

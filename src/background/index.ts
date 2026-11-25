@@ -106,6 +106,8 @@ import type {
 export { tabGenerations, getTabGeneration, incrementTabGeneration, setTabGeneration, clearTabGenerations } from './generations';
 import { tabGenerations, getTabGeneration, incrementTabGeneration, clearTabGenerations } from './generations';
 
+globalLeadStore.setTabGenerationResolver(getTabGeneration);
+
 // ---------------------------------------------------------------------------
 // Per-tab ordered reducer action queue
 // Serializes state-changing work per tab to eliminate race conditions
@@ -925,16 +927,14 @@ export async function onHopComplete(
       const scopeStatus = resolveScopeStatus(hop.url, currentSettings);
       const headerLeads = detectHeaderLeads(hop.headers, hop.url, state.origin, scopeStatus);
       for (const lead of headerLeads) {
-        globalLeadStore.addLead(lead, tabId);
+        globalLeadStore.addLead(lead, tabId, targetGen);
       }
       const paramLeads = detectParamLeads(hop.url, scopeStatus);
       for (const lead of paramLeads) {
-        globalLeadStore.addLead(lead, tabId);
+        globalLeadStore.addLead(lead, tabId, targetGen);
       }
-      if (headerLeads.length > 0 || paramLeads.length > 0) {
-        const leadState = getLeadsState(tabId, state.origin);
-        portRegistry.broadcast(tabId, leadState);
-      }
+      const leadState = getLeadsState(tabId, state.origin);
+      portRegistry.broadcast(tabId, leadState);
     }
 
     // 6. Recompute evaluation from the canonical tab state.
@@ -962,6 +962,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 
     incrementTabGeneration(tabId);
     tabActionQueue.clearTab(tabId);
+    globalLeadStore.clearTabAssociations(tabId);
 
     broadcastCoalescer.clear(tabId);
     writeBatcher.clear(tabId);
@@ -987,7 +988,13 @@ chrome.webNavigation.onBeforeNavigate.addListener(
   },
 );
 
-registerPageSignalInjection();
+registerPageSignalInjection((tabId, url) => {
+  if (currentSettings.leadsEnabled === true && !incognitoTabIds.has(tabId) && !isRestrictedUrl(url)) {
+    const committedOrigin = originFromUrl(url) ?? '';
+    const leadState = getLeadsState(tabId, committedOrigin);
+    portRegistry.broadcast(tabId, leadState);
+  }
+});
 
 // S1: Register parameter harvester for query parameter extraction
 registerParamHarvester((url, paramNames, tabId, isIncognito) => {
@@ -1146,6 +1153,7 @@ chrome.tabs.onRemoved.addListener((tabId: number): void => {
   writeBatcher.flushNow(tabId);
   tabGenerations.delete(tabId);
   tabActionQueue.clearTab(tabId);
+  globalLeadStore.clearTabAssociations(tabId);
   const tabOrigin = tabStates.get(tabId)?.origin;
   tabStates.delete(tabId);
   pendingServiceWorkerReports.delete(tabId);
@@ -1953,7 +1961,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === 'GET_LEADS_STATE') {
-      const isInternal = isExtensionInternalSender(_sender) && _sender.tab === undefined;
+      const isInternal = isExtensionInternalSender(_sender);
       const isContent = isContentScriptSender(_sender) && _sender.tab !== undefined && typeof _sender.tab.id === 'number';
 
       if (!isInternal && !isContent) {

@@ -741,8 +741,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   })();
 
+  let lastLeadsFetchOrigin = '';
+  let lastLeadsFetchGen = -1;
+
   function handleTabState(state: TabState): void {
     try {
+      const prevOrigin = lastLeadsFetchOrigin;
+      const prevGen = lastLeadsFetchGen;
       currentTabState = state;
       activeTabId = state.tabId;
       activeOrigin = state.origin;
@@ -751,8 +756,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (apex !== activeApexDomain) {
         activeApexDomain = apex;
         void fetchAndRenderGraph(apex, state.tabId);
-        void fetchLeads();
         void fetchAndRenderRecon();
+      }
+      const nextGen = state.navigationGeneration ?? -1;
+      if (state.origin !== prevOrigin || nextGen !== prevGen) {
+        lastLeadsFetchOrigin = state.origin;
+        lastLeadsFetchGen = nextGen;
+        void fetchLeads();
       }
       renderOverviewView();
       renderSubdomainTrustAndApis();
@@ -893,13 +903,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const hygieneRules = findings.filter(
       (f) =>
         (f.category === 'header' || f.category === 'cookie' || f.category === 'transport') &&
+        f.severity !== 'info' &&
         f.severity !== 'pass' &&
         f.outcome !== 'pass'
+    );
+    const infoHardeningNotes = findings.filter(
+      (f) =>
+        (f.category === 'header' || f.category === 'cookie' || f.category === 'transport') &&
+        f.severity === 'info'
     );
 
     overviewHygieneCount.textContent = hygieneRules.length.toString();
 
     if (hygieneRules.length === 0) {
+      overviewHygieneEmpty.textContent = infoHardeningNotes.length > 0
+        ? `No actionable header/cookie issues (${infoHardeningNotes.length} optional hardening suggestion(s) recorded).`
+        : 'No critical hygiene violations detected.';
       overviewHygieneEmpty.hidden = false;
       overviewHygieneList.appendChild(overviewHygieneEmpty);
     } else {

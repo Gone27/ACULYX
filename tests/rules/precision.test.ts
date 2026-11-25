@@ -4,6 +4,8 @@ import { checkCookies } from '../../src/rules/cookies/cookies';
 import { checkCacheCookie } from '../../src/rules/headers/cache-cookie';
 import { checkCsp } from '../../src/rules/headers/csp';
 import { runRules, runApiRules } from '../../src/rules/engine';
+import { detectAuthLeads } from '../../src/leads/detectors/f4-auth';
+import { verifyLeadPassive } from '../../src/leads/verify';
 import { ScopeEngine } from '../../src/shared/scope/engine';
 import type { Hop, CookieRecord, ApiHop } from '../../src/shared/types';
 import type { ScopeProfile } from '../../src/shared/scope/contracts';
@@ -263,6 +265,91 @@ describe('Bounded Rule Precision Audit', () => {
       const { findings } = checkCsp(hop);
       const csp004 = findings.find((f) => f.ruleId === 'CSP-004');
       expect(csp004).toBeUndefined();
+    });
+  });
+
+  describe('P2 Heuristic Calibration & Observed-Configuration Wording', () => {
+    it('calibrates CSP-002 and CSP-003 as medium observed-configuration findings with non-conclusive caveats', () => {
+      const hop = makeHop({
+        'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      });
+      const { findings } = checkCsp(hop);
+
+      const csp002 = findings.find((f) => f.ruleId === 'CSP-002');
+      const csp003 = findings.find((f) => f.ruleId === 'CSP-003');
+      expect(csp002?.severity).toBe('medium');
+      expect(csp002?.impact).toContain('Observed configuration');
+      expect(csp002?.limitations?.[0]).toContain('does not prove');
+
+      expect(csp003?.severity).toBe('medium');
+      expect(csp003?.confidence).toBe('heuristic');
+      expect(csp003?.impact).toContain('Observed configuration');
+      expect(csp003?.limitations?.[0]).toContain('does not prove');
+    });
+
+    it('treats unsafe-inline paired with legitimate 128-bit+ nonce/hash as info pass negative fixture', () => {
+      const hop = makeHop({
+        'content-security-policy': "script-src 'nonce-abcdefghijklmnop1234' 'unsafe-inline' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      const { findings } = checkCsp(hop);
+      const csp002 = findings.find((f) => f.ruleId === 'CSP-002');
+      expect(csp002?.severity).toBe('info');
+      expect(csp002?.outcome).toBe('pass');
+    });
+
+    it('keeps optional hardening headers (DOC/INTEGRITY/COEP/CORP) out of penalized score and at info severity', () => {
+      const hop = makeHop({
+        'strict-transport-security': 'max-age=31536000; includeSubDomains',
+        'content-security-policy': "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        'x-content-type-options': 'nosniff',
+        'x-frame-options': 'DENY',
+        'referrer-policy': 'strict-origin-when-cross-origin',
+        'cache-control': 'no-store',
+        'cross-origin-opener-policy': 'same-origin',
+        'origin-agent-cluster': '?1',
+      });
+      const output = runRules({
+        hops: [hop],
+        cookies: [],
+        origin: 'https://example.com',
+      });
+
+      const actionable = output.findings.filter(
+        (f) => f.severity !== 'info' && f.severity !== 'pass' && f.outcome !== 'pass',
+      );
+      const hardeningInfo = output.findings.filter((f) => f.severity === 'info');
+
+      expect(actionable).toHaveLength(0);
+      expect(hardeningInfo.length).toBeGreaterThan(0);
+      expect(output.score).toBe(100);
+      expect(output.grade).toBe('A');
+    });
+
+    it('keeps absent anti-CSRF markup (AUTH-002) as weak unconfirmed heuristic and avoids false positive on GET/tokenized forms', () => {
+      const postNoToken = detectAuthLeads({
+        url: 'https://example.com/settings',
+        forms: [{ action: '/settings/update', method: 'POST', inputs: [{ name: 'theme', type: 'text' }] }],
+      }, 'in-scope');
+      const csrfLead = postNoToken.find((l) => l.ruleId === 'AUTH-002');
+      expect(csrfLead).toBeDefined();
+      expect(csrfLead?.tier).toBe('weak');
+      expect(csrfLead?.doesNotProve.join(' ')).toContain('SameSite');
+
+      if (csrfLead) {
+        const verdict = verifyLeadPassive(csrfLead);
+        expect(verdict.securityAssessment).toBe('unreviewed');
+        expect(verdict.status).toBe('uncertain');
+      }
+
+      // Negative fixtures: GET search form and POST form with hidden CSRF token
+      const cleanForms = detectAuthLeads({
+        url: 'https://example.com/search',
+        forms: [
+          { action: '/search', method: 'GET', inputs: [{ name: 'q', type: 'text' }] },
+          { action: '/submit', method: 'POST', inputs: [{ name: 'csrf_token', type: 'hidden' }] },
+        ],
+      }, 'in-scope');
+      expect(cleanForms.filter((l) => l.ruleId === 'AUTH-002')).toHaveLength(0);
     });
   });
 });

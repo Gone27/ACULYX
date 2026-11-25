@@ -379,7 +379,13 @@ function renderFindingsTeaser(findings: Finding[]): void {
   );
   const top3 = sorted.slice(0, 3);
 
-  findingsCountBadge.textContent = `${findings.length} total`;
+  const actionableCount = findings.filter(
+    (f) => f.severity !== 'info' && f.severity !== 'pass' && f.outcome !== 'pass',
+  ).length;
+  const infoHardeningCount = findings.length - actionableCount;
+  findingsCountBadge.textContent = infoHardeningCount > 0
+    ? `${actionableCount} issues · ${infoHardeningCount} hardening`
+    : `${actionableCount} issues`;
 
   if (top3.length === 0) {
     findingsSection.hidden = true;

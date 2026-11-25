@@ -158,12 +158,17 @@ export function detectAuthLeads(
           id: nextLeadId('AUTH-CSRF'),
           ruleId: 'AUTH-002',
           family: 'F4',
-          tier: 'strong',
-          potential: 'medium',
-          confidence: 0.8,
-          title: 'State-Changing POST Form Without Anti-CSRF Token',
-          needs: ['verify cookie SameSite attribute and custom request headers'],
-          doesNotProve: ['cross-site request forgery without session cookie analysis'],
+          tier: 'weak',
+          potential: 'low',
+          confidence: 0.6,
+          title: 'POST Form Markup Lacks Visible Anti-CSRF Hidden Input (Heuristic)',
+          needs: [
+            'verify Set-Cookie SameSite attributes on session cookies',
+            'verify server-side Origin/Referer validation or custom-header token enforcement',
+          ],
+          doesNotProve: [
+            'exploitable CSRF vulnerability — static DOM markup inspection cannot observe SameSite cookies, Fetch/XHR custom headers, or server-side checks',
+          ],
           evidence: {
             preview: maskSecret(`form action=${actionStr} method=POST inputs=${inputs.length}`),
             location: maskLocation(url),
@@ -176,7 +181,7 @@ export function detectAuthLeads(
           origin,
           url,
           sourceSensor: 'S3',
-          remediation: 'Implement anti-CSRF token verification or SameSite=Strict/Lax cookie policy.',
+          remediation: 'Confirm whether state-changing requests are protected by anti-CSRF tokens, SameSite=Lax/Strict cookies, or custom request-header verification.',
         });
       }
     }

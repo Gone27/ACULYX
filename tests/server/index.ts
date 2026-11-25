@@ -7,33 +7,25 @@
  */
 
 import express from 'express';
-import { createServer } from 'http';
+import { createServer, type Server as HttpServer } from 'http';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
+import { createEphemeralTestCert } from './ephemeral-cert';
 import { registerRoutes } from './routes';
 
 // --------------------------------------------------------------------------
 // Public API
 // --------------------------------------------------------------------------
 
-/** Shape returned by {@link startServer}. */
+/** Shape returned by {@link startServer} and {@link startHttpsServer}. */
 export interface TestServerHandle {
-  /** The underlying Node.js HTTP server (call `.close()` to shut down). */
-  server: ReturnType<typeof createServer>;
-  /** Base URL the server is listening on, e.g. `http://localhost:3456`. */
+  /** The underlying Node.js HTTP/HTTPS server (call `.close()` to shut down). */
+  server: HttpServer | HttpsServer;
+  /** Base URL the server is listening on, e.g. `http://127.0.0.1:3456` or `https://127.0.0.1:3457`. */
   baseUrl: string;
 }
 
 /**
- * Start the Express test server on the given port.
- *
- * @param port - TCP port to listen on. Defaults to 3456.
- * @returns A Promise that resolves once the server is accepting connections.
- *
- * @example
- * ```ts
- * const { server, baseUrl } = await startServer(3456);
- * // … run tests …
- * server.close();
- * ```
+ * Start the Express HTTP test server on the given port (pass 0 for ephemeral port).
  */
 export function startServer(port = 3456, host = '127.0.0.1'): Promise<TestServerHandle> {
   const app = express();
@@ -45,10 +37,35 @@ export function startServer(port = 3456, host = '127.0.0.1'): Promise<TestServer
   registerRoutes(app);
 
   return new Promise<TestServerHandle>((resolve, reject) => {
-    const server = app.listen(port, host, () => {
-      resolve({ server, baseUrl: `http://${host}:${port}` });
-    });
+    const server = createServer(app);
     server.on('error', reject);
+    server.listen(port, host, () => {
+      const addr = server.address();
+      const boundPort = typeof addr === 'object' && addr !== null ? addr.port : port;
+      resolve({ server, baseUrl: `http://${host}:${boundPort}` });
+    });
+  });
+}
+
+/**
+ * Start the Express HTTPS test server with an ephemeral in-memory self-signed certificate.
+ * Used for valid TLS HSTS fixture testing (absent, short max-age, includeSubDomains, preload).
+ */
+export function startHttpsServer(port = 0, host = '127.0.0.1'): Promise<TestServerHandle> {
+  const app = express();
+  app.disable('x-powered-by');
+  registerRoutes(app);
+
+  const tls = createEphemeralTestCert();
+
+  return new Promise<TestServerHandle>((resolve, reject) => {
+    const server = createHttpsServer({ key: tls.key, cert: tls.cert }, app);
+    server.on('error', reject);
+    server.listen(port, host, () => {
+      const addr = server.address();
+      const boundPort = typeof addr === 'object' && addr !== null ? addr.port : port;
+      resolve({ server, baseUrl: `https://${host}:${boundPort}` });
+    });
   });
 }
 

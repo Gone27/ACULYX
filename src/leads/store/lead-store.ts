@@ -50,6 +50,7 @@ const SESSION_STORAGE_KEY = 'aculyx_session_leads_v2';
 interface SerializedSessionStore {
   leads: Lead[];
   tabToLeads: Array<[number, string[]]>;
+  tabToLeadGenerations?: Array<[number, Array<[string, number]>]>;
 }
 
 export class LeadStore {
@@ -65,11 +66,20 @@ export class LeadStore {
   /** Map from tabId -> Set of leadIds */
   private tabToLeads = new Map<number, Set<string>>();
 
+  /** Map from tabId -> Map<leadId, navigationGeneration> */
+  private tabToLeadGenerations = new Map<number, Map<string, number>>();
+
+  private tabGenerationResolver?: (tabId: number) => number;
+
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private isInitialized = false;
 
   public onLeadRemoved?: (leadId: string) => void;
   public onCleared?: () => void;
+
+  public setTabGenerationResolver(resolver: (tabId: number) => number): void {
+    this.tabGenerationResolver = resolver;
+  }
 
   constructor() {
     void this.init();
@@ -96,6 +106,7 @@ export class LeadStore {
       this.leadById.clear();
       this.dedupMap.clear();
       this.tabToLeads.clear();
+      this.tabToLeadGenerations.clear();
 
       for (const rawLead of data.leads) {
         const lead = this.sanitizeLeadEvidence(rawLead);
@@ -117,6 +128,14 @@ export class LeadStore {
         for (const [tabId, leadIds] of data.tabToLeads) {
           if (Array.isArray(leadIds)) {
             this.tabToLeads.set(tabId, new Set(leadIds));
+          }
+        }
+      }
+
+      if (Array.isArray(data.tabToLeadGenerations)) {
+        for (const [tabId, entries] of data.tabToLeadGenerations) {
+          if (Array.isArray(entries)) {
+            this.tabToLeadGenerations.set(tabId, new Map(entries));
           }
         }
       }
@@ -143,9 +162,14 @@ export class LeadStore {
       for (const [tabId, ids] of this.tabToLeads.entries()) {
         serializedTabs.push([tabId, Array.from(ids)]);
       }
+      const serializedTabGens: Array<[number, Array<[string, number]>]> = [];
+      for (const [tabId, gens] of this.tabToLeadGenerations.entries()) {
+        serializedTabGens.push([tabId, Array.from(gens.entries())]);
+      }
       const payload: SerializedSessionStore = {
         leads: allLeads,
         tabToLeads: serializedTabs,
+        tabToLeadGenerations: serializedTabGens,
       };
       await chrome.storage.session.set({ [SESSION_STORAGE_KEY]: payload });
     } catch {
@@ -270,7 +294,7 @@ export class LeadStore {
    * Returns the ID of the surviving lead in the store (may differ from rawLead.id
    * when the lead merges into an existing duplicate). Returns undefined if dropped.
    */
-  public addLead(rawLead: Lead, tabId?: number): string | undefined {
+  public addLead(rawLead: Lead, tabId?: number, generation?: number): string | undefined {
     if (rawLead.scopeStatus === 'out-of-scope') {
       return undefined;
     }
@@ -291,7 +315,7 @@ export class LeadStore {
           existing.chainIds = Array.from(mergedChains);
         }
         if (tabId !== undefined) {
-          this.associateTabLead(tabId, existing.id);
+          this.associateTabLead(tabId, existing.id, generation);
         }
         existing.priority = calculateLeadPriority(existing);
       }
@@ -324,19 +348,68 @@ export class LeadStore {
     }
 
     if (tabId !== undefined) {
-      this.associateTabLead(tabId, lead.id);
+      this.associateTabLead(tabId, lead.id, generation);
     }
     this.scheduleSave();
     return lead.id;
   }
 
-  public associateTabLead(tabId: number, leadId: string): void {
+  public associateTabLead(tabId: number, leadId: string, generation?: number): void {
     let set = this.tabToLeads.get(tabId);
     if (set === undefined) {
       set = new Set();
       this.tabToLeads.set(tabId, set);
     }
     set.add(leadId);
+
+    const resolvedGen = generation ?? (this.tabGenerationResolver ? this.tabGenerationResolver(tabId) : undefined);
+    if (resolvedGen !== undefined) {
+      let genMap = this.tabToLeadGenerations.get(tabId);
+      if (genMap === undefined) {
+        genMap = new Map();
+        this.tabToLeadGenerations.set(tabId, genMap);
+      }
+      genMap.set(leadId, resolvedGen);
+    }
+  }
+
+  /**
+   * Clears tab-to-lead links without removing underlying origin-level lead history.
+   * When preserveGeneration is provided, preserves links already associated with that generation.
+   */
+  public clearTabAssociations(tabId: number, preserveGeneration?: number): void {
+    const existingSet = this.tabToLeads.get(tabId);
+    if (existingSet === undefined) {
+      this.tabToLeadGenerations.delete(tabId);
+      return;
+    }
+
+    if (preserveGeneration === undefined) {
+      this.tabToLeads.delete(tabId);
+      this.tabToLeadGenerations.delete(tabId);
+      this.scheduleSave();
+      return;
+    }
+
+    const genMap = this.tabToLeadGenerations.get(tabId);
+    let removedAny = false;
+    for (const leadId of Array.from(existingSet)) {
+      const leadGen = genMap?.get(leadId);
+      if (leadGen !== preserveGeneration) {
+        existingSet.delete(leadId);
+        genMap?.delete(leadId);
+        removedAny = true;
+      }
+    }
+
+    if (existingSet.size === 0) {
+      this.tabToLeads.delete(tabId);
+      this.tabToLeadGenerations.delete(tabId);
+    }
+
+    if (removedAny) {
+      this.scheduleSave();
+    }
   }
 
   public getLeadsForOrigin(origin: string): Lead[] {
@@ -385,6 +458,15 @@ export class LeadStore {
     for (const lead of leads) {
       this.leadById.delete(lead.id);
       this.dedupMap.delete(this.computeDedupKey(lead));
+      for (const [tabId, ids] of this.tabToLeads.entries()) {
+        if (ids.delete(lead.id)) {
+          this.tabToLeadGenerations.get(tabId)?.delete(lead.id);
+          if (ids.size === 0) {
+            this.tabToLeads.delete(tabId);
+            this.tabToLeadGenerations.delete(tabId);
+          }
+        }
+      }
       this.onLeadRemoved?.(lead.id);
     }
     this.originLeads.delete(origin);
@@ -396,6 +478,7 @@ export class LeadStore {
     this.leadById.clear();
     this.dedupMap.clear();
     this.tabToLeads.clear();
+    this.tabToLeadGenerations.clear();
     this.onCleared?.();
     if (this.hasStorageSession()) {
       void chrome.storage.session.remove([SESSION_STORAGE_KEY]).catch(() => undefined);

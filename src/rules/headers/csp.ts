@@ -151,18 +151,18 @@ function checkSinglePolicy(finalHop: Hop, metaCspFound = false): CspResult {
       findings.push({
         ruleId: 'CSP-009',
         category: 'header',
-        severity: 'medium',
+        severity: 'info',
         confidence: 'heuristic',
         provenance: 'response-header',
-        outcome: fromCache ? 'partial-coverage' : 'fail',
-        title: 'CSP script-src trusts host(s) with historically bypass-prone endpoints or libraries',
+        outcome: 'pass',
+        title: 'CSP script-src trusts third-party host(s) with historically bypass-prone endpoints or libraries',
         impact:
-          'Some allowlisted hosts expose JSONP endpoints or host libraries with script gadgets; actual exploitability depends on endpoint path and version.',
+          'Observed configuration: allowlisted host(s) appear in a curated list of domains that have historically hosted JSONP/script-gadget endpoints; actual bypass risk depends on hosted paths and versions.',
         evidence: sanitizeEvidence(bypassProneHosts.join(', ')),
         recommendation:
-          'Review whether each host is required, restrict paths where practical, pin library versions, and prefer nonces or hashes. This curated host match is a heuristic, not proof of a bypass.',
+          'Next check: verify whether the allowlisted host exposes JSONP callbacks or outdated script libraries, restrict paths where practical, or migrate to nonces/hashes with strict-dynamic.',
         reference: 'https://csp-evaluator.withgoogle.com/',
-        limitations: ['Passive heuristic analysis only; presence of domain does not verify an active JSONP or gadget endpoint.'],
+        limitations: ['Passive heuristic match on domain name only; does not prove an active JSONP or script-gadget bypass exists.'],
       });
     }
 
@@ -230,16 +230,20 @@ function checkSinglePolicy(finalHop: Hop, metaCspFound = false): CspResult {
         findings.push({
           ruleId: 'CSP-002',
           category: 'header',
-          severity: 'high',
+          severity: 'medium',
           confidence: 'deterministic',
           provenance: 'response-header',
           outcome: fromCache ? 'partial-coverage' : 'fail',
-          title: "CSP script-src contains 'unsafe-inline'",
-          impact: 'Injected HTML tags can execute arbitrary JavaScript directly inside victim browsers.',
+          title: "CSP script-src permits 'unsafe-inline' without nonce/hash protection",
+          impact:
+            "Observed configuration permits inline script execution, weakening XSS defense-in-depth if an HTML or DOM injection sink is present; exploitability depends on application execution paths.",
           evidence: sanitizeEvidence(effectiveScriptSrc),
-          recommendation: "Remove 'unsafe-inline' and use nonces or hashes.",
+          recommendation:
+            "Remove 'unsafe-inline' and adopt cryptographic nonces or hashes. Next check: inspect application markup and DOM sinks for unescaped user input.",
           reference: REFERENCE,
-          limitations: fromCache ? ['Response served from cache.'] : ['Passive policy inspection.'],
+          limitations: fromCache
+            ? ['Response served from cache.', 'Observed CSP configuration only; passive analysis does not prove an injectable XSS sink.']
+            : ['Observed CSP configuration only; passive inspection does not prove an HTML or DOM injection vulnerability exists.'],
         });
       }
     }
@@ -248,16 +252,20 @@ function checkSinglePolicy(finalHop: Hop, metaCspFound = false): CspResult {
       findings.push({
         ruleId: 'CSP-003',
         category: 'header',
-        severity: 'high',
-        confidence: 'deterministic',
+        severity: 'medium',
+        confidence: 'heuristic',
         provenance: 'response-header',
         outcome: fromCache ? 'partial-coverage' : 'fail',
-        title: "CSP script-src contains 'unsafe-eval'",
-        impact: 'Allows dynamic code execution via eval() and new Function().',
+        title: "CSP script-src permits 'unsafe-eval' (weakens dynamic evaluation restriction)",
+        impact:
+          'Observed configuration allows eval() and Function() string evaluation. This increases XSS impact only if application code passes untrusted input into a dynamic evaluation sink.',
         evidence: sanitizeEvidence(effectiveScriptSrc),
-        recommendation: "Remove 'unsafe-eval'.",
+        recommendation:
+          "Remove 'unsafe-eval' where scripts do not require dynamic evaluation. Next check: audit JavaScript execution paths for eval-like sinks reachable by user input.",
         reference: REFERENCE,
-        limitations: fromCache ? ['Response served from cache.'] : ['Passive policy inspection.'],
+        limitations: fromCache
+          ? ['Response served from cache.', 'Observed policy directive only; does not prove eval() or an attacker-controlled sink is used.']
+          : ['Observed policy directive only; does not prove eval() usage or an exploitable injection path exists.'],
       });
     }
 
@@ -310,10 +318,10 @@ function checkSinglePolicy(finalHop: Hop, metaCspFound = false): CspResult {
     const t = sourceTokens(v);
     const nonceOrHash = NONCE_OR_HASH_RE.test(v) || t.includes("'strict-dynamic'");
     if (t.includes("'unsafe-inline'") && !(name === 'script-src-elem' && nonceOrHash)) {
-      findings.push(mk(name === 'script-src-elem' ? 'CSP-002E' : 'CSP-002A', 'high',
-        `CSP ${name} contains 'unsafe-inline' (overrides script-src)`,
-        'This directive takes precedence over script-src for its target, so injected inline scripts or handlers can execute even if script-src looks strict.',
-        `${name} ${v}`, `Remove 'unsafe-inline' from ${name}; use nonces/hashes.`));
+      findings.push(mk(name === 'script-src-elem' ? 'CSP-002E' : 'CSP-002A', 'medium',
+        `CSP ${name} permits 'unsafe-inline' (overrides script-src)`,
+        'Observed directive takes precedence over script-src for its target, weakening inline-script protection if an injection sink is present; passive header evidence does not prove exploitability.',
+        `${name} ${v}`, `Remove 'unsafe-inline' from ${name} and adopt nonces/hashes. Next check: verify whether user input reaches inline ${name} contexts.`));
     }
     if (name === 'script-src-elem' && !t.includes("'strict-dynamic'") &&
         t.some((x) => x === '*' || x === 'http:' || x === 'https:' || x === 'data:' || x === 'blob:')) {

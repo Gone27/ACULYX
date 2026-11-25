@@ -5,6 +5,7 @@ import { SettingsService } from '../shared/settings';
 import { isBroadGrant, hasAllSitesCoverage } from './permissions';
 import { incognitoTabIds } from './capture';
 import { getTabGeneration } from './generations';
+import { globalLeadStore } from '../leads';
 import type { SettingsV2 } from '../shared/types';
 
 export async function injectPageSignals(tabId: number, url: string): Promise<void> {
@@ -103,9 +104,13 @@ export async function injectPageSignals(tabId: number, url: string): Promise<voi
   }
 }
 
-export function registerPageSignalInjection(): void {
+export function registerPageSignalInjection(
+  onCommittedReset?: (tabId: number, url: string) => void,
+): void {
   chrome.webNavigation.onCommitted.addListener((details): void => {
     if (details.frameId !== 0 || details.tabId < 0) return;
+    globalLeadStore.clearTabAssociations(details.tabId, getTabGeneration(details.tabId));
+    onCommittedReset?.(details.tabId, details.url);
     void injectPageSignals(details.tabId, details.url);
   });
 
