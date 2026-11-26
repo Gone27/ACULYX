@@ -1560,18 +1560,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   radarSeverityFilter.addEventListener('change', renderSidepanelRadar);
 
-  // ── Radar sweep pause when hidden or inactive ────────────────
+  // ── Radar sweep pause when hidden, in settings, or reduced motion ──
   const radarSweepEl = document.getElementById('sp-radar-sweep');
   function updateRadarSweepState(): void {
     if (!radarSweepEl) return;
+    const motionReduced = document.documentElement.getAttribute('data-motion') === 'reduce';
     const overviewVisible =
-      !viewOverview.hidden && document.visibilityState === 'visible';
+      !viewOverview.hidden &&
+      viewSettings.hidden &&
+      document.visibilityState === 'visible' &&
+      !motionReduced;
     radarSweepEl.style.animationPlayState = overviewVisible ? 'running' : 'paused';
   }
   document.addEventListener('visibilitychange', updateRadarSweepState);
-  // Monitor Overview visibility via MutationObserver on the hidden attribute
+  // Monitor Overview, Settings, and reduced-motion attribute changes
   const radarViewObserver = new MutationObserver(updateRadarSweepState);
   radarViewObserver.observe(viewOverview, { attributes: true, attributeFilter: ['hidden'] });
+  radarViewObserver.observe(viewSettings, { attributes: true, attributeFilter: ['hidden'] });
+  radarViewObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-motion'] });
   updateRadarSweepState();
 
   // ── Leads View Filtering & Rendering ─────────────────────────

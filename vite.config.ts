@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import { crx } from '@crxjs/vite-plugin';
-import manifest from './manifest.json';
+import manifest from './manifest.json' with { type: 'json' };
 
 import path from 'path';
 
@@ -42,10 +42,10 @@ export default defineConfig({
     target: 'es2022',
     rollupOptions: {
       input: {
-        popup: path.resolve(__dirname, 'src/popup/popup.html'),
-        panel: path.resolve(__dirname, 'src/devtools/panel.html'),
-        'dom-collector': path.resolve(__dirname, 'src/content/dom-collector.ts'),
-        'main-world-hooks': path.resolve(__dirname, 'src/content/main-world-hooks.ts'),
+        popup: path.resolve(import.meta.dirname, 'src/popup/popup.html'),
+        panel: path.resolve(import.meta.dirname, 'src/devtools/panel.html'),
+        'dom-collector': path.resolve(import.meta.dirname, 'src/content/dom-collector.ts'),
+        'main-world-hooks': path.resolve(import.meta.dirname, 'src/content/main-world-hooks.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {

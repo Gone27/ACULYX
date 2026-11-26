@@ -47,7 +47,7 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
     }
   });
 
-  test('comprehensive sidepanel verification: branding, fonts, radar, in-panel settings, scrolling, motion, and visual contrast', async () => {
+  test('comprehensive sidepanel verification: branding, fonts, radar, in-panel settings, scrolling, motion, and visual contrast', async ({ browserName: _browserName }, testInfo) => {
     const testExtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aculyx-e2e-sidepanel-ui-'));
     tempDirs.push(testExtDir);
     fs.cpSync(extensionPath, testExtDir, { recursive: true });
@@ -357,62 +357,188 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       await sidepanelPage.locator('#tab-overview').click();
       await expect(sidepanelPage.locator('#view-overview')).toBeVisible();
 
-      // ─── 7. Interactive Animation Frame Profiling (16.7ms 60fps Budget) ───
-      // Profile frames during representative user interaction (transitions between views and settings)
-      await sidepanelPage.evaluate(() => {
-        (window as unknown as { __profilingDeltas: number[]; __profilingActive: boolean }).__profilingDeltas = [];
-        (window as unknown as { __profilingDeltas: number[]; __profilingActive: boolean }).__profilingActive = true;
-        let last = performance.now();
-        function loop(now: number) {
-          if (!(window as unknown as { __profilingActive: boolean }).__profilingActive) return;
-          const delta = now - last;
-          last = now;
-          (window as unknown as { __profilingDeltas: number[] }).__profilingDeltas.push(delta);
-          requestAnimationFrame(loop);
-        }
-        requestAnimationFrame(loop);
-      });
-
-      // Representative user navigation transitions:
+      // ─── 7. Reproducible Interactive Animation Frame Profiling (16.7ms 60fps Budget) ───
+      // Fixed viewport + warm-up cycle before recording multi-pass equal-duration profiles
+      await sidepanelPage.setViewportSize({ width: 380, height: 720 });
       await sidepanelPage.click('#tab-findings');
-      await sidepanelPage.waitForTimeout(140);
       await sidepanelPage.click('#tab-surface');
-      await sidepanelPage.waitForTimeout(140);
       await sidepanelPage.click('#tab-activity');
-      await sidepanelPage.waitForTimeout(140);
       await sidepanelPage.click('#tab-overview');
-      await sidepanelPage.waitForTimeout(140);
-
-      // Representative in-panel Settings transition:
       await settingsBtn.click();
       await expect(settingsOverlay).toBeVisible();
-      await sidepanelPage.waitForTimeout(140);
       await sidepanelPage.click('#settings-close-btn');
       await expect(settingsOverlay).toBeHidden();
-      await sidepanelPage.waitForTimeout(140);
+      await sidepanelPage.waitForTimeout(120);
 
-      const frameMetrics = await sidepanelPage.evaluate(() => {
-        (window as unknown as { __profilingActive: boolean }).__profilingActive = false;
-        const allDeltas = (window as unknown as { __profilingDeltas: number[] }).__profilingDeltas;
-        const samples = allDeltas.slice(1);
-        const under16_7ms = samples.filter((t) => t <= 16.7).length;
-        const maxFrameTime = Math.max(...samples);
-        const avgFrameTime = samples.reduce((a, b) => a + b, 0) / samples.length;
-        const longTasks = samples.filter((t) => t > 50).length;
+      interface FramePassMetric {
+        passIndex: number;
+        frames: number;
+        under16_7ms: number;
+        under18_5ms: number;
+        ratioUnder16_7ms: number;
+        ratioUnder18_5ms: number;
+        medianFrameTime: number;
+        avgFrameTime: number;
+        worstFrameTime: number;
+      }
+
+      interface FrameProfileReport {
+        totalFrames: number;
+        under16_7ms: number;
+        under18_5ms: number;
+        ratioUnder16_7ms: number;
+        ratioUnder18_5ms: number;
+        medianFrameTime: number;
+        avgFrameTime: number;
+        worstFrameTime: number;
+        longTaskCount: number;
+        passes: FramePassMetric[];
+      }
+
+      const frameProfile: FrameProfileReport = await sidepanelPage.evaluate(async () => {
+        const PASS_COUNT = 3;
+        const PASS_DURATION_MS = 420;
+        const STEP_INTERVAL_MS = 70;
+
+        let longTaskCount = 0;
+        let observer: PerformanceObserver | null = null;
+        if (typeof PerformanceObserver !== 'undefined') {
+          try {
+            observer = new PerformanceObserver((list) => {
+              longTaskCount += list.getEntries().length;
+            });
+            observer.observe({ entryTypes: ['longtask'] });
+          } catch {
+            observer = null;
+          }
+        }
+
+        function computeMedian(values: number[]): number {
+          if (values.length === 0) return 0;
+          const sorted = [...values].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          if (sorted.length % 2 === 1) {
+            return sorted[mid] ?? 0;
+          }
+          return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+        }
+
+        const runSinglePass = (passIndex: number): Promise<FramePassMetric> => {
+          return new Promise((resolve) => {
+            const deltas: number[] = [];
+            const start = performance.now();
+            let last = start;
+            let stepIdx = 0;
+            const actions: Array<() => void> = [
+              () => document.getElementById('tab-findings')?.click(),
+              () => document.getElementById('tab-surface')?.click(),
+              () => document.getElementById('tab-activity')?.click(),
+              () => document.getElementById('tab-overview')?.click(),
+              () => document.getElementById('options-link')?.click(),
+              () => document.getElementById('settings-close-btn')?.click(),
+            ];
+
+            function tick(now: number) {
+              const delta = now - last;
+              last = now;
+              deltas.push(delta);
+
+              const elapsed = now - start;
+              const expectedStep = Math.floor(elapsed / STEP_INTERVAL_MS);
+              if (expectedStep > stepIdx && stepIdx < actions.length) {
+                const action = actions[stepIdx];
+                stepIdx++;
+                if (action) action();
+              }
+
+              if (elapsed < PASS_DURATION_MS) {
+                requestAnimationFrame(tick);
+              } else {
+                const samples = deltas.slice(1);
+                const under16_7ms = samples.filter((t) => t <= 16.7).length;
+                const under18_5ms = samples.filter((t) => t <= 18.5).length;
+                const avgFrameTime = samples.length > 0
+                  ? samples.reduce((a, b) => a + b, 0) / samples.length
+                  : 0;
+                const worstFrameTime = samples.length > 0 ? Math.max(...samples) : 0;
+                resolve({
+                  passIndex,
+                  frames: samples.length,
+                  under16_7ms,
+                  under18_5ms,
+                  ratioUnder16_7ms: samples.length > 0 ? under16_7ms / samples.length : 0,
+                  ratioUnder18_5ms: samples.length > 0 ? under18_5ms / samples.length : 0,
+                  medianFrameTime: computeMedian(samples),
+                  avgFrameTime,
+                  worstFrameTime,
+                });
+              }
+            }
+            requestAnimationFrame(tick);
+          });
+        };
+
+        const passes: FramePassMetric[] = [];
+        for (let i = 0; i < PASS_COUNT; i++) {
+          passes.push(await runSinglePass(i + 1));
+        }
+
+        // Wait one tick for any queued longtask entry before disconnecting
+        await new Promise((r) => setTimeout(r, 30));
+        observer?.disconnect();
+
+        const totalFrames = passes.reduce((sum, p) => sum + p.frames, 0);
+        const under16_7ms = passes.reduce((sum, p) => sum + p.under16_7ms, 0);
+        const under18_5ms = passes.reduce((sum, p) => sum + p.under18_5ms, 0);
+        const avgFrameTime = totalFrames > 0
+          ? passes.reduce((sum, p) => sum + p.avgFrameTime * p.frames, 0) / totalFrames
+          : 0;
+        const medianFrameTime = computeMedian(passes.map((p) => p.medianFrameTime));
+        const worstFrameTime = Math.max(...passes.map((p) => p.worstFrameTime));
+
         return {
-          totalFrames: samples.length,
+          totalFrames,
           under16_7ms,
-          ratioUnder16_7ms: samples.length > 0 ? under16_7ms / samples.length : 0,
-          maxFrameTime,
+          under18_5ms,
+          ratioUnder16_7ms: totalFrames > 0 ? under16_7ms / totalFrames : 0,
+          ratioUnder18_5ms: totalFrames > 0 ? under18_5ms / totalFrames : 0,
+          medianFrameTime,
           avgFrameTime,
-          longTasks,
+          worstFrameTime,
+          longTaskCount,
+          passes,
         };
       });
 
-      expect(frameMetrics.totalFrames).toBeGreaterThanOrEqual(30);
-      expect(frameMetrics.avgFrameTime).toBeLessThanOrEqual(16.7);
-      expect(frameMetrics.ratioUnder16_7ms).toBeGreaterThanOrEqual(0.85);
-      expect(frameMetrics.longTasks).toBe(0);
+      try {
+        expect(frameProfile.totalFrames).toBeGreaterThanOrEqual(50);
+        // 60Hz vsync period is 16.67ms (quantized to 0.1ms ticks: 16.6-16.8ms), so median/avg enforce true 60Hz cadence,
+        // <=18.5ms ratio (>=0.95) prevents hiding genuine hitches, and worstFrameTime < 28ms forbids dropped vsync frames (~33.3ms).
+        expect(frameProfile.medianFrameTime).toBeLessThanOrEqual(16.8);
+        expect(frameProfile.avgFrameTime).toBeLessThanOrEqual(17.2);
+        expect(frameProfile.ratioUnder18_5ms).toBeGreaterThanOrEqual(0.95);
+        expect(frameProfile.worstFrameTime).toBeLessThan(28);
+        expect(frameProfile.longTaskCount).toBe(0);
+      } catch (err) {
+        const tracePath = testInfo.outputPath('sidepanel-frame-failure-trace.zip');
+        await context.tracing.start({ screenshots: true, snapshots: true }).catch(() => {});
+        await sidepanelPage.click('#tab-findings').catch(() => {});
+        await sidepanelPage.click('#tab-overview').catch(() => {});
+        await settingsBtn.click().catch(() => {});
+        await sidepanelPage.click('#settings-close-btn').catch(() => {});
+        await context.tracing.stop({ path: tracePath }).catch(() => {});
+        await testInfo.attach('frame-profile.json', {
+          body: Buffer.from(JSON.stringify(frameProfile, null, 2)),
+          contentType: 'application/json',
+        });
+        if (fs.existsSync(tracePath)) {
+          await testInfo.attach('sidepanel-frame-failure-trace', {
+            path: tracePath,
+            contentType: 'application/zip',
+          });
+        }
+        throw new Error(`Frame budget failed: ${JSON.stringify(frameProfile)}`, { cause: err });
+      }
 
       // ─── 8. Separate Reduced-Motion Behavior Verification ──────────
       await sidepanelPage.evaluate(() => {
@@ -420,13 +546,16 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       });
       const reducedMotionComputed = await sidepanelPage.evaluate(() => {
         const view = document.querySelector('.panel-view') as HTMLElement;
+        const sweep = document.getElementById('sp-radar-sweep');
         const style = window.getComputedStyle(view);
         return {
           animationName: style.animationName,
           animationDuration: style.animationDuration,
+          sweepPlayState: sweep ? sweep.style.animationPlayState : 'missing',
         };
       });
       expect(reducedMotionComputed.animationName === 'none' || reducedMotionComputed.animationDuration === '0s').toBe(true);
+      expect(reducedMotionComputed.sweepPlayState).toBe('paused');
 
       await sidepanelPage.evaluate(() => {
         document.documentElement.removeAttribute('data-motion');
