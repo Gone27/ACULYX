@@ -4,6 +4,68 @@ import os from 'node:os';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '..');
+
+/**
+ * Reads semantic version from repository package.json
+ * @returns {string}
+ */
+export function readRepoPackageVersion() {
+  const pkgPath = path.join(repoRoot, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  return pkg.version;
+}
+
+const REQUIRED_NOTICE_MARKERS = [
+  'Copyright 2020 The Space Grotesk Project Authors',
+  'Copyright © 2017 IBM Corp.',
+  'Reserved Font Name "Plex"',
+  'SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007',
+  'PERMISSION & CONDITIONS',
+  'TERMINATION',
+  'DISCLAIMER',
+];
+
+/**
+ * Validates that a bundled NOTICE text includes upstream font copyrights and complete OFL-1.1 text
+ * @param {string} noticeText
+ * @param {string} locationLabel
+ * @param {string[]} errors
+ */
+export function validateNoticeContent(noticeText, locationLabel, errors) {
+  for (const marker of REQUIRED_NOTICE_MARKERS) {
+    if (!noticeText.includes(marker)) {
+      errors.push(`${locationLabel} is missing required font license/attribution marker: "${marker}"`);
+    }
+  }
+}
+
+/**
+ * Reads and parses a JSON entry inside a ZIP archive, pushing structured errors on failure
+ */
+function readZipJsonEntry(buf, parsedEntries, entryName, errors) {
+  const entry = parsedEntries.find((e) => e.name === entryName);
+  if (!entry) return null;
+  try {
+    return JSON.parse(extractZipEntry(buf, entry).toString('utf8'));
+  } catch (err) {
+    errors.push(`Failed to parse ${entryName}: ${err.message}`);
+    return null;
+  }
+}
+
+function verifyNoticeEntry(buf, parsedEntries, entryName, label, errors) {
+  const entry = parsedEntries.find((e) => e.name === entryName);
+  if (!entry) {
+    errors.push(`Required font license and attribution file missing from ${label}: ${entryName}`);
+    return;
+  }
+  const text = extractZipEntry(buf, entry).toString('utf8');
+  validateNoticeContent(text, `${label}:${entryName}`, errors);
+}
+
 /**
  * @typedef {'source' | 'chrome' | 'firefox'} VerificationTarget
  *
@@ -79,7 +141,7 @@ export function extractZipEntry(buf, entry) {
  * Verifies a ZIP release archive according to target specification
  * @param {string} zipPath
  * @param {VerificationTarget} target
- * @param {{ smokeExtract?: boolean; quiet?: boolean }} [options]
+ * @param {{ smokeExtract?: boolean; quiet?: boolean; expectedVersion?: string }} [options]
  * @returns {{ success: boolean; errors: string[]; entries: string[] }}
  */
 export function verifyZipArchive(zipPath, target, options = {}) {
@@ -178,6 +240,26 @@ export function verifyZipArchive(zipPath, target, options = {}) {
     if (!hasPackageJson) errors.push('Essential file missing from source archive: package.json');
     if (!hasManifest) errors.push('Essential file missing from source archive: manifest.json');
     if (!hasSrc) errors.push('Source directory "src/" missing from source archive');
+
+    const expectedVersion = options.expectedVersion ?? readRepoPackageVersion();
+    const pkg = readZipJsonEntry(buf, parsedEntries, 'package.json', errors);
+    if (pkg && pkg.version !== expectedVersion) {
+      errors.push(`Source package.json version mismatch: expected ${expectedVersion}, found ${pkg.version}`);
+    }
+    const manifest = readZipJsonEntry(buf, parsedEntries, 'manifest.json', errors);
+    if (manifest) {
+      if (manifest.manifest_version !== 3) {
+        errors.push(`Source manifest_version must be 3, found: ${manifest.manifest_version}`);
+      }
+      if (manifest.version !== expectedVersion) {
+        errors.push(`Source manifest.json version mismatch: expected ${expectedVersion}, found ${manifest.version}`);
+      }
+    }
+    const firefoxManifest = readZipJsonEntry(buf, parsedEntries, 'manifest.firefox.json', errors);
+    if (firefoxManifest && firefoxManifest.version !== expectedVersion) {
+      errors.push(`Source manifest.firefox.json version mismatch: expected ${expectedVersion}, found ${firefoxManifest.version}`);
+    }
+    verifyNoticeEntry(buf, parsedEntries, 'NOTICE', 'source archive', errors);
   } else if (target === 'full') {
     const forbiddenPrefixes = [
       'node_modules/',
@@ -208,6 +290,26 @@ export function verifyZipArchive(zipPath, target, options = {}) {
     if (!hasManifest) errors.push('Essential file missing from full archive: manifest.json');
     if (!hasSrc) errors.push('Source directory "src/" missing from full archive');
     if (!hasDistManifest) errors.push('Built distribution directory "dist/manifest.json" missing from full archive');
+
+    const expectedVersion = options.expectedVersion ?? readRepoPackageVersion();
+    const pkg = readZipJsonEntry(buf, parsedEntries, 'package.json', errors);
+    if (pkg && pkg.version !== expectedVersion) {
+      errors.push(`Full package.json version mismatch: expected ${expectedVersion}, found ${pkg.version}`);
+    }
+    for (const manifestPath of [
+      'manifest.json',
+      'manifest.firefox.json',
+      'dist/manifest.json',
+      'dist-firefox/manifest.json',
+      'dist-hunter/manifest.json',
+    ]) {
+      const m = readZipJsonEntry(buf, parsedEntries, manifestPath, errors);
+      if (m && m.version !== expectedVersion) {
+        errors.push(`Full archive ${manifestPath} version mismatch: expected ${expectedVersion}, found ${m.version}`);
+      }
+    }
+    verifyNoticeEntry(buf, parsedEntries, 'NOTICE', 'full archive', errors);
+    verifyNoticeEntry(buf, parsedEntries, 'dist/NOTICE', 'full archive dist', errors);
   } else if (target === 'chrome' || target === 'firefox') {
     // Both Chrome and Firefox store packages must be FLAT (no wrapper dir)
     const hasRootManifest = entries.includes('manifest.json');
@@ -258,6 +360,11 @@ export function verifyZipArchive(zipPath, target, options = {}) {
             errors.push(`Manifest version must be 3, found: ${manifest.manifest_version}`);
           }
 
+          const expectedVersion = options.expectedVersion ?? readRepoPackageVersion();
+          if (manifest.version !== expectedVersion) {
+            errors.push(`${target} manifest.json version mismatch: expected ${expectedVersion}, found ${manifest.version}`);
+          }
+
           if (target === 'chrome') {
             if (manifest.browser_specific_settings && manifest.browser_specific_settings.gecko) {
               errors.push('Chrome package contains Firefox-specific browser_specific_settings.gecko');
@@ -295,6 +402,7 @@ export function verifyZipArchive(zipPath, target, options = {}) {
         }
       }
     }
+    verifyNoticeEntry(buf, parsedEntries, 'NOTICE', `${target} store package`, errors);
   }
 
   // Smoke extraction test

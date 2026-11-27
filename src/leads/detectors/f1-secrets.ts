@@ -43,7 +43,10 @@ export function isPlaceholder(val: string): boolean {
 
   // Exact full-string placeholder tokens or obvious placeholder phrases
   if (
-    /^(?:your[_-]?(?:api[_-]?)?(?:key|token|secret)|example[_-]?(?:key|token|secret)?|sample[_-]?(?:key|token|secret)?|dummy[_-]?(?:key|token|secret)?|change[_-]?me|placeholder|test|xxxx+|0000+|1234567890|12345678|123456)$/i.test(
+    /^(?:(?:your|my|insert|enter|put)[_-]?)?(?:[a-z]+[_-])*(?:key|token|secret|password|passwd|credential|value)[_-]?(?:goes[_-])?here$/i.test(
+      trimmed
+    ) ||
+    /^(?:your[_-]?(?:api[_-]?)?(?:key|token|secret)|example[_-]?(?:key|token|secret)?|sample[_-]?(?:key|token|secret)?|dummy[_-]?(?:key|token|secret)?|(?:replace|change|edit|update|set)[_-]?me(?:[_-]?with[_-]?[a-z0-9_-]+)?|placeholder|test|xxxx+|0000+|1234567890|12345678|123456)$/i.test(
       trimmed
     )
   ) {
@@ -51,12 +54,12 @@ export function isPlaceholder(val: string): boolean {
   }
 
   // Token-level check: split into words. If ALL words are placeholder words, it's a placeholder.
-  // Real staging passwords (like 'test_pass_2024!' or 'admin_123456') are preserved!
+  // Real staging passwords (like 'test_pass_2024!' or 'admin_123456' or 'sec_staging_...') are preserved!
   const tokens = trimmed.toLowerCase().split(/[-_.\s/:]+/).filter(Boolean);
   if (
     tokens.length > 0 &&
     tokens.every((t) =>
-      /^(?:your|api|key|token|secret|example|sample|dummy|changeme|placeholder|test|xxxx+|0000+|123456)$/.test(t)
+      /^(?:your|my|insert|enter|put|replace|me|with|here|goes|value|api|key|token|secret|password|passwd|credential|example|sample|dummy|changeme|placeholder|test|xxxx+|0000+|123456)$/.test(t)
     )
   ) {
     return true;
@@ -442,10 +445,12 @@ export function detectSecrets(
     }
   }
 
-  const ghPatMatches = code.match(/\bgithub_pat_[0-9a-zA-Z_]{82}\b/g);
+  // Canonical GitHub Fine-Grained Personal Access Token detector (covers 50+ char variants & standard 82-char PATs without duplicate emission)
+  const ghPatMatches = code.match(/\bgithub_pat_[0-9a-zA-Z_]{50,}(?=[^0-9a-zA-Z_]|$)/g);
   if (ghPatMatches) {
     for (const match of ghPatMatches) {
       if (isPlaceholder(match)) continue;
+      const isFullLength = match.length >= 'github_pat_'.length + 82;
       const leadId = nextLeadId('SEC-GH-PAT');
       leads.push({
         id: leadId,
@@ -453,7 +458,7 @@ export function detectSecrets(
         family: 'F1',
         tier: 'observed',
         potential: 'critical',
-        confidence: 1.0,
+        confidence: isFullLength ? 1.0 : 0.9,
         title: 'GitHub Fine-Grained Personal Access Token Exposure',
         needs: ['verify repository permissions'],
         doesNotProve: ['repo ownership'],
@@ -467,6 +472,7 @@ export function detectSecrets(
         origin,
         url,
         sourceSensor: 'S2',
+        remediation: 'Revoke the token in GitHub settings and rotate it.',
       });
       // Fine-grained PATs supported at GET /user (no specific scope needed)
       onCandidate?.({ leadId, provider: 'github', tokenFamily: 'github_pat', rawToken: match });
@@ -979,7 +985,6 @@ export function detectSecrets(
 
   // 3c. Additional vendor formats (review additions)
   const simple: Array<{ id: string; title: string; re: RegExp; potential: Lead['potential']; tags: string[]; remediation: string; group?: number }> = [
-    { id: 'SEC-GH-FINE', title: 'GitHub Fine-Grained Personal Access Token Exposure', re: /\bgithub_pat_[A-Za-z0-9_]{50,}\b/g, potential: 'critical', tags: ['github', 'secret'], remediation: 'Revoke the token in GitHub settings and rotate it.' },
     { id: 'SEC-HF', title: 'Hugging Face Access Token Exposure', re: /\bhf_[A-Za-z0-9]{30,}\b/g, potential: 'high', tags: ['huggingface', 'secret'], remediation: 'Revoke the token in Hugging Face settings and rotate it.' },
     { id: 'SEC-TWILIO-AUTH', title: 'Twilio Auth Token Exposure (context match)', re: /\b(?:twilio[\w.-]{0,20}|auth_?token)["']?\s*[:=,]\s*["']([0-9a-f]{32})["']/gi, potential: 'high', tags: ['twilio', 'secret'], remediation: 'Rotate the Twilio Auth Token and move it server-side.', group: 1 },
     { id: 'SEC-BEARER', title: 'Hard-coded Bearer Credential in Source', re: /\bAuthorization["']?\s*[:=]\s*["'`]Bearer\s+([A-Za-z0-9._~+/=-]{32,})["'`]/gi, potential: 'high', tags: ['bearer', 'auth', 'secret'], remediation: 'Remove the static credential from client code and issue per-user tokens.', group: 1 },

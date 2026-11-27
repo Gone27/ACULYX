@@ -107,7 +107,9 @@ describe('Vector 1: Cookie Scope & Cookie Tossing', () => {
     const sub005 = result.findings.find((f) => f.ruleId === 'SUB-005');
     expect(sub005).toBeDefined();
     expect(sub005?.severity).toBe('medium');
-    expect(sub005?.title).toContain('Cookie Tossing');
+    expect(sub005?.confidence).toBe('heuristic');
+    expect(sub005?.title).toContain('cookie-tossing');
+    expect(sub005?.title).toContain('depends on domain scope');
   });
 
   it('passes when sensitive cookie uses __Host- prefix', () => {
@@ -222,7 +224,10 @@ describe('Vector 3: CORS & Framing / Opener Trust', () => {
     });
 
     const result = checkSubdomainTrust(hop, []);
-    expect(result.findings.some((f) => f.ruleId === 'SUB-006')).toBe(true);
+    const sub006 = result.findings.find((f) => f.ruleId === 'SUB-006');
+    expect(sub006).toBeDefined();
+    expect(sub006?.confidence).toBe('heuristic');
+    expect(sub006?.title).toContain('not set to same-origin');
   });
 });
 

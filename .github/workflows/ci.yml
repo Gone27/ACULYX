@@ -46,6 +46,32 @@ jobs:
       - name: Build all extension distributions (Chrome, Firefox, Hunter)
         run: npm run build:all
 
+      - name: Verify release tag and manifest version consistency
+        run: |
+          node << 'EOF'
+          const fs = require('node:fs');
+          const pkgVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+          const manifests = [
+            'manifest.json',
+            'manifest.firefox.json',
+            'dist/manifest.json',
+            'dist-firefox/manifest.json',
+            'dist-hunter/manifest.json',
+          ];
+          for (const m of manifests) {
+            const mv = JSON.parse(fs.readFileSync(m, 'utf8')).version;
+            if (mv !== pkgVersion) {
+              throw new Error(`Version mismatch: ${m} has ${mv}, expected ${pkgVersion}`);
+            }
+          }
+          const ref = process.env.GITHUB_REF || '';
+          const refName = process.env.GITHUB_REF_NAME || '';
+          if (ref.startsWith('refs/tags/v') && refName !== `v${pkgVersion}`) {
+            throw new Error(`Tag mismatch: tag ${refName} does not match v${pkgVersion}`);
+          }
+          console.log(`✓ Manifests aligned at version ${pkgVersion}${ref.startsWith('refs/tags/v') ? ` and tag ${refName}` : ''}`);
+          EOF
+
       - name: Post-build artifact security & syntax checks
         run: npm run test:artifacts
 

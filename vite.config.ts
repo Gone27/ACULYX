@@ -2,7 +2,21 @@ import { defineConfig } from 'vite';
 import { crx } from '@crxjs/vite-plugin';
 import manifest from './manifest.json' with { type: 'json' };
 
+import fs from 'fs';
 import path from 'path';
+
+function copyNoticePlugin() {
+  return {
+    name: 'aculyx-copy-notice',
+    writeBundle() {
+      const srcNotice = path.resolve(import.meta.dirname, 'NOTICE');
+      const destNotice = path.resolve(import.meta.dirname, 'dist', 'NOTICE');
+      if (fs.existsSync(srcNotice)) {
+        fs.copyFileSync(srcNotice, destNotice);
+      }
+    },
+  };
+}
 
 function contentScriptBundlePlugin() {
   return {
@@ -34,6 +48,7 @@ export default defineConfig({
   plugins: [
     crx({ manifest }),
     contentScriptBundlePlugin(),
+    copyNoticePlugin(),
   ],
   build: {
     // Keep readable output for debugging during development

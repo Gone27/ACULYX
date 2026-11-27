@@ -98,18 +98,21 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       await sidepanelPage.evaluate(async () => {
         await document.fonts.ready;
         await Promise.all([
-          document.fonts.load('16px "Space Grotesk"'),
+          document.fonts.load('400 16px "Space Grotesk"'),
+          document.fonts.load('700 16px "Space Grotesk"'),
           document.fonts.load('14px "IBM Plex Mono"'),
         ]);
       });
       const fontsLoaded = await sidepanelPage.evaluate(() => {
         return {
-          spaceGrotesk: document.fonts.check('16px "Space Grotesk"'),
+          spaceGroteskRegular: document.fonts.check('400 16px "Space Grotesk"'),
+          spaceGroteskBold: document.fonts.check('700 16px "Space Grotesk"'),
           ibmPlexMono: document.fonts.check('14px "IBM Plex Mono"'),
         };
       });
-      // Assert both font families are verified true
-      expect(fontsLoaded.spaceGrotesk).toBe(true);
+      // Assert both font families (including regular & bold variable weights) are verified true
+      expect(fontsLoaded.spaceGroteskRegular).toBe(true);
+      expect(fontsLoaded.spaceGroteskBold).toBe(true);
       expect(fontsLoaded.ibmPlexMono).toBe(true);
 
       // ─── 3. Navigation Hit Target & Semantic Verification ───────────

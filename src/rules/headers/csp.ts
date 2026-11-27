@@ -107,7 +107,7 @@ function checkSinglePolicy(finalHop: Hop, metaCspFound = false): CspResult {
         provenance: 'response-header',
         outcome: fromCache ? 'partial-coverage' : 'fail',
         title: 'Content-Security-Policy header is missing',
-        impact: 'Without a CSP, XSS vulnerabilities can execute malicious scripts.',
+        impact: 'Without an enforcing CSP response header, the browser lacks policy-level script execution defense-in-depth if XSS exists.',
         evidence: sanitizeEvidence('(header absent)'),
         recommendation:
           'Add a Content-Security-Policy header. Start with a strict base policy ' +

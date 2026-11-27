@@ -1619,10 +1619,10 @@ chrome.runtime.onMessage.addListener(
 
               state.captureFindings.push({
                 ruleId: 'SRI-001', category: 'header', severity: 'medium',
-                title: `${totalMissing} external resource(s) lack Subresource Integrity`,
-                impact: 'A compromised or modified third-party script or stylesheet may run with the privileges of this page.',
+                title: `${totalMissing} external resource(s) lack Subresource Integrity attributes`,
+                impact: 'External scripts or stylesheets without integrity hashes represent a third-party supply-chain hardening gap; asset eligibility and dynamic URL stability were not verified.',
                 evidence: `Missing integrity attribute on: ${parts.join(', ')}`,
-                recommendation: 'Add integrity hashes and crossorigin="anonymous" to external scripts and stylesheets, or self-host resources whose content you control.',
+                recommendation: 'Add integrity hashes and crossorigin="anonymous" to static external scripts and stylesheets where feasible, or self-host third-party assets.',
                 reference: 'https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity',
               });
             }

@@ -255,9 +255,9 @@ export function checkSubdomainTrust(
 
   vectors.push({
     id: 'SUB-005',
-    label: 'Cookie Tossing / Shadowing Risk (Missing __Host- prefix)',
+    label: 'Sensitive Cookie Lacks __Host- Prefix (Subdomain Tossing Heuristic)',
     detail: cookieTossingRisk
-      ? `Sensitive cookie(s) lack __Host- prefix: ${unshieldedSensitiveCookies.slice(0, 3).join(', ')}. A compromised subdomain can inject Domain=.${regDomain} cookies to hijack sessions.`
+      ? `Sensitive cookie(s) lack __Host- prefix: ${unshieldedSensitiveCookies.slice(0, 3).join(', ')}. Subdomain cookie-tossing risk depends on domain scope, subdomain control, and server parsing.`
       : 'All sensitive cookies use __Host- prefix or none detected',
     risk: 'medium',
     present: cookieTossingRisk,
@@ -268,15 +268,15 @@ export function checkSubdomainTrust(
       ruleId: 'SUB-005',
       category: 'cookie',
       severity: 'medium',
-      title: `Sensitive session cookie(s) lack __Host- prefix — vulnerable to Cookie Tossing from subdomains`,
+      confidence: 'heuristic',
+      title: `Sensitive cookie(s) lack __Host- prefix — subdomain cookie-tossing risk depends on domain scope and server parsing`,
       impact:
-        `An attacker controlling any subdomain can overwrite or shadow main-domain session cookies by setting Domain=.${regDomain} cookies (Cookie Tossing).`,
+        `Without the __Host- prefix, cookie shadowing or tossing of Domain=.${regDomain} names from a compromised subdomain cannot be ruled out passively; actual impact depends on subdomain control and server-side cookie parsing.`,
       evidence: sanitizeEvidence(
         `Unprefixed sensitive cookies: ${unshieldedSensitiveCookies.slice(0, 5).join(', ')}`,
       ),
       recommendation:
-        'Prefix sensitive session cookies with __Host- (e.g. __Host-session=...) so browsers reject ' +
-        'subdomains attempting to shadow or overwrite cookies for the main domain (RFC 6265bis §4.1.3).',
+        'Where host-only scoping fits the application architecture, prefix sensitive session cookies with __Host- (e.g. __Host-session=...) with Secure and Path=/ so browsers restrict subdomain shadowing (RFC 6265bis §4.1.3).',
       reference: REF_COOKIE_TOSS,
     });
   }
@@ -481,13 +481,13 @@ export function checkSubdomainTrust(
       ruleId: 'SUB-006',
       category: 'header',
       severity: 'medium',
-      title: 'Missing Cross-Origin-Opener-Policy (COOP) — subdomains can access window.opener',
+      confidence: 'heuristic',
+      title: 'Cross-Origin-Opener-Policy (COOP) is not set to same-origin — window.opener isolation is not enforced',
       impact:
-        'Untrusted subdomains opened in new tabs or windows can access window.opener and silently redirect the parent tab to a phishing clone (Reverse Tabnabbing).',
+        'Without COOP: same-origin, documents opened via window.open may retain a window.opener reference depending on relationship and browser defaults (actual opener exposure was not tested passively).',
       evidence: sanitizeEvidence(coopHeader.length > 0 ? coopHeader : '(header absent)'),
       recommendation:
-        'Set "Cross-Origin-Opener-Policy: same-origin" to isolate the top-level browsing context ' +
-        'and prevent malicious subdomains from manipulating window.opener.',
+        'Set "Cross-Origin-Opener-Policy: same-origin" where cross-origin popup flows are unneeded to isolate the top-level browsing context.',
       reference: REF_COOP,
     });
   }
@@ -496,9 +496,9 @@ export function checkSubdomainTrust(
   const oacMissing = oacHeader.length === 0 || !oacHeader.includes('?1');
   vectors.push({
     id: 'SUB-007',
-    label: 'Origin-Agent-Cluster missing (document.domain relaxation risk)',
+    label: 'Origin-Agent-Cluster (?1) header is not set',
     detail: oacMissing
-      ? 'Origin-Agent-Cluster: ?1 missing — legacy document.domain relaxation can bridge subdomains'
+      ? 'Origin-Agent-Cluster: ?1 not set — origin-keyed agent clustering is not explicitly requested'
       : 'Origin-Agent-Cluster: ?1 is active',
     risk: 'low',
     present: oacMissing,
@@ -509,12 +509,13 @@ export function checkSubdomainTrust(
       ruleId: 'SUB-007',
       category: 'header',
       severity: 'low',
-      title: 'Missing Origin-Agent-Cluster header — document.domain relaxation possible',
+      confidence: 'heuristic',
+      title: 'Origin-Agent-Cluster (?1) header is not set — origin-keyed agent clustering is not requested',
       impact:
-        'Subdomains can alter document.domain to match the main domain, breaking Same-Origin-Policy boundaries and reading DOM content directly.',
+        'Legacy document.domain relaxation between same-site subdomains cannot be excluded via Origin-Agent-Cluster unless enforced by browser defaults (actual document.domain usage was not tested).',
       evidence: sanitizeEvidence(oacHeader.length > 0 ? oacHeader : '(header absent)'),
       recommendation:
-        'Add "Origin-Agent-Cluster: ?1" to prevent document.domain relaxation and enforce origin isolation.',
+        'Add "Origin-Agent-Cluster: ?1" where cross-subdomain scripting via document.domain is not required.',
       reference: REF_OAC,
     });
   }

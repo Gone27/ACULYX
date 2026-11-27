@@ -34,11 +34,44 @@ describe('Bounty Hardening: F1 Secrets', () => {
     expect(detectSecrets(realBearer, 'https://example.com/app.js').filter(l => l.title.includes('Bearer'))).toHaveLength(1);
   });
 
-  it('marks values containing test/demo/staging/mock as placeholders', () => {
+  it('marks values containing test/demo/staging/mock and _HERE/REPLACE_ME phrases as placeholders without suppressing high-entropy staging secrets', () => {
     expect(isPlaceholder('staging_api_key')).toBe(true);
     expect(isPlaceholder('demo-secret-key')).toBe(true);
     expect(isPlaceholder('mock_auth_token')).toBe(true);
     expect(isPlaceholder('test-credential')).toBe(true);
+    expect(isPlaceholder('YOUR_API_KEY_HERE')).toBe(true);
+    expect(isPlaceholder('YOUR_SECRET_TOKEN_HERE')).toBe(true);
+    expect(isPlaceholder('INSERT_YOUR_KEY_HERE')).toBe(true);
+    expect(isPlaceholder('REPLACE_ME')).toBe(true);
+
+    // Conventional placeholder assignment must NOT emit SEC-003
+    expect(
+      detectSecrets('const api_key = "YOUR_API_KEY_HERE";', 'https://example.com/config.js').filter((l) => l.ruleId === 'SEC-003')
+    ).toHaveLength(0);
+
+    // Real high-entropy staging secret MUST still be detected
+    expect(
+      detectSecrets('const api_key = "sec_staging_8kP2mX9qV4zL1nR7wY";', 'https://example.com/config.js').filter((l) => l.ruleId === 'SEC-003')
+    ).toHaveLength(1);
+  });
+
+  it('emits exactly one SEC-001 lead and one candidate callback for GitHub fine-grained PATs', () => {
+    const pat82 = 'github_pat_' + 'Ab3dE5gH7jK9mN1pQ3sT5vX7zB9dF1hJ3lN5pR7tV9xZ1bD3fH5jL7nP9rT1wY3zA5cE7gI9kM1oQ3sU'.slice(0, 82);
+    const pat60 = 'github_pat_' + 'Ab3dE5gH7jK9mN1pQ3sT5vX7zB9dF1hJ3lN5pR7tV9xZ1bD3fH5jL7nP9rT'.slice(0, 60);
+
+    const candidates82: string[] = [];
+    const leads82 = detectSecrets(`const gh = "${pat82}";`, 'https://example.com/app.js', 'in-scope', (c) => {
+      candidates82.push(c.leadId);
+    });
+    expect(leads82.filter((l) => l.ruleId === 'SEC-001')).toHaveLength(1);
+    expect(candidates82).toHaveLength(1);
+
+    const candidates60: string[] = [];
+    const leads60 = detectSecrets(`const gh = "${pat60}";`, 'https://example.com/app.js', 'in-scope', (c) => {
+      candidates60.push(c.leadId);
+    });
+    expect(leads60.filter((l) => l.ruleId === 'SEC-001')).toHaveLength(1);
+    expect(candidates60).toHaveLength(1);
   });
 
   it('processes massive adversarial inputs with repeated underscores/hyphens in linear time without ReDoS', () => {

@@ -20,15 +20,17 @@ export interface AggregateVerificationResult {
   results: Record<string, VerificationResult>;
 }
 
+export function readRepoPackageVersion(): string;
+export function validateNoticeContent(noticeText: string, locationLabel: string, errors: string[]): void;
 export function parseZipEntries(buf: Buffer): ZipEntry[];
 export function extractZipEntry(buf: Buffer, entry: ZipEntry): Buffer;
 export function verifyZipArchive(
   zipPath: string,
   target: VerificationTarget,
-  options?: { smokeExtract?: boolean; quiet?: boolean }
+  options?: { smokeExtract?: boolean; quiet?: boolean; expectedVersion?: string }
 ): VerificationResult;
 
 export function verifyAllArchives(
   dir: string,
-  options?: { smokeExtract?: boolean; quiet?: boolean }
+  options?: { smokeExtract?: boolean; quiet?: boolean; expectedVersion?: string }
 ): AggregateVerificationResult;

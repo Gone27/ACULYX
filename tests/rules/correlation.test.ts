@@ -156,4 +156,130 @@ describe('Set-Cookie jar correlation diagnostics', () => {
       globalThis.chrome = originalChrome;
     }
   });
+
+  it('clears pending COOKIE-REJECTED warning when cookie store commits within bounded settle window', async () => {
+    const { correlateCookies } = await import('../../src/background/correlate');
+
+    const originalChrome = globalThis.chrome;
+    let queryCount = 0;
+    const listeners = new Set<(info: chrome.cookies.CookieChangeInfo) => void>();
+
+    globalThis.chrome = {
+      cookies: {
+        getAll: () => {
+          queryCount += 1;
+          if (queryCount === 1) {
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([
+            {
+              name: 'delayed_sess',
+              domain: 'www.example.com',
+              path: '/',
+              secure: true,
+              httpOnly: true,
+              sameSite: 'lax',
+              session: true,
+              hostOnly: true,
+              storeId: '0',
+              value: 'REDACTED',
+            },
+          ]);
+        },
+        onChanged: {
+          addListener: (fn: (info: chrome.cookies.CookieChangeInfo) => void) => {
+            listeners.add(fn);
+            setTimeout(() => {
+              fn({
+                removed: false,
+                cause: 'explicit',
+                cookie: {
+                  name: 'delayed_sess',
+                  domain: 'www.example.com',
+                  path: '/',
+                  secure: true,
+                  httpOnly: true,
+                  sameSite: 'lax',
+                  session: true,
+                  hostOnly: true,
+                  storeId: '0',
+                  value: 'REDACTED',
+                },
+              });
+            }, 5);
+          },
+          removeListener: (fn: (info: chrome.cookies.CookieChangeInfo) => void) => {
+            listeners.delete(fn);
+          },
+        },
+      },
+    } as unknown as typeof chrome;
+
+    try {
+      const result = await correlateCookies(
+        1,
+        'https://www.example.com/',
+        ['delayed_sess=val; Path=/; Secure; HttpOnly'],
+        1,
+        () => true,
+        'req-delayed',
+        'https://www.example.com/',
+        { settleDelayMs: 100 },
+      );
+
+      expect(queryCount).toBe(2);
+      expect(listeners.size).toBe(0);
+      expect(result.findings.some((f) => f.ruleId === 'COOKIE-REJECTED')).toBe(false);
+      expect(result.records.some((r) => r.name === 'delayed_sess')).toBe(true);
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
+
+  it('emits exactly one COOKIE-REJECTED finding when cookie stays absent past bounded settle window', async () => {
+    const { correlateCookies } = await import('../../src/background/correlate');
+
+    const originalChrome = globalThis.chrome;
+    let queryCount = 0;
+
+    globalThis.chrome = {
+      cookies: {
+        getAll: () => {
+          queryCount += 1;
+          return Promise.resolve([]);
+        },
+      },
+    } as unknown as typeof chrome;
+
+    try {
+      const result = await correlateCookies(
+        2,
+        'https://www.example.com/',
+        ['missing_sess=val; Path=/; SameSite=None'],
+        1,
+        () => true,
+        'req-absent',
+        'https://www.example.com/',
+        { settleDelayMs: 15 },
+      );
+
+      expect(queryCount).toBe(2);
+      const rejected = result.findings.filter((f) => f.ruleId === 'COOKIE-REJECTED');
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]?.title).toContain('after bounded verification');
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
+
+  it('does not match same-name jar cookies across incompatible domain or path scopes', () => {
+    const findings = findUnobservedCookieFindings(
+      ['sid=secret; Domain=app.example.com; Path=/api'],
+      [{ name: 'sid', domain: 'other.example.com', path: '/admin' }],
+      'https://app.example.com/api/v1',
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.ruleId).toBe('COOKIE-REJECTED');
+  });
 });

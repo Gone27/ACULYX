@@ -125,6 +125,50 @@ function parseCookieHeaderMetadata(setCookieHeader: string): {
 export const MAX_SET_COOKIES = 100;
 export const MAX_COOKIE_RECORDS = 100;
 export const MAX_UNOBSERVED_FINDINGS = 50;
+export const COOKIE_SETTLE_DELAY_MS = 120;
+
+interface ParsedCookieMeta {
+  name: string;
+  path: string | null;
+  domainAttributePresent: boolean;
+  domain: string | null;
+  sameSiteNone: boolean;
+  sameSite: 'strict' | 'lax' | 'none' | '';
+  secure: boolean;
+  httpOnly: boolean;
+  partitioned: boolean;
+  session: boolean;
+  expiresAt: number | null;
+  isDeletion: boolean;
+}
+
+function isCookiePresentInJar(
+  cookieMeta: ParsedCookieMeta,
+  cookies: Array<{ name: string; path: string; domain: string }>,
+  responseUrl: URL,
+): boolean {
+  const candidates = cookies.filter((c) => c.name === cookieMeta.name);
+  if (candidates.length === 0) return false;
+
+  const expectedDomain = (cookieMeta.domain !== null && cookieMeta.domain.length > 0
+    ? cookieMeta.domain
+    : responseUrl.hostname).toLowerCase();
+
+  return candidates.some((jarCookie) => {
+    const jarHost = (jarCookie.domain || '').replace(/^\./, '').toLowerCase();
+    const domainMatches = jarHost.length === 0 ||
+      jarHost === expectedDomain ||
+      (cookieMeta.domainAttributePresent && (expectedDomain.endsWith(`.${jarHost}`) || jarHost.endsWith(`.${expectedDomain}`)));
+
+    if (!domainMatches) return false;
+
+    const jarPath = jarCookie.path && jarCookie.path.length > 0 ? jarCookie.path : '/';
+    if (cookieMeta.path !== null && cookieMeta.path.startsWith('/')) {
+      return jarPath === cookieMeta.path || cookiePathMatches(cookieMeta.path, jarPath);
+    }
+    return cookiePathMatches(responseUrl.pathname, jarPath);
+  });
+}
 
 export function findUnobservedCookieFindings(
   setCookieHeaders: string[],
@@ -157,9 +201,8 @@ export function findUnobservedCookieFindings(
   const pageHostname = pageUrl.hostname;
   const responseHostname = responseUrl.hostname;
 
-  const visibleNames = new Set(cookies.map((cookie) => cookie.name));
   const findings = metadata
-    .filter((cookie) => cookie.name.length > 0 && !cookie.isDeletion && !visibleNames.has(cookie.name))
+    .filter((cookie) => cookie.name.length > 0 && !cookie.isDeletion && !isCookiePresentInJar(cookie, cookies, responseUrl))
     .flatMap((cookie): Finding[] => {
       const effectiveDomain = (cookie.domain !== null && cookie.domain.length > 0)
         ? cookie.domain
@@ -198,21 +241,21 @@ export function findUnobservedCookieFindings(
         if (!likelyRejected) return [];
       }
       if (reasons.length === 0) {
-        reasons.push('browser privacy policy, third-party cookie blocking, expiry, or another cookie validation rule may apply');
+        reasons.push('browser privacy policy, third-party cookie blocking, expiry, or asynchronous cookie-store commit timing may apply');
       }
 
       return [{
         ruleId: 'COOKIE-REJECTED',
         category: 'cookie',
         severity: 'info',
-        title: `Set-Cookie named "${sanitizeEvidence(cookie.name)}" was not observed in the accessible cookie jar`,
-        impact: 'The cookie may not persist in this browser context, which can break a login or other stateful flow.',
+        title: `Set-Cookie "${sanitizeEvidence(cookie.name)}" was not observed in the accessible cookie jar after bounded verification`,
+        impact: 'The cookie was absent from the accessible browser cookie jar during initial and bounded follow-up checks; it may have been rejected, scoped elsewhere, or committed asynchronously.',
         evidence: sanitizeEvidence(`Cookie name: ${cookie.name}; sent attributes: ${[
           cookie.sameSiteNone ? 'SameSite=None' : '',
           cookie.secure ? 'Secure' : '',
           cookie.domainAttributePresent ? 'Domain attribute' : 'host-only',
         ].filter((part) => part.length > 0).join(', ')}`),
-        recommendation: `Check whether ${reasons.join('; ')}. A name-only jar comparison cannot prove rejection if a same-name cookie existed before this response.`,
+        recommendation: `Check whether ${reasons.join('; ')}. Bounded cookie-jar polling cannot distinguish silent browser rejection from delayed storage outside the check window.`,
         reference: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie',
         sourceUrl: responseUrl.href,
       }];
@@ -310,6 +353,50 @@ const MAX_IN_FLIGHT_CORRELATIONS = 50;
  * @param isCurrentGeneration - Optional callback verifying whether generation is still current.
  * @returns                   Array of {@link CookieRecord} metadata objects and findings.
  */
+async function waitForBoundedCookieSettle(
+  missingNames: Set<string>,
+  settleDelayMs: number,
+): Promise<void> {
+  if (settleDelayMs <= 0 || missingNames.size === 0) return;
+
+  await new Promise<void>((resolve) => {
+    const remaining = new Set(missingNames);
+    const cookiesApi = typeof chrome !== 'undefined' ? (chrome.cookies as { onChanged?: chrome.cookies.CookieChangedEvent } | undefined) : undefined;
+    const onChangedApi = cookiesApi?.onChanged;
+    let settled = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (onChangedApi !== undefined && typeof onChangedApi.removeListener === 'function') {
+        onChangedApi.removeListener(listener);
+      }
+      resolve();
+    };
+
+    const listener = (changeInfo: chrome.cookies.CookieChangeInfo) => {
+      const changedName = changeInfo.cookie.name;
+      if (!changeInfo.removed && changedName.length > 0 && remaining.has(changedName)) {
+        remaining.delete(changedName);
+        if (remaining.size === 0) {
+          cleanup();
+        }
+      }
+    };
+
+    if (onChangedApi !== undefined && typeof onChangedApi.addListener === 'function') {
+      onChangedApi.addListener(listener);
+    }
+
+    timerId = setTimeout(cleanup, settleDelayMs);
+  });
+}
+
 export async function correlateCookies(
   tabId: number,
   tabUrl: string,
@@ -318,6 +405,7 @@ export async function correlateCookies(
   isCurrentGeneration?: (tabId: number, generation: number) => boolean,
   hopId?: string,
   hopUrl?: string,
+  options?: { settleDelayMs?: number },
 ): Promise<{ records: CookieRecord[]; findings: Finding[]; discarded?: boolean }> {
   // Pre-query generation check: discard if generation already superseded
   if (
@@ -362,6 +450,47 @@ export async function correlateCookies(
       !isCurrentGeneration(tabId, generation)
     ) {
       return { records: [], findings: [], discarded: true };
+    }
+
+    // 2b. Bounded delayed confirmation when Set-Cookie candidates are initially missing
+    //     from chrome.cookies.getAll() (Chrome commits cookies to storage asynchronously).
+    const initialUnobserved = findUnobservedCookieFindings(
+      boundedSetCookieHeaders,
+      urlScopedCookies,
+      tabUrl,
+      hopUrl,
+    );
+    const settleDelayMs = options?.settleDelayMs ?? COOKIE_SETTLE_DELAY_MS;
+    if (initialUnobserved.length > 0 && settleDelayMs > 0) {
+      const missingNames = new Set<string>();
+      const visibleSet = new Set(urlScopedCookies.map((c) => c.name));
+      for (const meta of headerMetadata) {
+        if (meta.name.length > 0 && !meta.isDeletion && !visibleSet.has(meta.name)) {
+          missingNames.add(meta.name);
+        }
+      }
+      if (missingNames.size > 0) {
+        await waitForBoundedCookieSettle(missingNames, settleDelayMs);
+        if (
+          generation !== undefined &&
+          isCurrentGeneration !== undefined &&
+          !isCurrentGeneration(tabId, generation)
+        ) {
+          return { records: [], findings: [], discarded: true };
+        }
+        try {
+          urlScopedCookies = await chrome.cookies.getAll({ url: tabUrl });
+        } catch {
+          return { records: [], findings: [] };
+        }
+        if (
+          generation !== undefined &&
+          isCurrentGeneration !== undefined &&
+          !isCurrentGeneration(tabId, generation)
+        ) {
+          return { records: [], findings: [], discarded: true };
+        }
+      }
     }
 
     // ------------------------------------------------------------------

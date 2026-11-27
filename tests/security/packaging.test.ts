@@ -8,7 +8,11 @@ import {
   extractZipEntry,
   verifyZipArchive,
   verifyAllArchives,
+  readRepoPackageVersion,
 } from '../../scripts/verify-release-zip.mjs';
+
+const REPO_VERSION = readRepoPackageVersion();
+const REPO_NOTICE = fs.readFileSync(path.resolve(__dirname, '../../NOTICE'), 'utf8');
 import {
   collectFiles,
   writeZipArchive,
@@ -185,9 +189,10 @@ describe('Release ZIP Packaging & Verifier', () => {
 
       it('accepts valid clean source archive', () => {
         const mockZip = createMockZipBuffer([
-          { name: 'package.json', content: '{"version":"2.0.3"}', method: 0 },
-          { name: 'manifest.json', content: '{"manifest_version":3}', method: 0 },
+          { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+          { name: 'manifest.json', content: JSON.stringify({ manifest_version: 3, version: REPO_VERSION }), method: 0 },
           { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
           { name: 'README.md', content: '# ACULYX', method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-source-valid.zip');
@@ -196,6 +201,21 @@ describe('Release ZIP Packaging & Verifier', () => {
         const result = verifyZipArchive(zipPath, 'source', { smokeExtract: true });
         expect(result.success).toBe(true);
         expect(result.errors).toHaveLength(0);
+      });
+
+      it('rejects source zip when manifest version mismatches package.json', () => {
+        const mockZip = createMockZipBuffer([
+          { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+          { name: 'manifest.json', content: JSON.stringify({ manifest_version: 3, version: '0.0.1' }), method: 0 },
+          { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-source-mismatch.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'source');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('version mismatch'))).toBe(true);
       });
     });
 
@@ -220,10 +240,12 @@ describe('Release ZIP Packaging & Verifier', () => {
             content: JSON.stringify({
               manifest_version: 3,
               name: 'ACULYX',
+              version: REPO_VERSION,
               browser_specific_settings: { gecko: { id: 'aculyx@test' } },
             }),
             method: 0,
           },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-chrome-gecko.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -235,8 +257,9 @@ describe('Release ZIP Packaging & Verifier', () => {
 
       it('rejects chrome zip if source or test files are bundled', () => {
         const mockZip = createMockZipBuffer([
-          { name: 'manifest.json', content: '{"manifest_version":3}', method: 0 },
+          { name: 'manifest.json', content: JSON.stringify({ manifest_version: 3, version: REPO_VERSION }), method: 0 },
           { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-chrome-src.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -246,11 +269,59 @@ describe('Release ZIP Packaging & Verifier', () => {
         expect(result.errors.some((err: string) => err.includes('Source or test'))).toBe(true);
       });
 
+      it('rejects chrome zip when manifest version mismatches or NOTICE lacks OFL-1.1 license', () => {
+        const mockZip = createMockZipBuffer([
+          {
+            name: 'manifest.json',
+            content: JSON.stringify({
+              manifest_version: 3,
+              name: 'ACULYX',
+              version: '2.0.5',
+              content_security_policy: {
+                extension_pages: "script-src 'self'; object-src 'none'; connect-src 'none'",
+              },
+            }),
+            method: 0,
+          },
+          { name: 'NOTICE', content: 'Short notice without OFL text', method: 0 },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-chrome-bad-version-notice.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'chrome', { expectedVersion: '2.0.6' });
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('version mismatch'))).toBe(true);
+        expect(result.errors.some((err: string) => err.includes('SIL OPEN FONT LICENSE'))).toBe(true);
+      });
+
+      it('rejects chrome zip when NOTICE is omitted', () => {
+        const mockZip = createMockZipBuffer([
+          {
+            name: 'manifest.json',
+            content: JSON.stringify({
+              manifest_version: 3,
+              name: 'ACULYX',
+              version: REPO_VERSION,
+              content_security_policy: {
+                extension_pages: "script-src 'self'; object-src 'none'; connect-src 'none'",
+              },
+            }),
+            method: 0,
+          },
+        ]);
+        const zipPath = path.join(tmpDir, 'test-chrome-no-notice.zip');
+        fs.writeFileSync(zipPath, mockZip);
+
+        const result = verifyZipArchive(zipPath, 'chrome');
+        expect(result.success).toBe(false);
+        expect(result.errors.some((err: string) => err.includes('NOTICE'))).toBe(true);
+      });
+
       it('accepts valid flat Chrome store archive and extracts in smoke test', () => {
         const validManifest = {
           manifest_version: 3,
           name: 'ACULYX',
-          version: '2.0.3',
+          version: REPO_VERSION,
           action: { default_popup: 'popup.html' },
           content_security_policy: {
             extension_pages: "script-src 'self'; object-src 'none'; connect-src 'none'",
@@ -259,6 +330,7 @@ describe('Release ZIP Packaging & Verifier', () => {
         const mockZip = createMockZipBuffer([
           { name: 'manifest.json', content: JSON.stringify(validManifest), method: 8 },
           { name: 'popup.html', content: '<html><body>Popup</body></html>', method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 8 },
         ]);
         const zipPath = path.join(tmpDir, 'test-chrome-valid.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -277,9 +349,11 @@ describe('Release ZIP Packaging & Verifier', () => {
             content: JSON.stringify({
               manifest_version: 3,
               name: 'ACULYX',
+              version: REPO_VERSION,
             }),
             method: 0,
           },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-firefox-no-gecko.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -296,11 +370,13 @@ describe('Release ZIP Packaging & Verifier', () => {
             content: JSON.stringify({
               manifest_version: 3,
               name: 'ACULYX',
+              version: REPO_VERSION,
               browser_specific_settings: { gecko: { id: 'aculyx@dhyanpatel.com' } },
               permissions: ['storage', 'sidePanel'],
             }),
             method: 0,
           },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-firefox-sidepanel.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -314,7 +390,7 @@ describe('Release ZIP Packaging & Verifier', () => {
         const validFirefoxManifest = {
           manifest_version: 3,
           name: 'ACULYX',
-          version: '2.0.3',
+          version: REPO_VERSION,
           browser_specific_settings: {
             gecko: {
               id: 'aculyx@dhyanpatel.com',
@@ -327,6 +403,7 @@ describe('Release ZIP Packaging & Verifier', () => {
         const mockZip = createMockZipBuffer([
           { name: 'manifest.json', content: JSON.stringify(validFirefoxManifest), method: 8 },
           { name: 'popup.html', content: '<html><body>Firefox Popup</body></html>', method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 8 },
         ]);
         const zipPath = path.join(tmpDir, 'test-firefox-valid.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -340,10 +417,12 @@ describe('Release ZIP Packaging & Verifier', () => {
     describe('target: full', () => {
       it('rejects full zip if forbidden node_modules or .git are present', () => {
         const mockZip = createMockZipBuffer([
-          { name: 'package.json', content: '{}', method: 0 },
-          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+          { name: 'manifest.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
           { name: 'src/index.ts', content: 'export {}', method: 0 },
-          { name: 'dist/manifest.json', content: '{}', method: 0 },
+          { name: 'dist/manifest.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
+          { name: 'dist/NOTICE', content: REPO_NOTICE, method: 0 },
           { name: 'node_modules/lib/index.js', content: 'dep', method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-full-forbidden.zip');
@@ -356,9 +435,10 @@ describe('Release ZIP Packaging & Verifier', () => {
 
       it('rejects full zip if built dist directory is missing', () => {
         const mockZip = createMockZipBuffer([
-          { name: 'package.json', content: '{}', method: 0 },
-          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+          { name: 'manifest.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
           { name: 'src/index.ts', content: 'export {}', method: 0 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
         ]);
         const zipPath = path.join(tmpDir, 'test-full-no-dist.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -370,11 +450,13 @@ describe('Release ZIP Packaging & Verifier', () => {
 
       it('accepts valid full project archive containing source and built distributions', () => {
         const mockZip = createMockZipBuffer([
-          { name: 'package.json', content: '{}', method: 0 },
-          { name: 'manifest.json', content: '{}', method: 0 },
+          { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+          { name: 'manifest.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
           { name: 'src/index.ts', content: 'export {}', method: 0 },
-          { name: 'dist/manifest.json', content: '{"name":"aculyx"}', method: 8 },
-          { name: 'dist-firefox/manifest.json', content: '{"name":"aculyx"}', method: 8 },
+          { name: 'NOTICE', content: REPO_NOTICE, method: 8 },
+          { name: 'dist/manifest.json', content: JSON.stringify({ name: 'aculyx', version: REPO_VERSION }), method: 8 },
+          { name: 'dist/NOTICE', content: REPO_NOTICE, method: 8 },
+          { name: 'dist-firefox/manifest.json', content: JSON.stringify({ name: 'aculyx', version: REPO_VERSION }), method: 8 },
         ]);
         const zipPath = path.join(tmpDir, 'test-full-valid.zip');
         fs.writeFileSync(zipPath, mockZip);
@@ -462,7 +544,7 @@ describe('Release ZIP Packaging & Verifier', () => {
         const validManifest = {
           manifest_version: 3,
           name: 'ACULYX',
-          version: '2.0.5',
+          version: REPO_VERSION,
           content_security_policy: {
             extension_pages: "script-src 'self'; object-src 'none'; connect-src 'self'",
           },
@@ -471,25 +553,28 @@ describe('Release ZIP Packaging & Verifier', () => {
         const validFirefoxManifest = {
           manifest_version: 3,
           name: 'ACULYX',
-          version: '2.0.5',
+          version: REPO_VERSION,
           browser_specific_settings: { gecko: { id: 'aculyx@dhyanpatel.com' } },
         };
 
         fs.writeFileSync(
           path.join(aggDir, 'ACULYX-source.zip'),
           createMockZipBuffer([
-            { name: 'package.json', content: '{}', method: 0 },
-            { name: 'manifest.json', content: '{}', method: 0 },
+            { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+            { name: 'manifest.json', content: JSON.stringify({ manifest_version: 3, version: REPO_VERSION }), method: 0 },
             { name: 'src/index.ts', content: 'export {}', method: 0 },
+            { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
           ])
         );
         fs.writeFileSync(
           path.join(aggDir, 'ACULYX-full.zip'),
           createMockZipBuffer([
-            { name: 'package.json', content: '{}', method: 0 },
-            { name: 'manifest.json', content: '{}', method: 0 },
+            { name: 'package.json', content: JSON.stringify({ version: REPO_VERSION }), method: 0 },
+            { name: 'manifest.json', content: JSON.stringify({ manifest_version: 3, version: REPO_VERSION }), method: 0 },
             { name: 'src/index.ts', content: 'export {}', method: 0 },
-            { name: 'dist/manifest.json', content: '{}', method: 0 },
+            { name: 'NOTICE', content: REPO_NOTICE, method: 0 },
+            { name: 'dist/manifest.json', content: JSON.stringify(validManifest), method: 0 },
+            { name: 'dist/NOTICE', content: REPO_NOTICE, method: 0 },
           ])
         );
         fs.writeFileSync(
@@ -497,6 +582,7 @@ describe('Release ZIP Packaging & Verifier', () => {
           createMockZipBuffer([
             { name: 'manifest.json', content: JSON.stringify(validManifest), method: 8 },
             { name: 'popup.html', content: '<html></html>', method: 0 },
+            { name: 'NOTICE', content: REPO_NOTICE, method: 8 },
           ])
         );
         fs.writeFileSync(
@@ -504,6 +590,7 @@ describe('Release ZIP Packaging & Verifier', () => {
           createMockZipBuffer([
             { name: 'manifest.json', content: JSON.stringify(validFirefoxManifest), method: 8 },
             { name: 'popup.html', content: '<html></html>', method: 0 },
+            { name: 'NOTICE', content: REPO_NOTICE, method: 8 },
           ])
         );
 

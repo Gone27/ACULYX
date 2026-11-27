@@ -415,7 +415,18 @@ describe('correlateCookies generation awareness and bounding', () => {
   it('deduplicates concurrent in-flight correlations for the same tab and url', async () => {
     const getAllSpy = vi.fn().mockImplementation(async () => {
       await new Promise((r) => setTimeout(r, 10));
-      return [];
+      return [{
+        name: 'a',
+        domain: 'dedup.example',
+        path: '/',
+        secure: false,
+        httpOnly: false,
+        sameSite: 'lax',
+        session: true,
+        hostOnly: true,
+        storeId: '0',
+        value: 'REDACTED',
+      }];
     });
     (globalThis as unknown as { chrome: { cookies: { getAll: unknown } } }).chrome.cookies.getAll = getAllSpy;
 

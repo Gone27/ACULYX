@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
 interface Manifest {
   manifest_version?: number;
+  version?: string;
   content_security_policy?: {
     extension_pages?: string;
   };
@@ -289,6 +291,61 @@ describe('Artifact Scan', () => {
       expect(hunterManifest.content_security_policy?.extension_pages).toBe(
         "script-src 'self'; object-src 'none'; connect-src 'self' http: https:"
       );
+
+      // 4. Version parity across package.json, source manifests, and compiled distributions
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf-8')) as { version: string };
+      const rootManifest = readManifest('manifest.json');
+      const rootFirefoxManifest = readManifest('manifest.firefox.json');
+      expect(rootManifest.version).toBe(pkg.version);
+      expect(rootFirefoxManifest.version).toBe(pkg.version);
+      expect(chromeManifest.version).toBe(pkg.version);
+      expect(firefoxManifest.version).toBe(pkg.version);
+      expect(hunterManifest.version).toBe(pkg.version);
+    });
+
+    it('pins checked-in font SHA-256 checksums, ships NOTICE in distributions, and emits a single Space Grotesk asset', () => {
+      const pinnedHashes: Record<string, string> = {
+        'SpaceGrotesk-Variable.woff2': '0640890476fc1198ab4de571fb658de443c4d85b66466ec09534a8737ab1ce9d',
+        'IBMPlexMono-Regular.woff2': '7ced53420784c93cecccb7c27237594f0e41e5a7990581565f0aef8eda9e9d2f',
+        'IBMPlexMono-SemiBold.woff2': 'cecb8f0bc58b996a828bc0a23e2814e4acec33f0f531adf565c0248e242061e1',
+      };
+      const fontsDir = path.join(__dirname, '../../src/assets/fonts');
+      expect(fs.existsSync(path.join(__dirname, '../../scripts/download-fonts.mjs'))).toBe(false);
+      expect(fs.existsSync(path.join(fontsDir, 'SpaceGrotesk-Bold.woff2'))).toBe(false);
+
+      const sha256 = (filePath: string) =>
+        crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+
+      for (const [fileName, expectedHash] of Object.entries(pinnedHashes)) {
+        const fontFile = path.join(fontsDir, fileName);
+        expect(fs.existsSync(fontFile)).toBe(true);
+        expect(sha256(fontFile)).toBe(expectedHash);
+      }
+
+      const requireBuild = process.env.REQUIRE_BUILD_ARTIFACTS === 'true';
+      for (const distName of ['dist', 'dist-firefox', 'dist-hunter']) {
+        const distPath = path.join(__dirname, '../../', distName);
+        if (!fs.existsSync(distPath)) {
+          if (requireBuild) throw new Error(`Missing ${distName} for font/notice verification`);
+          continue;
+        }
+        const noticePath = path.join(distPath, 'NOTICE');
+        expect(fs.existsSync(noticePath)).toBe(true);
+        const noticeText = fs.readFileSync(noticePath, 'utf-8');
+        expect(noticeText).toContain('Copyright 2020 The Space Grotesk Project Authors');
+        expect(noticeText).toContain('Copyright © 2017 IBM Corp.');
+        expect(noticeText).toContain('SIL OPEN FONT LICENSE Version 1.1');
+
+        const assetsDir = path.join(distPath, 'assets');
+        const assetFiles = fs.readdirSync(assetsDir);
+        const spaceGroteskAssets = assetFiles.filter((f) => f.startsWith('SpaceGrotesk') && f.endsWith('.woff2'));
+        expect(spaceGroteskAssets).toHaveLength(1);
+
+        const validPinnedValues = new Set(Object.values(pinnedHashes));
+        for (const woff of assetFiles.filter((f) => f.endsWith('.woff2'))) {
+          expect(validPinnedValues.has(sha256(path.join(assetsDir, woff)))).toBe(true);
+        }
+      }
     });
   });
 });
