@@ -1605,9 +1605,10 @@ chrome.runtime.onMessage.addListener(
         const missingStyles = message.missingStyleIntegrity ?? 0;
         const totalMissing = missingScripts + missingStyles;
         const dynamicMissingCount = message.dynamicMissingCount ?? 0;
+        const historicalRemoved = message.historicalRemovedMissingCount ?? 0;
         const scriptUrls = (message.missingScriptUrls ?? []).slice(0, 5);
         const styleUrls = (message.missingStyleUrls ?? []).slice(0, 5);
-        const eventId = message.eventId ?? `sri:${senderTabId}:${gen}:${missingScripts}:${missingStyles}:${message.externalScripts ?? 0}:${message.externalStylesheets ?? 0}:${dynamicMissingCount}`;
+        const eventId = message.eventId ?? `sri:${senderTabId}:${gen}:${missingScripts}:${missingStyles}:${message.externalScripts ?? 0}:${message.externalStylesheets ?? 0}:${dynamicMissingCount}:${historicalRemoved}`;
         if (isDuplicateEvent(eventId)) {
           return false;
         }
@@ -1626,28 +1627,29 @@ chrome.runtime.onMessage.addListener(
             }
             state.captureFindings = (state.captureFindings ?? []).filter((finding) => finding.ruleId !== 'SRI-001');
 
-            if (totalMissing > 0) {
+            if (totalMissing > 0 || historicalRemoved > 0) {
               const parts: string[] = [];
-              if (missingScripts > 0) parts.push(`${missingScripts}/${message.externalScripts ?? 0} script(s)`);
-              if (missingStyles > 0) parts.push(`${missingStyles}/${message.externalStylesheets ?? 0} stylesheet(s)`);
+              if (missingScripts > 0) parts.push(`${missingScripts}/${message.externalScripts ?? 0} current script(s)`);
+              if (missingStyles > 0) parts.push(`${missingStyles}/${message.externalStylesheets ?? 0} current stylesheet(s)`);
               const listedUrls = [...scriptUrls, ...styleUrls].slice(0, 5);
               const urlSummary = listedUrls.length > 0
                 ? `; URLs: ${listedUrls.join(', ')}${totalMissing > listedUrls.length ? ` (+${totalMissing - listedUrls.length} more)` : ''}`
                 : '';
-              const dynamicNote = dynamicMissingCount > 0
-                ? ` (${dynamicMissingCount} injected dynamically)`
-                : '';
+              const dynamicParts: string[] = [];
+              if (dynamicMissingCount > 0) dynamicParts.push(`${dynamicMissingCount} dynamically present`);
+              if (historicalRemoved > 0) dynamicParts.push(`${historicalRemoved} previously seen and removed`);
+              const dynamicNote = dynamicParts.length > 0 ? ` (${dynamicParts.join(', ')})` : '';
 
               state.captureFindings.push({
                 ruleId: 'SRI-001', category: 'header', severity: 'medium',
                 provenance: 'dom-signal',
                 title: `${totalMissing} cross-origin external resource(s) lack Subresource Integrity attributes`,
                 impact: 'External cross-origin scripts or stylesheets without integrity hashes represent a third-party supply-chain hardening gap; inline scripts, same-origin assets, and dynamic URL hash stability were not flagged as equivalent.',
-                evidence: sanitizeEvidence(`Missing integrity attribute on ${parts.join(', ')}${dynamicNote}${urlSummary}`),
+                evidence: sanitizeEvidence(`Missing integrity attribute on ${parts.length > 0 ? parts.join(', ') : '0 current resource(s)'}${dynamicNote}${urlSummary}`),
                 recommendation: 'Add integrity hashes and crossorigin="anonymous" to static cross-origin scripts and stylesheets where feasible, or self-host third-party assets.',
                 reference: 'https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity',
                 limitations: [
-                  'Enumerates eligible cross-origin HTTP(S) <script src> and <link rel="stylesheet"> elements only (inline and same-origin assets excluded).',
+                  'Enumerates eligible cross-origin HTTP(S) <script src> and <link rel="stylesheet"> elements currently in DOM separately from historically removed dynamic elements (inline and same-origin assets excluded).',
                   'Dynamic or cache-busted third-party endpoints may not remain hash-stable across requests.',
                 ],
               });

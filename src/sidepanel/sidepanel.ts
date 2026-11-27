@@ -39,6 +39,8 @@ import type {
 } from '../shared/messaging';
 import { SIDEPANEL_PORT_NAME, DEFAULT_SETTINGS } from '../shared/constants';
 import { SettingsService } from '../shared/settings';
+import { PermissionsService, patternFromOrigin } from '../background/permissions';
+import { isModeCaptureAllowed, isRestrictedUrl } from '../shared/gating';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { bootstrapAppearance, applyAppearance } from '../shared/appearance';
 import {
@@ -130,6 +132,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const overviewGradeBadge = getEl<HTMLDivElement>('overview-grade-badge');
   const overviewScoreVal = getEl<HTMLSpanElement>('overview-score-val');
   const overviewQualityVal = getEl<HTMLSpanElement>('overview-quality-val');
+  const spCaptureBar = getEl<HTMLDivElement>('sp-capture-bar');
+  const spScanShuriken = document.getElementById('sp-scan-shuriken') as unknown as SVGSVGElement;
+  const spCaptureStatus = getEl<HTMLSpanElement>('sp-capture-status');
+  const spCaptureBtn = getEl<HTMLButtonElement>('sp-capture-btn');
+  const spReloadCaptureBtn = getEl<HTMLButtonElement>('sp-reload-capture-btn');
 
   const overviewActionIcon = getEl<HTMLSpanElement>('overview-action-icon');
   const overviewActionText = getEl<HTMLParagraphElement>('overview-action-text');
@@ -295,10 +302,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let activeTabId: number | null = null;
+  let activeTabUrl: string = '';
   let activeApexDomain: string = '';
   let activeOrigin: string = '';
   let isListView = false;
   let currentTabState: TabState | null = null;
+  let tabStateResolved = false;
+  let captureControlsSeq = 0;
+  const grantedReloadOrigins = new Set<string>();
+  const deniedCaptureOrigins = new Set<string>();
+  const seenLeadCardIds = new Set<string>();
+  const seenRadarLeadIds = new Set<string>();
+  let seenMotionOrigin = '';
 
   let currentLeads: Lead[] = [];
   let activeChains: Array<{ chain: ChainRule; matchedLeads: Lead[] }> = [];
@@ -555,6 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
         density: form.density,
         reducedMotion: form.reducedMotion,
       };
+      void updateSidepanelCaptureControls();
 
       spSettingsStatus.textContent = 'Saved';
       spSettingsStatus.hidden = false;
@@ -649,6 +665,7 @@ document.addEventListener('DOMContentLoaded', () => {
         applyAppearance(newSettings.theme, newSettings.density, newSettings.reducedMotion);
         renderOverviewView();
         renderLeadsList();
+        void updateSidepanelCaptureControls();
       }
       return;
     }
@@ -677,12 +694,252 @@ document.addEventListener('DOMContentLoaded', () => {
       currentSettings = s;
       renderOverviewView();
       renderLeadsList();
+      void updateSidepanelCaptureControls();
     })
     .catch(() => {
       // fallback to DEFAULT_SETTINGS
     });
 
   void bootstrapAppearance();
+
+  async function updateSidepanelCaptureControls(): Promise<void> {
+    const seq = ++captureControlsSeq;
+    const setShuriken = (scanning: boolean): void => {
+      spScanShuriken.toggleAttribute('hidden', !scanning);
+      spScanShuriken.setAttribute('data-scanning', scanning ? 'true' : 'false');
+    };
+
+    const targetUrl = activeTabUrl.length > 0 ? activeTabUrl : (currentTabState?.url ?? '');
+    const targetOrigin = activeOrigin;
+
+    if (targetUrl.length === 0 || isRestrictedUrl(targetUrl) || targetOrigin.length === 0) {
+      spCaptureBar.dataset['captureState'] = 'restricted';
+      setShuriken(false);
+      spCaptureStatus.textContent = 'This page cannot be inspected. Navigate to an HTTP/HTTPS website to capture headers.';
+      spCaptureBtn.hidden = true;
+      spCaptureBtn.disabled = true;
+      spReloadCaptureBtn.hidden = true;
+      return;
+    }
+
+    if (currentSettings.monitoringMode === 'off') {
+      spCaptureBar.dataset['captureState'] = 'warning';
+      setShuriken(false);
+      spCaptureStatus.textContent = 'Monitoring is Off — enable Per-site or All-sites in Settings to capture.';
+      spCaptureBtn.hidden = true;
+      spReloadCaptureBtn.hidden = true;
+      return;
+    }
+
+    let broadActive = false;
+    let completeBroad = false;
+    let exactOriginPermitted = false;
+    try {
+      broadActive = await PermissionsService.isBroadGrantPresent();
+      completeBroad = await PermissionsService.hasCompleteBroadGrant();
+      exactOriginPermitted = await PermissionsService.hasPermissionForOrigin(targetOrigin);
+    } catch {
+      // Fallback safely when permissions API unavailable
+    }
+
+    if (seq !== captureControlsSeq) return;
+
+    const gate = isModeCaptureAllowed(targetUrl, currentSettings, broadActive, undefined, completeBroad);
+    if (!gate.allowed) {
+      if (gate.reason === 'broad-access-conflict') {
+        spCaptureBar.dataset['captureState'] = 'warning';
+        setShuriken(false);
+        spCaptureStatus.textContent = 'Capture paused — broad and per-site permissions conflict.';
+        spCaptureBtn.hidden = true;
+        spReloadCaptureBtn.hidden = true;
+        return;
+      }
+      if (gate.reason === 'all-sites-missing-grant') {
+        spCaptureBar.dataset['captureState'] = 'warning';
+        setShuriken(false);
+        spCaptureStatus.textContent = 'All-sites permission missing — grant host access in Settings.';
+        spCaptureBtn.hidden = true;
+        spReloadCaptureBtn.hidden = true;
+        return;
+      }
+      if (gate.reason === 'restricted-url') {
+        spCaptureBar.dataset['captureState'] = 'restricted';
+        setShuriken(false);
+        spCaptureStatus.textContent = 'This URL cannot be inspected by browser extensions.';
+        spCaptureBtn.hidden = true;
+        spReloadCaptureBtn.hidden = true;
+        return;
+      }
+    }
+
+    if (currentSettings.monitoringMode === 'per-site' && !exactOriginPermitted) {
+      spCaptureBar.dataset['captureState'] = deniedCaptureOrigins.has(targetOrigin) ? 'denied' : 'permission-needed';
+      setShuriken(false);
+      spCaptureStatus.textContent = deniedCaptureOrigins.has(targetOrigin)
+        ? 'Permission was denied — click "Capture this site" to try again.'
+        : 'Read response headers and cookie metadata for this site.';
+      spCaptureBtn.disabled = false;
+      spCaptureBtn.hidden = false;
+      spReloadCaptureBtn.hidden = true;
+      return;
+    }
+
+    const hopsCaptured = currentTabState?.coverage?.hopsCaptured ?? 0;
+    if (hopsCaptured > 0) {
+      grantedReloadOrigins.delete(targetOrigin);
+      deniedCaptureOrigins.delete(targetOrigin);
+      spCaptureBar.dataset['captureState'] = 'capturing';
+      setShuriken(false);
+      spCaptureStatus.textContent = 'Capturing';
+      spCaptureBtn.hidden = true;
+      spReloadCaptureBtn.hidden = true;
+      return;
+    }
+
+    if (grantedReloadOrigins.has(targetOrigin) || (tabStateResolved && hopsCaptured === 0)) {
+      spCaptureBar.dataset['captureState'] = 'access-granted-reload';
+      setShuriken(false);
+      spCaptureStatus.textContent = 'Access granted — reload to capture initial response headers.';
+      spCaptureBtn.hidden = true;
+      spReloadCaptureBtn.hidden = activeTabId === null;
+      return;
+    }
+
+    spCaptureBar.dataset['captureState'] = 'scanning';
+    setShuriken(true);
+    spCaptureStatus.textContent = 'Capturing response headers & telemetry…';
+    spCaptureBtn.hidden = true;
+    spReloadCaptureBtn.hidden = true;
+  }
+
+  spCaptureBtn.addEventListener('click', () => {
+    const reqTabId = activeTabId;
+    const reqOrigin = activeOrigin;
+    const reqUrl = activeTabUrl;
+    if (reqOrigin.length === 0 || isRestrictedUrl(reqUrl)) return;
+
+    const pattern = patternFromOrigin(reqOrigin);
+    if (pattern.length === 0) return;
+
+    spCaptureBtn.disabled = true;
+    chrome.permissions.request({ origins: [pattern] }, (granted) => {
+      const apiError = chrome.runtime.lastError;
+      if (activeTabId !== reqTabId || activeOrigin !== reqOrigin) {
+        // Stale tab/navigation race guard: do not mutate new tab's UI
+        void updateSidepanelCaptureControls();
+        return;
+      }
+      if (apiError != null || granted !== true) {
+        deniedCaptureOrigins.add(reqOrigin);
+        grantedReloadOrigins.delete(reqOrigin);
+        spCaptureBtn.disabled = false;
+        void updateSidepanelCaptureControls();
+        return;
+      }
+
+      deniedCaptureOrigins.delete(reqOrigin);
+      grantedReloadOrigins.add(reqOrigin);
+      void sendToBackground({
+        type: 'PERMISSIONS_CHANGED',
+        granted: true,
+        origins: [pattern],
+      }).catch(() => undefined);
+      if (reqTabId !== null) {
+        port.postMessage({ type: 'REQUEST_STATE', tabId: reqTabId });
+      }
+      void updateSidepanelCaptureControls();
+    });
+  });
+
+  spReloadCaptureBtn.addEventListener('click', () => {
+    if (activeTabId === null) return;
+    const targetOrigin = activeOrigin;
+    chrome.tabs.reload(activeTabId, {}, () => {
+      if (chrome.runtime.lastError == null) {
+        grantedReloadOrigins.delete(targetOrigin);
+      }
+      void updateSidepanelCaptureControls();
+    });
+  });
+
+  function syncActiveBrowserTab(tab: chrome.tabs.Tab | undefined): void {
+    const targetId = tab?.id ?? null;
+    if (targetId !== activeTabId) {
+      currentTabState = null;
+    }
+    tabStateResolved = false;
+
+    if (tab !== undefined && tab.id !== undefined && tab.url !== undefined && tab.url.length > 0 &&
+        !tab.url.startsWith('chrome-extension://') && !tab.url.startsWith('moz-extension://')) {
+      const switchedTabId = tab.id;
+      activeTabId = switchedTabId;
+      activeTabUrl = tab.url;
+      try {
+        const origin = new URL(tab.url).origin;
+        activeOrigin = origin;
+        const hostname = new URL(origin).hostname;
+        activeApexDomain = registrableDomain(hostname) ?? hostname;
+      } catch {
+        activeOrigin = '';
+        activeApexDomain = '';
+      }
+      port.postMessage({ type: 'REQUEST_STATE', tabId: switchedTabId });
+      void sendToBackground({ type: 'REQUEST_STATE', tabId: switchedTabId })
+        .then((res) => {
+          if (activeTabId !== switchedTabId) return;
+          tabStateResolved = true;
+          if (res.type === 'STATE_RESPONSE') {
+            if (res.state) {
+              handleTabState(res.state);
+            } else {
+              currentTabState = null;
+              void updateSidepanelCaptureControls();
+            }
+          }
+        })
+        .catch(() => {
+          if (activeTabId === switchedTabId) {
+            tabStateResolved = true;
+            void updateSidepanelCaptureControls();
+          }
+        });
+      if (activeApexDomain.length > 0) {
+        void fetchAndRenderGraph(activeApexDomain, switchedTabId);
+      }
+      void fetchLeads();
+      void fetchAndRenderRecon();
+      renderOverviewView();
+      void updateSidepanelCaptureControls();
+    } else {
+      activeTabId = targetId;
+      activeTabUrl = tab?.url ?? '';
+      activeOrigin = '';
+      activeApexDomain = '';
+      tabStateResolved = true;
+      graphLoading.hidden = true;
+      graphEmpty.textContent = 'No inspectable tab active. Open a website to view its attack surface graph.';
+      graphEmpty.hidden = false;
+      renderOverviewView();
+      void updateSidepanelCaptureControls();
+    }
+  }
+
+  if (typeof chrome.tabs?.onActivated?.addListener === 'function') {
+    chrome.tabs.onActivated.addListener((activeInfo) => {
+      chrome.tabs.get(activeInfo.tabId, (tab) => {
+        if (chrome.runtime.lastError != null) return;
+        syncActiveBrowserTab(tab);
+      });
+    });
+  }
+
+  if (typeof chrome.tabs?.onUpdated?.addListener === 'function') {
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (tabId === activeTabId && (changeInfo.url !== undefined || changeInfo.status === 'complete')) {
+        syncActiveBrowserTab(tab);
+      }
+    });
+  }
 
   // ── Query Active Tab Initially ──────────────────────────────
   void (async () => {
@@ -698,46 +955,45 @@ document.addEventListener('DOMContentLoaded', () => {
         activeTabId = Number.isNaN(tabIdNum) ? null : tabIdNum;
         if (activeTabId !== null) {
           port.postMessage({ type: 'REQUEST_STATE', tabId: activeTabId });
+          try {
+            const paramTab = await chrome.tabs.get(activeTabId);
+            activeTabUrl = paramTab.url ?? '';
+            if (activeTabUrl.length > 0) {
+              activeOrigin = new URL(activeTabUrl).origin;
+            }
+          } catch {
+            // Ignore tab lookup fallback
+          }
         }
         void fetchAndRenderGraph(cleanApex, activeTabId);
         void fetchLeads();
         void fetchAndRenderRecon();
         renderOverviewView();
+        void updateSidepanelCaptureControls();
         return;
       }
 
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      const tab = tabs[0];
-      if (
-        tab !== undefined &&
-        tab.id !== undefined &&
-        tab.url !== undefined &&
-        tab.url.length > 0 &&
-        !tab.url.startsWith('chrome-extension://') &&
-        !tab.url.startsWith('moz-extension://')
-      ) {
-        activeTabId = tab.id;
-        port.postMessage({ type: 'REQUEST_STATE', tabId: tab.id });
-        const origin = new URL(tab.url).origin;
-        activeOrigin = origin;
-        const hostname = new URL(origin).hostname;
-        const apex = registrableDomain(hostname) ?? hostname;
-        activeApexDomain = apex;
-        void fetchAndRenderGraph(apex, tab.id);
-        void fetchLeads();
-        void fetchAndRenderRecon();
-        renderOverviewView();
-      } else {
-        graphLoading.hidden = true;
-        graphEmpty.textContent = 'No inspectable tab active. Open a website to view its attack surface graph.';
-        graphEmpty.hidden = false;
-        renderOverviewView();
+      if (paramTabId !== null && paramTabId.length > 0) {
+        const tabIdNum = parseInt(paramTabId, 10);
+        if (!Number.isNaN(tabIdNum)) {
+          try {
+            const explicitTab = await chrome.tabs.get(tabIdNum);
+            syncActiveBrowserTab(explicitTab);
+            return;
+          } catch {
+            // Fall through to active tab query
+          }
+        }
       }
+
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      syncActiveBrowserTab(tabs[0]);
     } catch {
       graphLoading.hidden = true;
       graphEmpty.textContent = 'Unable to query active tab.';
       graphEmpty.hidden = false;
       renderOverviewView();
+      void updateSidepanelCaptureControls();
     }
   })();
 
@@ -748,8 +1004,10 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const prevOrigin = lastLeadsFetchOrigin;
       const prevGen = lastLeadsFetchGen;
+      tabStateResolved = true;
       currentTabState = state;
       activeTabId = state.tabId;
+      activeTabUrl = state.url;
       activeOrigin = state.origin;
       const host = new URL(state.origin).hostname;
       const apex = registrableDomain(host) ?? host;
@@ -767,6 +1025,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderOverviewView();
       renderSubdomainTrustAndApis();
       renderCoverageLedger();
+      void updateSidepanelCaptureControls();
     } catch {
       // Ignore URL parsing errors
     }
@@ -1481,6 +1740,12 @@ document.addEventListener('DOMContentLoaded', () => {
       info: 96,
     };
 
+    if (activeOrigin !== seenMotionOrigin) {
+      seenMotionOrigin = activeOrigin;
+      seenLeadCardIds.clear();
+      seenRadarLeadIds.clear();
+    }
+
     for (const lead of leadsToPlot) {
       const baseAngleDeg = angleMap[lead.family] ?? 0;
       const baseRadius = radiusMap[lead.potential] ?? 70;
@@ -1525,6 +1790,22 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       spRadarBlips.appendChild(blip);
+
+      // One-shot radar ping ring for genuinely newly appeared lead IDs
+      if (!seenRadarLeadIds.has(lead.id)) {
+        seenRadarLeadIds.add(lead.id);
+        const ping = document.createElementNS(SVG_NS, 'circle');
+        ping.setAttribute('cx', bx.toFixed(1));
+        ping.setAttribute('cy', by.toFixed(1));
+        ping.setAttribute('r', '5');
+        ping.setAttribute('class', 'radar-blip-ping');
+        const removePing = () => {
+          ping.remove();
+        };
+        ping.addEventListener('animationend', removePing, { once: true });
+        setTimeout(removePing, 600);
+        spRadarBlips.appendChild(ping);
+      }
     }
 
     // Show empty-state when no blips match filter
@@ -1628,8 +1909,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     spLeadsEmpty.hidden = true;
 
+    let animatedCount = 0;
     filtered.forEach((lead, index) => {
       const card = renderLeadCard(lead, index);
+      if (!seenLeadCardIds.has(lead.id) && animatedCount < 8) {
+        seenLeadCardIds.add(lead.id);
+        card.classList.add('motion-smoke-enter');
+        card.style.setProperty('--smoke-delay', `${animatedCount * 24}ms`);
+        animatedCount++;
+        const cleanupCardMotion = () => card.classList.remove('motion-smoke-enter');
+        card.addEventListener('animationend', cleanupCardMotion, { once: true });
+        setTimeout(cleanupCardMotion, 450);
+      } else {
+        seenLeadCardIds.add(lead.id);
+      }
       spLeadsList.appendChild(card);
     });
   }

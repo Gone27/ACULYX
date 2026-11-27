@@ -91,30 +91,23 @@ body {
 .popup-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  min-width: 0;
 }
 
-.brand-katana-icon {
+.popup-header .header-wordmark {
+  width: 160px;
+  height: 36px;
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
   flex-shrink: 0;
 }
 
-.popup-title {
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.05em;
-  color: var(--text);
-}
-
-.popup-discipline-badge {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 2px 5px;
-  border-radius: 3px;
-  background: var(--accent-ink);
-  color: var(--accent);
-  border: 1px solid var(--border);
-  text-transform: uppercase;
+@media (max-width: 340px) {
+  .popup-header .header-wordmark {
+    width: 132px;
+    height: auto;
+  }
 }
 
 .settings-icon {

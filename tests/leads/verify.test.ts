@@ -192,6 +192,22 @@ describe('passive verdicts and scope taxonomy', () => {
     expect(v.evidenceStatus).toBe('inconclusive');
   });
 
+  it('keeps IFR-002 page-reported leads uncertain and unreviewed passively', () => {
+    const v = verifyLeadPassive(
+      makeLead({
+        ruleId: 'IFR-002',
+        family: 'F7',
+        tags: ['page-reported', 'iframe'],
+        tier: 'observed',
+        sourceSensor: 'S2',
+        potential: 'medium',
+        needs: ['Verify iframe source origin manually'],
+      }),
+    );
+    expect(v.status).toBe('uncertain');
+    expect(v.securityAssessment).toBe('unreviewed');
+  });
+
   it('labels info-level observations informational, not bugs', () => {
     const v = verifyLeadPassive(makeLead({ potential: 'info' }));
     expect(v.status).toBe('informational');

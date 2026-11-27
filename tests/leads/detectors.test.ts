@@ -90,6 +90,18 @@ describe('Detector F1: Secrets', () => {
     expect(lead?.evidence.location).not.toContain('SUPERSECRETTOKEN');
   });
 
+  it('calibrates Google API key (AIza...) to strong medium potential at 0.75 confidence', () => {
+    const gcpKey = ['AIza', 'SyD-7abcdef1234567890abcdef12345678'].join('');
+    const code = `window.__CONFIG = { mapsApiKey: "${gcpKey}" };`;
+    const leads = detectSecrets(code, 'https://example.com/app.js', 'in-scope');
+    const gcpLead = leads.find(l => l.ruleId === 'SEC-001' && l.tags.includes('gcp'));
+    expect(gcpLead).toBeDefined();
+    expect(gcpLead?.tier).toBe('strong');
+    expect(gcpLead?.potential).toBe('medium');
+    expect(gcpLead?.confidence).toBe(0.75);
+    expect(gcpLead?.title).toBe('Google API Key Format Matched (Restrictions Unverified)');
+  });
+
   it('filters out common placeholders', () => {
     const code = 'const fake = "AKIA_YOUR_KEY_HERE_123"; const dummy = "xxxx-xxxx-xxxx";';
     const leads = detectSecrets(code, 'https://example.com/test.js', 'in-scope');

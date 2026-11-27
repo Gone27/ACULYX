@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ACULYX — Recon &amp; Lead Radar</title>
   <link rel="stylesheet" href="../shared/design-tokens.css">
+  <link rel="stylesheet" href="../shared/motion.css">
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body class="view-overview">
   <!-- Header bar -->
   <header class="sidepanel-header" role="banner">
     <div class="header-main">
-      <img class="header-wordmark" src="../assets/aculyx-header-wordmark.svg" alt="ACULYX" width="140" height="32">
+      <img class="header-wordmark" src="../assets/aculyx-header-wordmark.svg" alt="ACULYX" width="160" height="36">
       <span class="tier-badge" id="tier-badge">Standard</span>
     </div>
     <div class="header-actions">
@@ -58,6 +59,20 @@
               <span class="grade-score-num" id="overview-score-val">—/100</span>
               <span class="grade-quality-subscore" id="overview-quality-val">Quality: —</span>
             </div>
+          </div>
+        </div>
+        <div class="posture-capture-bar" id="sp-capture-bar">
+          <div class="posture-capture-info">
+            <span class="capture-dot-indicator" id="sp-capture-dot" aria-hidden="true"></span>
+            <svg class="shuriken-loader" id="sp-scan-shuriken" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" hidden>
+              <path d="M12 1l2.8 7.2L22 11l-7.2 2.8L12 21l-2.8-7.2L2 11l7.2-2.8Z" fill="currentColor"/>
+              <circle cx="12" cy="11" r="2.2" fill="var(--bg, #070611)"/>
+            </svg>
+            <span class="capture-status-text" id="sp-capture-status" role="status" aria-live="polite">Checking capture permission…</span>
+          </div>
+          <div class="posture-capture-actions">
+            <button class="panel-action-btn capture-cta-btn" id="sp-capture-btn" type="button" hidden>Capture this site</button>
+            <button class="panel-action-btn capture-reload-btn" id="sp-reload-capture-btn" type="button" hidden>Reload page to start capture</button>
           </div>
         </div>
       </section>

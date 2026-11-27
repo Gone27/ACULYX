@@ -301,7 +301,18 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       // 2. Visit popup page and verify UI elements
       const popupPage = await context.newPage();
       await popupPage.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-      await expect(popupPage.locator('.popup-title')).toContainText('ACULYX');
+      const popupWordmark = popupPage.locator('.header-wordmark');
+      await expect(popupWordmark).toBeVisible();
+      await expect(popupWordmark).toHaveAttribute('alt', 'ACULYX');
+      const wordmarkMetrics = await popupWordmark.evaluate((el) => {
+        const img = el as HTMLImageElement;
+        const rect = img.getBoundingClientRect();
+        return { complete: img.complete, naturalWidth: img.naturalWidth, width: rect.width, height: rect.height };
+      });
+      expect(wordmarkMetrics.complete).toBe(true);
+      expect(wordmarkMetrics.naturalWidth).toBeGreaterThan(0);
+      expect(wordmarkMetrics.width).toBeGreaterThan(0);
+      expect(wordmarkMetrics.height).toBeGreaterThan(0);
       await expect(popupPage.locator('#settings-link')).toBeVisible();
       await expect(popupPage.locator('#open-graph-btn')).toBeAttached();
       await popupPage.close();
@@ -475,8 +486,15 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       await popupPage.waitForLoadState('domcontentloaded');
 
       // Verify header and logotype
-      const title = popupPage.locator('.popup-title');
-      await expect(title).toHaveText('ACULYX');
+      const wordmark = popupPage.locator('.header-wordmark');
+      await expect(wordmark).toBeVisible();
+      await expect(wordmark).toHaveAttribute('alt', 'ACULYX');
+      const wordmarkBox = await wordmark.boundingBox();
+      expect(wordmarkBox).not.toBeNull();
+      expect(wordmarkBox?.width ?? 0).toBeGreaterThan(0);
+      expect(wordmarkBox?.height ?? 0).toBeGreaterThan(0);
+      const naturalWidth = await wordmark.evaluate((el) => (el as HTMLImageElement).naturalWidth);
+      expect(naturalWidth).toBeGreaterThan(0);
 
       // Verify initial tab roles and aria-selected state
       const hygieneTab = popupPage.locator('#tab-btn-hygiene');

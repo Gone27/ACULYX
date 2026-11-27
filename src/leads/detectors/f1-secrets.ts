@@ -249,7 +249,7 @@ export function detectSecrets(
     }
   }
 
-  // GCP API Key
+  // GCP API Key (format match — public browser API keys are common; risk depends on API/referrer restrictions)
   const gcpMatches = code.match(/\bAIza[0-9A-Za-z\-_]{35}(?=[^0-9A-Za-z\-_]|$)/g);
   if (gcpMatches) {
     for (const match of gcpMatches) {
@@ -258,16 +258,16 @@ export function detectSecrets(
         id: nextLeadId('SEC-GCP'),
         ruleId: 'SEC-001',
         family: 'F1',
-        tier: 'observed',
-        potential: 'critical',
-        confidence: 0.95,
-        title: 'Google Cloud Platform API Key Detected',
-        needs: ['audit API key restrictions in Google Cloud Console'],
-        doesNotProve: ['unrestricted Google Cloud service access'],
+        tier: 'strong',
+        potential: 'medium',
+        confidence: 0.75,
+        title: 'Google API Key Format Matched (Restrictions Unverified)',
+        needs: ['audit HTTP referrer / API restrictions and billing quotas in Google Cloud Console'],
+        doesNotProve: ['that the key is unrestricted, privileged, or sensitive (browser Google API keys may be public-by-design)'],
         evidence: {
           preview: maskSecret(match),
           location: maskLocation(url),
-          context: 'GCP AIza API Key',
+          context: 'GCP AIza key format matched; API/referrer restrictions not verified passively',
         },
         tags: ['gcp', 'google', 'secret'],
         scopeStatus,
@@ -275,7 +275,7 @@ export function detectSecrets(
         origin,
         url,
         sourceSensor: 'S2',
-        remediation: 'Apply HTTP referrer / API restrictions and rotate the exposed GCP key.',
+        remediation: 'Verify API and HTTP referrer restrictions in Google Cloud Console; rotate only if restricted server privileges are exposed.',
       });
     }
   }

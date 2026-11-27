@@ -197,11 +197,17 @@ export function checkSubdomainTrust(
   // =========================================================================
 
   // SUB-001: Domain-wide cookie scope for sensitive session cookies
+  // Only flag cookies with explicit Domain= scope covering the registrable apex domain
+  // (domainAttributePresent === true). Host-only apex cookies (domainAttributePresent === false)
+  // and unknown scope records must never be treated as domain-wide.
   const broadCookies: string[] = [];
   for (const cookie of cookies) {
-    const d = cookie.domain;
+    if (cookie.domainAttributePresent !== true) {
+      continue;
+    }
+    const d = cookie.domain.toLowerCase();
     const normalised = d.startsWith('.') ? d.slice(1) : d;
-    if (normalised === regDomain || d === `.${regDomain}`) {
+    if (normalised === regDomain.toLowerCase()) {
       // Only flag cookies that look authentication-related or are session-shaped and server-managed.
       // Harmless client preferences (theme, language, UI flags, analytics) shared across
       // subdomains are completely standard and do not constitute an account takeover escalation path.

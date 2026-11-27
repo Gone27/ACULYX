@@ -546,23 +546,51 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       // ─── 8. Separate Reduced-Motion Behavior Verification ──────────
       await sidepanelPage.evaluate(() => {
         document.documentElement.setAttribute('data-motion', 'reduce');
+        const shuriken = document.getElementById('sp-scan-shuriken');
+        if (shuriken) shuriken.setAttribute('data-scanning', 'true');
       });
       const reducedMotionComputed = await sidepanelPage.evaluate(() => {
         const view = document.querySelector('.panel-view') as HTMLElement;
         const sweep = document.getElementById('sp-radar-sweep');
+        const shuriken = document.getElementById('sp-scan-shuriken');
+        const smokeEl = document.querySelector('.motion-smoke-enter');
         const style = window.getComputedStyle(view);
         return {
           animationName: style.animationName,
           animationDuration: style.animationDuration,
           sweepPlayState: sweep ? sweep.style.animationPlayState : 'missing',
+          shurikenAnimationName: shuriken ? window.getComputedStyle(shuriken).animationName : 'missing',
+          smokeAnimationName: smokeEl ? window.getComputedStyle(smokeEl).animationName : 'none',
         };
       });
       expect(reducedMotionComputed.animationName === 'none' || reducedMotionComputed.animationDuration === '0s').toBe(true);
       expect(reducedMotionComputed.sweepPlayState).toBe('paused');
+      expect(reducedMotionComputed.shurikenAnimationName).toBe('none');
+      expect(reducedMotionComputed.smokeAnimationName).toBe('none');
 
       await sidepanelPage.evaluate(() => {
         document.documentElement.removeAttribute('data-motion');
+        const shuriken = document.getElementById('sp-scan-shuriken');
+        if (shuriken) shuriken.removeAttribute('data-scanning');
       });
+
+      // Verify sidepanel header wordmark loaded and Capture bar rendered cleanly across viewports
+      const checkWordmarkAndCapture = async () => {
+        const wm = sidepanelPage.locator('.header-wordmark');
+        await expect(wm).toBeVisible();
+        await expect(wm).toHaveAttribute('alt', 'ACULYX');
+        const wmStats = await wm.evaluate((el) => {
+          const img = el as HTMLImageElement;
+          const rect = img.getBoundingClientRect();
+          return { complete: img.complete, naturalWidth: img.naturalWidth, width: rect.width, height: rect.height };
+        });
+        expect(wmStats.complete).toBe(true);
+        expect(wmStats.naturalWidth).toBeGreaterThan(0);
+        expect(wmStats.width).toBeGreaterThan(0);
+        expect(wmStats.height).toBeGreaterThan(0);
+        await expect(sidepanelPage.locator('#sp-capture-bar')).toBeVisible();
+      };
+      await checkWordmarkAndCapture();
 
       // ─── 9. Visual Screenshots Capture ────────────────────────────
       try {
@@ -585,6 +613,7 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
         // Screenshot 3: Narrow 320px Viewport (Dark Mode)
         await sidepanelPage.setViewportSize({ width: 320, height: 600 });
         await sidepanelPage.waitForTimeout(100);
+        await checkWordmarkAndCapture();
         await sidepanelPage.screenshot({ path: path.join(artifactsScreenshotDir, 'sidepanel-narrow-320px.png') });
 
         // Screenshot 4: Light Mode Preview

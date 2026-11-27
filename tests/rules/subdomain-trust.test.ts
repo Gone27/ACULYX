@@ -9,6 +9,7 @@ import {
   registrableDomain,
   isSubdomain,
 } from '../../src/rules/headers/subdomain-trust';
+import { runRules } from '../../src/rules/engine';
 import { isThirdPartyCookie } from '../../src/background/correlate';
 import type { Hop, CookieRecord } from '../../src/shared/types';
 
@@ -81,10 +82,10 @@ describe('Domain Parsing & Subdomain Detection', () => {
 });
 
 describe('Vector 1: Cookie Scope & Cookie Tossing', () => {
-  it('detects domain-wide cookies scoped to .example.com (SUB-001)', () => {
+  it('detects domain-wide cookies explicitly scoped to .example.com (SUB-001)', () => {
     const hop = makeHop({ url: 'https://example.com/' });
     const cookies = [
-      makeCookie({ name: 'session_id', domain: '.example.com' }),
+      makeCookie({ name: 'session_id', domain: '.example.com', domainAttributePresent: true }),
     ];
 
     const result = checkSubdomainTrust(hop, cookies);
@@ -95,6 +96,34 @@ describe('Vector 1: Cookie Scope & Cookie Tossing', () => {
 
     const v1 = result.vectors.find((v) => v.id === 'SUB-001');
     expect(v1?.present).toBe(true);
+  });
+
+  it('does NOT fire SUB-001 or raise escalation path for host-only apex cookies or unknown Domain scope', () => {
+    const hop = makeHop({
+      url: 'https://example.com/',
+      headers: {
+        'content-security-policy': "default-src 'self'",
+        'cross-origin-opener-policy': 'same-origin',
+        'origin-agent-cluster': '?1',
+        'x-frame-options': 'DENY',
+      },
+    });
+
+    // 1. Host-only apex cookie (domain: 'example.com', domainAttributePresent: false)
+    const hostOnlyResult = checkSubdomainTrust(hop, [
+      makeCookie({ name: 'session_id', domain: 'example.com', domainAttributePresent: false, httpOnly: true, session: true }),
+    ]);
+    expect(hostOnlyResult.findings.some((f) => f.ruleId === 'SUB-001')).toBe(false);
+    expect(hostOnlyResult.vectors.find((v) => v.id === 'SUB-001')?.present).toBe(false);
+    // Triggers SUB-005 (__Host- prefix), which must remain isolated from SUB-001 critical scope
+    expect(hostOnlyResult.findings.some((f) => f.ruleId === 'SUB-005')).toBe(true);
+
+    // 2. Unknown Domain attribute (domainAttributePresent: null) must fail closed against critical SUB-001
+    const unknownScopeResult = checkSubdomainTrust(hop, [
+      makeCookie({ name: '__Host-session', domain: 'example.com', domainAttributePresent: null, httpOnly: true, session: true }),
+    ]);
+    expect(unknownScopeResult.findings.some((f) => f.ruleId === 'SUB-001')).toBe(false);
+    expect(unknownScopeResult.hasEscalationPath).toBe(false);
   });
 
   it('flags sensitive cookies lacking __Host- prefix for cookie tossing (SUB-005)', () => {
@@ -260,5 +289,41 @@ describe('Subdomain Isolation Certification (SUB-008)', () => {
 
     const vIsolated = result.vectors.find((v) => v.id === 'SUB-008');
     expect(vIsolated?.present).toBe(false);
+  });
+});
+
+describe('SUB-001 grade-impact regression', () => {
+  it('does not degrade grade for host-only apex cookies vs explicit Domain=.example.com', () => {
+    const strongHeaders: Record<string, string> = {
+      'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+      'content-security-policy': "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'cross-origin-opener-policy': 'same-origin',
+      'cross-origin-embedder-policy': 'require-corp',
+      'cross-origin-resource-policy': 'same-origin',
+      'permissions-policy': 'camera=(), microphone=()',
+      'origin-agent-cluster': '?1',
+    };
+    const hop = makeHop({ url: 'https://example.com/', headers: strongHeaders });
+    const hostOnlyApex = makeCookie({
+      name: 'SID',
+      domain: 'example.com',
+      domainAttributePresent: false,
+    });
+    const explicitWildcard = makeCookie({
+      name: 'SID',
+      domain: '.example.com',
+      domainAttributePresent: true,
+    });
+
+    const hostOnlyResult = runRules({ hops: [hop], cookies: [hostOnlyApex], origin: 'https://example.com' });
+    const wildcardResult = runRules({ hops: [hop], cookies: [explicitWildcard], origin: 'https://example.com' });
+
+    expect(hostOnlyResult.findings.some((f) => f.ruleId === 'SUB-001')).toBe(false);
+    expect(hostOnlyResult.grade).toBe('A');
+    expect(wildcardResult.findings.some((f) => f.ruleId === 'SUB-001')).toBe(true);
+    expect(wildcardResult.score).toBeLessThan(hostOnlyResult.score);
   });
 });

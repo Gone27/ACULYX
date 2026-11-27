@@ -10,6 +10,7 @@ interface SriMessage {
   missingScriptUrls?: string[];
   missingStyleUrls?: string[];
   dynamicMissingCount?: number;
+  historicalRemovedMissingCount?: number;
 }
 
 describe('Cross-origin SRI signal enumeration and DOM mutation handling', () => {
@@ -79,8 +80,11 @@ describe('Cross-origin SRI signal enumeration and DOM mutation handling', () => 
       { tagName: 'SCRIPT', src: 'blob:https://app.example.com/1234', integrity: '', querySelector: () => null },
       // Cross-origin WITH integrity -> counted in externalScripts, NOT missing
       { tagName: 'SCRIPT', src: 'https://cdn.trusted.net/lib.js?cache=123', integrity: 'sha384-abc123', querySelector: () => null },
-      // Cross-origin WITHOUT integrity -> MUST be flagged with sanitized origin+pathname URL
-      { tagName: 'SCRIPT', src: 'https://cdn.thirdparty.net/sdk.js?token=secretQuery', integrity: '', querySelector: () => null },
+      // Cross-origin WITHOUT integrity -> MUST be flagged with sanitized non-sensitive query params preserved
+      { tagName: 'SCRIPT', src: 'https://cdn.thirdparty.net/sdk.js?v=1&token=secretQuery', integrity: '', querySelector: () => null },
+      { tagName: 'SCRIPT', src: 'https://cdn.thirdparty.net/sdk.js?v=2', integrity: '', querySelector: () => null },
+      // Duplicate exact URL deduplicated
+      { tagName: 'SCRIPT', src: 'https://cdn.thirdparty.net/sdk.js?v=2', integrity: '', querySelector: () => null },
     );
 
     links.push(
@@ -94,17 +98,21 @@ describe('Cross-origin SRI signal enumeration and DOM mutation handling', () => 
 
     const sriMsg = sentMessages.find((m) => m.type === 'SRI_SCAN');
     expect(sriMsg).toBeDefined();
-    expect(sriMsg?.externalScripts).toBe(2);
-    expect(sriMsg?.missingIntegrity).toBe(1);
-    expect(sriMsg?.missingScriptUrls).toEqual(['https://cdn.thirdparty.net/sdk.js']);
+    expect(sriMsg?.externalScripts).toBe(3);
+    expect(sriMsg?.missingIntegrity).toBe(2);
+    expect(sriMsg?.missingScriptUrls).toEqual([
+      'https://cdn.thirdparty.net/sdk.js?v=1&token=%5BREDACTED%5D',
+      'https://cdn.thirdparty.net/sdk.js?v=2',
+    ]);
     expect(sriMsg?.externalStylesheets).toBe(1);
     expect(sriMsg?.missingStyleIntegrity).toBe(1);
-    expect(sriMsg?.missingStyleUrls).toEqual(['https://fonts.cdn.net/css2.css']);
+    expect(sriMsg?.missingStyleUrls).toEqual(['https://fonts.cdn.net/css2.css?family=Inter']);
     expect(sriMsg?.dynamicMissingCount).toBe(0);
+    expect(sriMsg?.historicalRemovedMissingCount).toBe(0);
     expect(JSON.stringify(sriMsg)).not.toContain('secretQuery');
   });
 
-  it('tracks dynamically injected cross-origin scripts separately and updates when integrity is set via DOM mutation', async () => {
+  it('tracks dynamically injected cross-origin scripts separately, handles removal, and updates when integrity is set', async () => {
     scripts.push({
       tagName: 'SCRIPT',
       src: 'https://static.vendor.net/analytics.js',
@@ -137,6 +145,7 @@ describe('Cross-origin SRI signal enumeration and DOM mutation handling', () => 
     const afterAdd = sentMessages.filter((m) => m.type === 'SRI_SCAN').at(-1);
     expect(afterAdd?.missingIntegrity).toBe(2);
     expect(afterAdd?.dynamicMissingCount).toBe(1);
+    expect(afterAdd?.historicalRemovedMissingCount).toBe(0);
     expect(afterAdd?.missingScriptUrls).toEqual([
       'https://static.vendor.net/analytics.js',
       'https://widgets.vendor.net/loader.js',
@@ -150,5 +159,17 @@ describe('Cross-origin SRI signal enumeration and DOM mutation handling', () => 
     const afterIntegrityAdded = sentMessages.filter((m) => m.type === 'SRI_SCAN').at(-1);
     expect(afterIntegrityAdded?.missingIntegrity).toBe(1);
     expect(afterIntegrityAdded?.dynamicMissingCount).toBe(0);
+
+    // Dynamically add and then remove another script -> current DOM count drops, historical removed count tracks it separately
+    scripts.push({ tagName: 'SCRIPT', src: 'https://ephemeral.vendor.net/pixel.js', integrity: '', querySelector: () => null });
+    sriObserverCb?.([{ type: 'childList', addedNodes: [{ nodeType: 1, tagName: 'SCRIPT', querySelector: () => null }] }]);
+    await Promise.resolve();
+    scripts.pop();
+    sriObserverCb?.([{ type: 'attributes', addedNodes: [] }]);
+    await Promise.resolve();
+
+    const afterRemoval = sentMessages.filter((m) => m.type === 'SRI_SCAN').at(-1);
+    expect(afterRemoval?.missingIntegrity).toBe(1);
+    expect(afterRemoval?.historicalRemovedMissingCount).toBe(1);
   });
 });

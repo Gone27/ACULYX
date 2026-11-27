@@ -70,15 +70,14 @@ export function reportPageSignals(generation?: number): void {
   }
 
   // ── SRI scan ──────────────────────────────────────────────────────────────
-  // Track eligible cross-origin HTTP(S) external resources across page lifetime.
-  // Excludes inline <script>, same-origin assets, and data:/blob: URLs.
-  interface SriResourceEntry {
-    hasIntegrity: boolean;
-    isDynamic: boolean;
-  }
+  // Track current settled DOM cross-origin HTTP(S) resources separately from
+  // historically observed dynamic resources later removed from the DOM.
+  // Deduplicates exact URLs (preserving non-sensitive query versions).
   const MAX_REPORTED_SRI_URLS = 20;
-  const externalScriptMap = new Map<string, SriResourceEntry>(); // origin+pathname -> status
-  const externalStylesheetMap = new Map<string, SriResourceEntry>(); // origin+pathname -> status
+  const MAX_SRI_URL_LEN = 256;
+  const initialUrlsSeen = new Set<string>();
+  const historicalUrlsMissing = new Set<string>();
+  let initializedBaseline = false;
 
   function toEligibleCrossOriginUrl(rawRef: string): string | null {
     try {
@@ -89,74 +88,105 @@ export function reportPageSignals(generation?: number): void {
       if (parsed.origin === location.origin) {
         return null;
       }
-      return `${parsed.origin}${parsed.pathname}`;
+      const sensitiveQueryRe = /^(?:token|access_token|auth|key|apikey|api_key|secret|sig|signature|password|session|sid)$/i;
+      const cleanParams = new URLSearchParams();
+      for (const [k, v] of parsed.searchParams.entries()) {
+        cleanParams.append(k, sensitiveQueryRe.test(k) ? '[REDACTED]' : v);
+      }
+      const query = cleanParams.toString();
+      const normalized = `${parsed.origin}${parsed.pathname}${query.length > 0 ? `?${query}` : ''}`;
+      return normalized.slice(0, MAX_SRI_URL_LEN);
     } catch {
       return null;
     }
   }
 
   function doReportSri(isMutationPass: boolean): void {
+    const currentScripts = new Map<string, boolean>();
     const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'));
     for (const script of scripts) {
       const eligibleUrl = toEligibleCrossOriginUrl(script.src);
       if (eligibleUrl === null) continue;
       const hasIntegrity = script.integrity.trim().length > 0;
-      const prev = externalScriptMap.get(eligibleUrl);
-      externalScriptMap.set(eligibleUrl, {
-        hasIntegrity,
-        isDynamic: prev !== undefined ? prev.isDynamic : isMutationPass,
-      });
+      const prev = currentScripts.get(eligibleUrl);
+      // If multiple tags reference exact URL, mark safe only if all have integrity
+      currentScripts.set(eligibleUrl, prev === undefined ? hasIntegrity : (prev && hasIntegrity));
+      if (!initializedBaseline && !isMutationPass) {
+        initialUrlsSeen.add(`script:${eligibleUrl}`);
+      }
     }
 
+    const currentStyles = new Map<string, boolean>();
     const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'));
     for (const link of links) {
       const eligibleUrl = toEligibleCrossOriginUrl(link.href);
       if (eligibleUrl === null) continue;
       const hasIntegrity = link.integrity.trim().length > 0;
-      const prev = externalStylesheetMap.get(eligibleUrl);
-      externalStylesheetMap.set(eligibleUrl, {
-        hasIntegrity,
-        isDynamic: prev !== undefined ? prev.isDynamic : isMutationPass,
-      });
+      const prev = currentStyles.get(eligibleUrl);
+      currentStyles.set(eligibleUrl, prev === undefined ? hasIntegrity : (prev && hasIntegrity));
+      if (!initializedBaseline && !isMutationPass) {
+        initialUrlsSeen.add(`style:${eligibleUrl}`);
+      }
     }
+    initializedBaseline = true;
 
-    const totalExternalScripts = externalScriptMap.size;
     const missingScriptUrls: string[] = [];
+    let currentMissingScripts = 0;
     let dynamicMissingCount = 0;
-    for (const [url, entry] of externalScriptMap.entries()) {
-      if (!entry.hasIntegrity) {
+    for (const [url, hasIntegrity] of currentScripts.entries()) {
+      if (!hasIntegrity) {
+        currentMissingScripts++;
         if (missingScriptUrls.length < MAX_REPORTED_SRI_URLS) {
           missingScriptUrls.push(url);
         }
-        if (entry.isDynamic) dynamicMissingCount++;
+        if (!initialUrlsSeen.has(`script:${url}`)) {
+          dynamicMissingCount++;
+        }
+        historicalUrlsMissing.add(`script:${url}`);
       }
     }
 
-    const totalExternalStylesheets = externalStylesheetMap.size;
     const missingStyleUrls: string[] = [];
-    for (const [url, entry] of externalStylesheetMap.entries()) {
-      if (!entry.hasIntegrity) {
+    let currentMissingStyles = 0;
+    for (const [url, hasIntegrity] of currentStyles.entries()) {
+      if (!hasIntegrity) {
+        currentMissingStyles++;
         if (missingStyleUrls.length < MAX_REPORTED_SRI_URLS) {
           missingStyleUrls.push(url);
         }
-        if (entry.isDynamic) dynamicMissingCount++;
+        if (!initialUrlsSeen.has(`style:${url}`)) {
+          dynamicMissingCount++;
+        }
+        historicalUrlsMissing.add(`style:${url}`);
       }
     }
 
-    const missingScriptIntegrity = Array.from(externalScriptMap.values()).filter((e) => !e.hasIntegrity).length;
-    const missingStyleIntegrity = Array.from(externalStylesheetMap.values()).filter((e) => !e.hasIntegrity).length;
+    let historicalRemovedMissingCount = 0;
+    for (const histKey of historicalUrlsMissing) {
+      if (histKey.startsWith('script:')) {
+        const u = histKey.slice('script:'.length);
+        if (!currentScripts.has(u)) historicalRemovedMissingCount++;
+      } else if (histKey.startsWith('style:')) {
+        const u = histKey.slice('style:'.length);
+        if (!currentStyles.has(u)) historicalRemovedMissingCount++;
+      }
+    }
+
+    const totalExternalScripts = currentScripts.size;
+    const totalExternalStylesheets = currentStyles.size;
 
     void chrome.runtime.sendMessage({
       type: 'SRI_SCAN',
       externalScripts: totalExternalScripts,
-      missingIntegrity: missingScriptIntegrity,
+      missingIntegrity: currentMissingScripts,
       externalStylesheets: totalExternalStylesheets,
-      missingStyleIntegrity,
+      missingStyleIntegrity: currentMissingStyles,
       missingScriptUrls,
       missingStyleUrls,
       dynamicMissingCount,
+      historicalRemovedMissingCount,
       generation,
-      eventId: `sri:${generation ?? 0}:${totalExternalScripts}:${missingScriptIntegrity}:${totalExternalStylesheets}:${missingStyleIntegrity}:${dynamicMissingCount}`,
+      eventId: `sri:${generation ?? 0}:${totalExternalScripts}:${currentMissingScripts}:${totalExternalStylesheets}:${currentMissingStyles}:${dynamicMissingCount}:${historicalRemovedMissingCount}:${missingScriptUrls.join(',')}|${missingStyleUrls.join(',')}`,
     }).catch(() => undefined);
   }
 

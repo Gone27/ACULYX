@@ -40,6 +40,8 @@ let qualityScoreText:    HTMLDivElement;
 let originText:          HTMLDivElement;
 let coverageBar:         HTMLDivElement;
 let stateMessage:        HTMLDivElement;
+let stateMessageText:    HTMLSpanElement;
+let popupScanShuriken:   SVGSVGElement;
 let specialNotice:       HTMLDivElement;
 let monitorSection:      HTMLDivElement;
 let monitorBtn:          HTMLButtonElement;
@@ -49,6 +51,12 @@ let findingsCountBadge:  HTMLSpanElement;
 let findingsList:        HTMLUListElement;
 let openGraphBtn:        HTMLButtonElement;
 let settingsLink:        HTMLAnchorElement;
+
+/** Tracks last animated grade key (`origin|grade`) so refresh updates never replay reveal motion. */
+let lastAnimatedGradeKey = '';
+let gradeRevealTimer: ReturnType<typeof setTimeout> | null = null;
+let seenFindingOrigin = '';
+const seenFindingKeys = new Set<string>();
 
 /** The tab ID currently being inspected by the popup. */
 let currentTabId: number | null = null;
@@ -96,6 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
   originText          = getEl<HTMLDivElement>('origin-text');
   coverageBar         = getEl<HTMLDivElement>('coverage-bar');
   stateMessage        = getEl<HTMLDivElement>('state-message');
+  stateMessageText    = getEl<HTMLSpanElement>('state-message-text');
+  popupScanShuriken   = document.getElementById('popup-scan-shuriken') as unknown as SVGSVGElement;
   specialNotice       = getEl<HTMLDivElement>('special-notice');
   monitorSection      = getEl<HTMLDivElement>('monitor-section');
   monitorBtn          = getEl<HTMLButtonElement>('monitor-btn');
@@ -301,10 +311,36 @@ function renderState(state: TabState): void {
     gradeBadge.className = 'grade-badge grade-unknown';
     scoreText.textContent = 'Score: No data';
     qualityScoreText.textContent = '';
+    gradeBadge.classList.remove('motion-grade-reveal');
+    popupScanShuriken.toggleAttribute('hidden', false);
+    popupScanShuriken.setAttribute('data-scanning', 'true');
   } else {
     setPopupState('results');
     setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
     gradeBadge.className = 'grade-badge grade-' + (state.grade?.toLowerCase() ?? 'unknown');
+    popupScanShuriken.toggleAttribute('hidden', true);
+    popupScanShuriken.setAttribute('data-scanning', 'false');
+
+    const nextGradeKey = `${state.origin}|${state.grade}`;
+    if (nextGradeKey !== lastAnimatedGradeKey) {
+      lastAnimatedGradeKey = nextGradeKey;
+      if (gradeRevealTimer !== null) {
+        clearTimeout(gradeRevealTimer);
+      }
+      gradeBadge.classList.remove('motion-grade-reveal');
+      // Force reflow so genuine grade transition triggers once cleanly
+      void gradeBadge.offsetWidth;
+      gradeBadge.classList.add('motion-grade-reveal');
+      const clearReveal = () => {
+        gradeBadge.classList.remove('motion-grade-reveal');
+        if (gradeRevealTimer !== null) {
+          clearTimeout(gradeRevealTimer);
+          gradeRevealTimer = null;
+        }
+      };
+      gradeBadge.addEventListener('animationend', clearReveal, { once: true });
+      gradeRevealTimer = setTimeout(clearReveal, 450);
+    }
 
     scoreText.textContent = `Score: ${state.score}/100`;
     qualityScoreText.textContent = `Quality: ${state.qualityScore ?? 100}/100 (${state.qualityGrade ?? 'A'})`;
@@ -394,10 +430,29 @@ function renderFindingsTeaser(findings: Finding[]): void {
 
   findingsSection.hidden = false;
 
+  if (currentOrigin !== seenFindingOrigin) {
+    seenFindingOrigin = currentOrigin;
+    seenFindingKeys.clear();
+  }
+
+  let animatedCount = 0;
   for (const finding of top3) {
     const li = document.createElement('li');
     li.className = `finding-item severity-${finding.severity}`;
     li.dataset['severity'] = finding.severity;
+
+    const fKey = `${finding.ruleId}:${finding.evidence}`;
+    if (!seenFindingKeys.has(fKey) && animatedCount < 8) {
+      seenFindingKeys.add(fKey);
+      li.classList.add('motion-smoke-enter');
+      li.style.setProperty('--smoke-delay', `${animatedCount * 24}ms`);
+      animatedCount++;
+      const cleanupSmoke = () => li.classList.remove('motion-smoke-enter');
+      li.addEventListener('animationend', cleanupSmoke, { once: true });
+      setTimeout(cleanupSmoke, 450);
+    } else {
+      seenFindingKeys.add(fKey);
+    }
 
     const headerRow = document.createElement('div');
     headerRow.className = 'finding-header-row';
@@ -547,12 +602,15 @@ function showStateMessage(
   msg: string,
   mode: 'loading' | 'waiting' | 'permission' | 'restricted' | 'error' = 'waiting',
 ): void {
-  if (mode === 'loading' || mode === 'waiting') {
+  const isScanning = mode === 'loading' || mode === 'waiting';
+  if (isScanning) {
     setBadgeState('scanning', undefined, 'Checking this page');
   } else if (mode === 'permission' || mode === 'restricted' || mode === 'error') {
     setBadgeState('locked', undefined, mode === 'permission' ? 'Site access locked' : 'Page not available for analysis');
   }
-  stateMessage.textContent = msg;
+  popupScanShuriken.toggleAttribute('hidden', !isScanning);
+  popupScanShuriken.setAttribute('data-scanning', isScanning ? 'true' : 'false');
+  stateMessageText.textContent = msg;
   stateMessage.className = `state-message state-${mode}`;
 }
 
@@ -573,7 +631,9 @@ function setBadgeState(
 }
 
 function clearStateMessage(): void {
-  stateMessage.textContent = '';
+  popupScanShuriken.toggleAttribute('hidden', true);
+  popupScanShuriken.setAttribute('data-scanning', 'false');
+  stateMessageText.textContent = '';
   stateMessage.className = 'state-message';
 }
 
