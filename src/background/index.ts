@@ -18,7 +18,7 @@
 import { tabStates, initLifecycle, hydrateFromSession, originAuthBaselines } from './lifecycle';
 import { registerCaptureListeners, captureMap, clearInFlightCaptures, inFlightRequests, incognitoTabIds, registerParamHarvester } from './capture';
 import { CapturePolicy, canCollectForTab } from './capture-policy';
-import { correlateCookies } from './correlate';
+import { correlateCookies, resetInFlightCorrelationsForTesting } from './correlate';
 import { registerPageSignalInjection } from './page-signals';
 import {
   handleParamHarvest,
@@ -48,6 +48,7 @@ import type { ScopeProfile } from '../shared/scope/contracts';
 import {
   extractSetCookieHeaders,
   originFromUrl,
+  sanitizeEvidence,
   sanitizeUrlForStorage,
   sanitizeCspPolicyForStorage,
 } from '../rules/utils';
@@ -910,6 +911,7 @@ export async function onHopComplete(
       gen,
       (t, g) => getTabGeneration(t) === g,
       hop.requestId,
+      hop.url,
     );
     if (currentResetEpoch !== actionEpoch || CapturePolicy.getSnapshot().mode === 'off') return;
     if (correlation.discarded === true) return;
@@ -1134,6 +1136,14 @@ chrome.cookies.onChanged.addListener(
           const liveStateAfter = tabStates.get(tabId);
           if (!liveStateAfter || liveStateAfter !== state) return;
           liveStateAfter.cookies = correlation.records;
+          const visibleCookieNames = new Set(correlation.records.map((r) => r.name));
+          if (liveStateAfter.captureFindings !== undefined) {
+            liveStateAfter.captureFindings = liveStateAfter.captureFindings.filter((finding) => {
+              if (finding.ruleId !== 'COOKIE-REJECTED') return true;
+              const match = /^Cookie name: ([^;]+)/.exec(finding.evidence);
+              return match === null || !visibleCookieNames.has(match[1] ?? '');
+            });
+          }
 
           recomputeTabState(tabId, liveStateAfter, actionEpoch);
         } catch {
@@ -1315,6 +1325,7 @@ export async function executeResetAllData(): Promise<void> {
   captureMap.clear();
   inFlightRequests.clear();
   incognitoTabIds.clear();
+  resetInFlightCorrelationsForTesting();
   clearTabGenerations();
 
   // Clear Lead Radar in-memory caches and persistent session/local stores
@@ -1593,7 +1604,10 @@ chrome.runtime.onMessage.addListener(
         const missingScripts = message.missingIntegrity ?? 0;
         const missingStyles = message.missingStyleIntegrity ?? 0;
         const totalMissing = missingScripts + missingStyles;
-        const eventId = message.eventId ?? `sri:${senderTabId}:${gen}:${missingScripts}:${missingStyles}:${message.externalScripts ?? 0}:${message.externalStylesheets ?? 0}`;
+        const dynamicMissingCount = message.dynamicMissingCount ?? 0;
+        const scriptUrls = (message.missingScriptUrls ?? []).slice(0, 5);
+        const styleUrls = (message.missingStyleUrls ?? []).slice(0, 5);
+        const eventId = message.eventId ?? `sri:${senderTabId}:${gen}:${missingScripts}:${missingStyles}:${message.externalScripts ?? 0}:${message.externalStylesheets ?? 0}:${dynamicMissingCount}`;
         if (isDuplicateEvent(eventId)) {
           return false;
         }
@@ -1616,14 +1630,26 @@ chrome.runtime.onMessage.addListener(
               const parts: string[] = [];
               if (missingScripts > 0) parts.push(`${missingScripts}/${message.externalScripts ?? 0} script(s)`);
               if (missingStyles > 0) parts.push(`${missingStyles}/${message.externalStylesheets ?? 0} stylesheet(s)`);
+              const listedUrls = [...scriptUrls, ...styleUrls].slice(0, 5);
+              const urlSummary = listedUrls.length > 0
+                ? `; URLs: ${listedUrls.join(', ')}${totalMissing > listedUrls.length ? ` (+${totalMissing - listedUrls.length} more)` : ''}`
+                : '';
+              const dynamicNote = dynamicMissingCount > 0
+                ? ` (${dynamicMissingCount} injected dynamically)`
+                : '';
 
               state.captureFindings.push({
                 ruleId: 'SRI-001', category: 'header', severity: 'medium',
-                title: `${totalMissing} external resource(s) lack Subresource Integrity attributes`,
-                impact: 'External scripts or stylesheets without integrity hashes represent a third-party supply-chain hardening gap; asset eligibility and dynamic URL stability were not verified.',
-                evidence: `Missing integrity attribute on: ${parts.join(', ')}`,
-                recommendation: 'Add integrity hashes and crossorigin="anonymous" to static external scripts and stylesheets where feasible, or self-host third-party assets.',
+                provenance: 'dom-signal',
+                title: `${totalMissing} cross-origin external resource(s) lack Subresource Integrity attributes`,
+                impact: 'External cross-origin scripts or stylesheets without integrity hashes represent a third-party supply-chain hardening gap; inline scripts, same-origin assets, and dynamic URL hash stability were not flagged as equivalent.',
+                evidence: sanitizeEvidence(`Missing integrity attribute on ${parts.join(', ')}${dynamicNote}${urlSummary}`),
+                recommendation: 'Add integrity hashes and crossorigin="anonymous" to static cross-origin scripts and stylesheets where feasible, or self-host third-party assets.',
                 reference: 'https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity',
+                limitations: [
+                  'Enumerates eligible cross-origin HTTP(S) <script src> and <link rel="stylesheet"> elements only (inline and same-origin assets excluded).',
+                  'Dynamic or cache-busted third-party endpoints may not remain hash-stable across requests.',
+                ],
               });
             }
             recomputeTabState(senderTabId, state, actionEpoch);

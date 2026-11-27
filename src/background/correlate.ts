@@ -175,6 +175,7 @@ export function findUnobservedCookieFindings(
   cookies: Array<{ name: string; path: string; domain: string }>,
   tabUrl: string,
   hopUrl?: string,
+  inaccessibleParentDomains?: ReadonlySet<string>,
 ): Finding[] {
   const boundedSetCookies = setCookieHeaders.slice(0, MAX_SET_COOKIES);
   const metadata = boundedSetCookies.map(parseCookieHeaderMetadata);
@@ -240,6 +241,23 @@ export function findUnobservedCookieFindings(
         reasons.push(`the cookie Path (${cookie.path}) does not include the current page path`);
         if (!likelyRejected) return [];
       }
+
+      // Chrome's cookies.getAll({ url: 'https://www.example.com/' }) withholds parent-domain
+      // cookies (e.g. Domain=.example.com) unless the extension also holds permission for
+      // example.com/*. When no protocol rejection attribute is violated, do not report permission-
+      // withheld parent-domain cookies as browser-rejected.
+      if (!likelyRejected && cookie.domain !== null && cookie.domain.length > 0) {
+        const domainLower = cookie.domain.toLowerCase();
+        if (
+          inaccessibleParentDomains !== undefined &&
+          inaccessibleParentDomains.has(domainLower) &&
+          domainMatchesResponseHost &&
+          responseHostname.toLowerCase() !== domainLower
+        ) {
+          return [];
+        }
+      }
+
       if (reasons.length === 0) {
         reasons.push('browser privacy policy, third-party cookie blocking, expiry, or asynchronous cookie-store commit timing may apply');
       }
@@ -334,6 +352,36 @@ const inFlightCorrelations = new Map<
   Promise<{ records: CookieRecord[]; findings: Finding[]; discarded?: boolean }>
 >();
 const MAX_IN_FLIGHT_CORRELATIONS = 50;
+const rememberedCookieSetters = new Map<string, string>();
+const MAX_REMEMBERED_SETTERS = 500;
+
+function sanitizeSetterUrl(rawUrl?: string): string | undefined {
+  if (rawUrl === undefined || rawUrl.length === 0) return undefined;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function cookieSetterKey(domain: string, cookiePath: string, name: string): string {
+  const normDomain = domain.replace(/^\./, '').toLowerCase();
+  const normPath = cookiePath.length > 0 ? cookiePath : '/';
+  return `${normDomain}|${normPath}|${name}`;
+}
+
+function rememberCookieSetter(domain: string, cookiePath: string, name: string, setterUrl: string): void {
+  const key = cookieSetterKey(domain, cookiePath, name);
+  if (rememberedCookieSetters.has(key)) {
+    rememberedCookieSetters.delete(key);
+  } else if (rememberedCookieSetters.size >= MAX_REMEMBERED_SETTERS) {
+    const oldestKey = rememberedCookieSetters.keys().next().value;
+    if (oldestKey !== undefined) rememberedCookieSetters.delete(oldestKey);
+  }
+  rememberedCookieSetters.set(key, setterUrl);
+}
 
 /**
  * Fetches all cookies accessible for `tabUrl` from the live cookie store and
@@ -353,6 +401,57 @@ const MAX_IN_FLIGHT_CORRELATIONS = 50;
  * @param isCurrentGeneration - Optional callback verifying whether generation is still current.
  * @returns                   Array of {@link CookieRecord} metadata objects and findings.
  */
+async function checkOriginPermission(originPattern: string): Promise<boolean> {
+  if (typeof chrome === 'undefined') return true;
+  const permsApi = (chrome as { permissions?: typeof chrome.permissions }).permissions;
+  if (permsApi === undefined || typeof permsApi.contains !== 'function') {
+    return true;
+  }
+  return await new Promise<boolean>((resolve) => {
+    try {
+      const maybePromise: unknown = permsApi.contains({ origins: [originPattern] }, (granted: boolean) => {
+        resolve(granted === true);
+      });
+      if (
+        typeof maybePromise === 'object' &&
+        maybePromise !== null &&
+        'then' in maybePromise &&
+        typeof (maybePromise as Promise<boolean>).then === 'function'
+      ) {
+        void (maybePromise as Promise<boolean>).then((granted) => resolve(granted === true), () => resolve(true));
+      }
+    } catch {
+      resolve(true);
+    }
+  });
+}
+
+async function collectInaccessibleParentDomains(
+  headerMetadata: ParsedCookieMeta[],
+  responseUrl: URL | null,
+): Promise<Set<string>> {
+  const inaccessible = new Set<string>();
+  if (responseUrl === null) return inaccessible;
+  const responseHost = responseUrl.hostname.toLowerCase();
+  const checked = new Set<string>();
+
+  for (const meta of headerMetadata) {
+    if (meta.domain === null || meta.domain.length === 0) continue;
+    const domainLower = meta.domain.toLowerCase();
+    if (domainLower === responseHost || !responseHost.endsWith(`.${domainLower}`)) continue;
+    if (checked.has(domainLower)) continue;
+    checked.add(domainLower);
+
+    const exactPerm = await checkOriginPermission(`${responseUrl.protocol}//${domainLower}/*`);
+    if (exactPerm) continue;
+    const wildcardPerm = await checkOriginPermission(`${responseUrl.protocol}//*.${domainLower}/*`);
+    if (!wildcardPerm) {
+      inaccessible.add(domainLower);
+    }
+  }
+  return inaccessible;
+}
+
 async function waitForBoundedCookieSettle(
   missingNames: Set<string>,
   settleDelayMs: number,
@@ -452,6 +551,16 @@ export async function correlateCookies(
       return { records: [], findings: [], discarded: true };
     }
 
+    const parsedResponseUrl = (() => {
+      const rawTarget = hopUrl !== undefined && hopUrl.length > 0 ? hopUrl : tabUrl;
+      try {
+        return new URL(rawTarget);
+      } catch {
+        return null;
+      }
+    })();
+    const inaccessibleParentDomains = await collectInaccessibleParentDomains(headerMetadata, parsedResponseUrl);
+
     // 2b. Bounded delayed confirmation when Set-Cookie candidates are initially missing
     //     from chrome.cookies.getAll() (Chrome commits cookies to storage asynchronously).
     const initialUnobserved = findUnobservedCookieFindings(
@@ -459,6 +568,7 @@ export async function correlateCookies(
       urlScopedCookies,
       tabUrl,
       hopUrl,
+      inaccessibleParentDomains,
     );
     const settleDelayMs = options?.settleDelayMs ?? COOKIE_SETTLE_DELAY_MS;
     if (initialUnobserved.length > 0 && settleDelayMs > 0) {
@@ -466,7 +576,10 @@ export async function correlateCookies(
       const visibleSet = new Set(urlScopedCookies.map((c) => c.name));
       for (const meta of headerMetadata) {
         if (meta.name.length > 0 && !meta.isDeletion && !visibleSet.has(meta.name)) {
-          missingNames.add(meta.name);
+          const domLower = meta.domain?.toLowerCase();
+          if (domLower === undefined || !inaccessibleParentDomains.has(domLower)) {
+            missingNames.add(meta.name);
+          }
         }
       }
       if (missingNames.size > 0) {
@@ -516,21 +629,32 @@ export async function correlateCookies(
     // 4. Map each chrome.cookies.Cookie to a CookieRecord (bounded).
     //    We deliberately skip cookie.value everywhere.
     // ------------------------------------------------------------------
+    const currentResponseSetterUrl = sanitizeSetterUrl(hopUrl ?? tabUrl);
     const boundedLiveCookies = urlScopedCookies.slice(0, MAX_COOKIE_RECORDS);
     const records: CookieRecord[] = boundedLiveCookies.map(
       (cookie: chrome.cookies.Cookie): CookieRecord => {
-        const setByJs: boolean | null = headerSetNames.has(cookie.name)
-          ? false
-          : null;
         const matchingHeaders = headerMetadata.filter((item) => item.name === cookie.name);
         const matchingPath = matchingHeaders.find((item) => item.path === cookie.path);
         const headerMatch = matchingPath ?? (matchingHeaders.length === 1 ? matchingHeaders[0] : undefined);
+        const matchedOnCurrentResponse = headerMatch !== undefined || headerSetNames.has(cookie.name);
+        const setByJs: boolean | null = matchedOnCurrentResponse ? false : null;
 
         // Derive target domain: header Domain attribute if present, else cookie.domain from jar
         const targetDomain = (headerMatch?.domainAttributePresent === true && headerMatch.domain !== null && headerMatch.domain.length > 0)
           ? headerMatch.domain
           : cookie.domain;
         const thirdParty = isThirdPartyCookie(pageHostname, targetDomain);
+
+        let setterUrl: string | undefined;
+        if (matchedOnCurrentResponse && currentResponseSetterUrl !== undefined) {
+          setterUrl = currentResponseSetterUrl;
+          rememberCookieSetter(targetDomain, cookie.path, cookie.name, currentResponseSetterUrl);
+          if (cookie.domain !== targetDomain) {
+            rememberCookieSetter(cookie.domain, cookie.path, cookie.name, currentResponseSetterUrl);
+          }
+        } else {
+          setterUrl = rememberedCookieSetters.get(cookieSetterKey(cookie.domain, cookie.path, cookie.name));
+        }
 
         const partitioned =
           (cookie as chrome.cookies.Cookie & { partitionKey?: unknown })
@@ -541,7 +665,7 @@ export async function correlateCookies(
             ? null
             : Math.round(cookie.expirationDate) * 1000;
 
-        return {
+        const baseRecord: CookieRecord = {
           name: cookie.name,
           domain: cookie.domain,
           domainAttributePresent: setByJs === null
@@ -556,16 +680,22 @@ export async function correlateCookies(
           partitioned,
           setByJs,
           isThirdParty: thirdParty,
+          evidenceSource: matchedOnCurrentResponse ? 'set-cookie-header' : 'cookie-jar',
           // cookie.value is intentionally NOT accessed here.
         };
+        if (setterUrl !== undefined) {
+          baseRecord.setterUrl = setterUrl;
+        }
+        return baseRecord;
       },
     );
 
     // ------------------------------------------------------------------
-    // 5. Derive third-party cookies from Set-Cookie headers not in url-scoped jar.
+    // 5. Derive header-only records for third-party or permission-withheld
+    //    parent-domain cookies absent from the URL-scoped jar query.
     // ------------------------------------------------------------------
     const liveNames = new Set(boundedLiveCookies.map((cookie) => cookie.name));
-    const thirdPartyRecordsFromHeaders: CookieRecord[] = [];
+    const headerDerivedRecords: CookieRecord[] = [];
     const fallbackHost = hopHostname.length > 0 ? hopHostname : pageHostname;
     for (const header of headerMetadata) {
       if (header.name.length === 0 || header.isDeletion || liveNames.has(header.name)) {
@@ -575,8 +705,9 @@ export async function correlateCookies(
         ? header.domain
         : fallbackHost;
       const isThirdParty = isThirdPartyCookie(pageHostname, effectiveDomain);
-      if (isThirdParty) {
-        thirdPartyRecordsFromHeaders.push({
+      const isWithheldParentDomain = !isThirdParty && inaccessibleParentDomains.has(effectiveDomain.toLowerCase());
+      if (isThirdParty || isWithheldParentDomain) {
+        const derivedRecord: CookieRecord = {
           name: header.name,
           domain: effectiveDomain,
           domainAttributePresent: header.domainAttributePresent,
@@ -588,16 +719,27 @@ export async function correlateCookies(
           expiresAt: header.expiresAt,
           partitioned: header.partitioned,
           setByJs: false,
-          isThirdParty: true,
-        });
+          isThirdParty,
+          evidenceSource: 'set-cookie-header',
+        };
+        if (currentResponseSetterUrl !== undefined) {
+          derivedRecord.setterUrl = currentResponseSetterUrl;
+        }
+        headerDerivedRecords.push(derivedRecord);
       }
     }
 
-    const allRecords: CookieRecord[] = [...records, ...thirdPartyRecordsFromHeaders].slice(0, MAX_COOKIE_RECORDS);
+    const allRecords: CookieRecord[] = [...records, ...headerDerivedRecords].slice(0, MAX_COOKIE_RECORDS);
 
     return {
       records: allRecords,
-      findings: findUnobservedCookieFindings(boundedSetCookieHeaders, boundedLiveCookies, tabUrl, hopUrl),
+      findings: findUnobservedCookieFindings(
+        boundedSetCookieHeaders,
+        boundedLiveCookies,
+        tabUrl,
+        hopUrl,
+        inaccessibleParentDomains,
+      ),
     };
   })();
 
@@ -614,4 +756,5 @@ export async function correlateCookies(
 
 export function resetInFlightCorrelationsForTesting(): void {
   inFlightCorrelations.clear();
+  rememberedCookieSetters.clear();
 }

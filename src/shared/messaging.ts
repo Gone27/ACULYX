@@ -60,6 +60,12 @@ export interface SriScanMessage {
   externalStylesheets?: number;
   /** Stylesheets missing an integrity attribute. */
   missingStyleIntegrity?: number;
+  /** Bounded sanitized cross-origin script URLs (origin + pathname) missing integrity. */
+  missingScriptUrls?: string[];
+  /** Bounded sanitized cross-origin stylesheet URLs (origin + pathname) missing integrity. */
+  missingStyleUrls?: string[];
+  /** Number of missing-SRI cross-origin resources injected dynamically after initial scan. */
+  dynamicMissingCount?: number;
   generation?: number;
   eventId?: string;
 }

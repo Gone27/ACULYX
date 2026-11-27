@@ -282,4 +282,145 @@ describe('Set-Cookie jar correlation diagnostics', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.ruleId).toBe('COOKIE-REJECTED');
   });
+
+  it('tracks explicit Set-Cookie vs jar provenance and retains setter route across follow-up same-origin routes', async () => {
+    const { correlateCookies, resetInFlightCorrelationsForTesting } = await import('../../src/background/correlate');
+    const { runRules } = await import('../../src/rules/engine');
+
+    resetInFlightCorrelationsForTesting();
+    const originalChrome = globalThis.chrome;
+    const jarCookie = {
+      name: 'test_session',
+      domain: 'app.example.com',
+      path: '/',
+      secure: false,
+      httpOnly: false,
+      sameSite: 'unspecified' as chrome.cookies.SameSiteStatus,
+      session: true,
+      hostOnly: true,
+      storeId: '0',
+      value: 'REDACTED',
+    };
+
+    globalThis.chrome = {
+      cookies: {
+        getAll: () => Promise.resolve([jarCookie]),
+      },
+    } as unknown as typeof chrome;
+
+    try {
+      // 1. Setter route (/cookie-test) sets the cookie via Set-Cookie header
+      const route1 = await correlateCookies(
+        10,
+        'https://app.example.com/cookie-test',
+        ['test_session=secret123; Path=/'],
+        1,
+        () => true,
+        'hop-1',
+        'https://app.example.com/cookie-test',
+      );
+      expect(route1.records[0]?.evidenceSource).toBe('set-cookie-header');
+      expect(route1.records[0]?.setterUrl).toBe('https://app.example.com/cookie-test');
+
+      const out1 = runRules({
+        origin: 'https://app.example.com',
+        hops: [{
+          requestId: 'hop-1',
+          url: 'https://app.example.com/cookie-test',
+          status: 200,
+          headers: {},
+          rawHeaders: [{ name: 'set-cookie', value: 'test_session=secret123; Path=/' }],
+          timestamp: Date.now(),
+          fromCache: false,
+          isHstsUpgrade: false,
+          capturedAt: 'onHeadersReceived',
+          headersDiffer: false,
+        }],
+        cookies: route1.records,
+      });
+      const cook1 = out1.findings.find((f) => f.ruleId === 'COOK-004');
+      expect(cook1?.sourceUrl).toBe('https://app.example.com/cookie-test');
+      expect(cook1?.evidence).toContain('Set-Cookie header on https://app.example.com/cookie-test');
+
+      // 2. Follow-up route (/good-headers) has NO Set-Cookie header, only persisted cookie in jar
+      const route2 = await correlateCookies(
+        10,
+        'https://app.example.com/good-headers',
+        [],
+        2,
+        () => true,
+        'hop-2',
+        'https://app.example.com/good-headers',
+      );
+      expect(route2.records[0]?.evidenceSource).toBe('cookie-jar');
+      expect(route2.records[0]?.setterUrl).toBe('https://app.example.com/cookie-test');
+
+      const out2 = runRules({
+        origin: 'https://app.example.com',
+        hops: [{
+          requestId: 'hop-2',
+          url: 'https://app.example.com/good-headers',
+          status: 200,
+          headers: {},
+          rawHeaders: [],
+          timestamp: Date.now(),
+          fromCache: false,
+          isHstsUpgrade: false,
+          capturedAt: 'onHeadersReceived',
+          headersDiffer: false,
+        }],
+        cookies: route2.records,
+      });
+      const cook2 = out2.findings.find((f) => f.ruleId === 'COOK-004');
+      expect(cook2?.sourceUrl).toBe('https://app.example.com/cookie-test');
+      expect(cook2?.evidence).toContain('browser cookie jar');
+      expect(cook2?.evidence).toContain('originally set on https://app.example.com/cookie-test');
+      expect(cook2?.evidence).not.toContain('/good-headers');
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
+
+  it('does not emit false COOKIE-REJECTED for parent-domain Set-Cookie withheld by subdomain-only host permission', async () => {
+    const { correlateCookies, resetInFlightCorrelationsForTesting } = await import('../../src/background/correlate');
+
+    resetInFlightCorrelationsForTesting();
+    const originalChrome = globalThis.chrome;
+    globalThis.chrome = {
+      cookies: {
+        getAll: () => Promise.resolve([]),
+      },
+      permissions: {
+        contains: (query: { origins?: string[] }, cb?: (granted: boolean) => void) => {
+          const origins = query.origins ?? [];
+          const granted = origins.every((o) => o.includes('www.agoda.com'));
+          cb?.(granted);
+          return Promise.resolve(granted);
+        },
+      },
+    } as unknown as typeof chrome;
+
+    try {
+      const result = await correlateCookies(
+        20,
+        'https://www.agoda.com/',
+        ['agoda.version.03=1; Domain=.agoda.com; Path=/; Secure; SameSite=Lax'],
+        1,
+        () => true,
+        'req-parent',
+        'https://www.agoda.com/',
+        { settleDelayMs: 0 },
+      );
+
+      expect(result.findings.filter((f) => f.ruleId === 'COOKIE-REJECTED')).toHaveLength(0);
+      const derived = result.records.find((r) => r.name === 'agoda.version.03');
+      expect(derived).toBeDefined();
+      expect(derived?.domain).toBe('agoda.com');
+      expect(derived?.isThirdParty).toBe(false);
+      expect(derived?.evidenceSource).toBe('set-cookie-header');
+      expect(derived?.setterUrl).toBe('https://www.agoda.com/');
+    } finally {
+      globalThis.chrome = originalChrome;
+    }
+  });
 });

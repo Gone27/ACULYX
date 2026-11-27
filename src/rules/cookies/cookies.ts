@@ -270,6 +270,28 @@ function checkSameSiteNoneOnSensitive(
   };
 }
 
+function applyCookieProvenance(finding: Finding, cookie: CookieRecord): Finding {
+  const fromHeader = cookie.evidenceSource === 'set-cookie-header' || cookie.setByJs === false;
+  const setter = cookie.setterUrl;
+  const sourceLabel = fromHeader
+    ? `Set-Cookie header${setter !== undefined ? ` on ${setter}` : ''}`
+    : `browser cookie jar${setter !== undefined ? `; originally set on ${setter}` : '; not set on current route'}`;
+  const provenanceNote = fromHeader
+    ? `Evidence source: Set-Cookie response header${setter !== undefined ? ` (${setter})` : ''}.`
+    : `Evidence source: browser cookie jar (persisted cookie, not set via Set-Cookie on this response${setter !== undefined ? `; setter route: ${setter}` : ''}).`;
+
+  const updated: Finding = {
+    ...finding,
+    provenance: 'cookie-metadata',
+    evidence: sanitizeEvidence(`${finding.evidence} [source: ${sourceLabel}]`),
+    limitations: [...(finding.limitations ?? []), provenanceNote],
+  };
+  if (setter !== undefined) {
+    updated.sourceUrl = setter;
+  }
+  return updated;
+}
+
 export function checkCookies(
   cookies: CookieRecord[],
   isHttps: boolean,
@@ -279,25 +301,23 @@ export function checkCookies(
   const findings: Finding[] = [];
 
   for (const cookie of cookies) {
-    const secure    = checkSecure(cookie, isHttps, alwaysSensitive, alwaysIgnore);
-    const httpOnly  = checkHttpOnly(cookie, alwaysSensitive, alwaysIgnore);
-    const sameNone  = checkSameSiteNone(cookie);
-    const sameMiss  = checkSameSiteMissing(cookie, alwaysSensitive, alwaysIgnore);
-    const host      = checkHostPrefix(cookie);
-    const secPfx    = checkSecurePrefix(cookie);
-    const httpPfx   = checkHttpPrefix(cookie);
-    const longLived = checkLongLivedSessionCookie(cookie, alwaysSensitive, alwaysIgnore);
-    const ssNoneSens = checkSameSiteNoneOnSensitive(cookie, alwaysSensitive, alwaysIgnore);
+    const candidates = [
+      checkSecure(cookie, isHttps, alwaysSensitive, alwaysIgnore),
+      checkHttpOnly(cookie, alwaysSensitive, alwaysIgnore),
+      checkSameSiteNone(cookie),
+      checkSameSiteMissing(cookie, alwaysSensitive, alwaysIgnore),
+      checkHostPrefix(cookie),
+      checkSecurePrefix(cookie),
+      checkHttpPrefix(cookie),
+      checkLongLivedSessionCookie(cookie, alwaysSensitive, alwaysIgnore),
+      checkSameSiteNoneOnSensitive(cookie, alwaysSensitive, alwaysIgnore),
+    ];
 
-    if (secure    !== null) findings.push(secure);
-    if (httpOnly  !== null) findings.push(httpOnly);
-    if (sameNone  !== null) findings.push(sameNone);
-    if (sameMiss  !== null) findings.push(sameMiss);
-    if (host      !== null) findings.push(host);
-    if (secPfx    !== null) findings.push(secPfx);
-    if (httpPfx   !== null) findings.push(httpPfx);
-    if (longLived !== null) findings.push(longLived);
-    if (ssNoneSens !== null) findings.push(ssNoneSens);
+    for (const candidate of candidates) {
+      if (candidate !== null) {
+        findings.push(applyCookieProvenance(candidate, cookie));
+      }
+    }
   }
 
   return findings;

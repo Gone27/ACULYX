@@ -94,6 +94,10 @@ export interface CookieRecord {
   /** True when directly observed as JS-set, false from a response header, null when unknown. */
   setByJs: boolean | null;
   isThirdParty: boolean;
+  /** Explicit provenance indicating whether attributes came from Set-Cookie headers or persisted cookie jar. */
+  evidenceSource?: 'set-cookie-header' | 'cookie-jar';
+  /** Sanitized origin+pathname URL where the cookie was observed being set via Set-Cookie. */
+  setterUrl?: string;
 }
 
 // ─── Findings ─────────────────────────────────────────────────────────────────

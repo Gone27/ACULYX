@@ -70,49 +70,81 @@ export function reportPageSignals(generation?: number): void {
   }
 
   // ── SRI scan ──────────────────────────────────────────────────────────────
-  // Track all external resources seen on the page across its lifetime so cumulative
-  // totals are sent on every update (prevents flickering on lazy-loaded pages).
-  const externalScriptMap = new Map<string, boolean>(); // src -> hasIntegrity
-  const externalStylesheetMap = new Map<string, boolean>(); // href -> hasIntegrity
+  // Track eligible cross-origin HTTP(S) external resources across page lifetime.
+  // Excludes inline <script>, same-origin assets, and data:/blob: URLs.
+  interface SriResourceEntry {
+    hasIntegrity: boolean;
+    isDynamic: boolean;
+  }
+  const MAX_REPORTED_SRI_URLS = 20;
+  const externalScriptMap = new Map<string, SriResourceEntry>(); // origin+pathname -> status
+  const externalStylesheetMap = new Map<string, SriResourceEntry>(); // origin+pathname -> status
 
-  function doReportSri(): void {
+  function toEligibleCrossOriginUrl(rawRef: string): string | null {
+    try {
+      const parsed = new URL(rawRef, location.href);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return null;
+      }
+      if (parsed.origin === location.origin) {
+        return null;
+      }
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return null;
+    }
+  }
+
+  function doReportSri(isMutationPass: boolean): void {
     const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]'));
     for (const script of scripts) {
-      try {
-        const scriptUrl = new URL(script.src, location.href);
-        if (scriptUrl.origin !== location.origin) {
-          const hasIntegrity = script.integrity.trim().length > 0;
-          externalScriptMap.set(script.src, hasIntegrity);
-        }
-      } catch {
-        // Ignore invalid URLs
-      }
+      const eligibleUrl = toEligibleCrossOriginUrl(script.src);
+      if (eligibleUrl === null) continue;
+      const hasIntegrity = script.integrity.trim().length > 0;
+      const prev = externalScriptMap.get(eligibleUrl);
+      externalScriptMap.set(eligibleUrl, {
+        hasIntegrity,
+        isDynamic: prev !== undefined ? prev.isDynamic : isMutationPass,
+      });
     }
 
     const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'));
     for (const link of links) {
-      try {
-        const linkUrl = new URL(link.href, location.href);
-        if (linkUrl.origin !== location.origin) {
-          const hasIntegrity = link.integrity.trim().length > 0;
-          externalStylesheetMap.set(link.href, hasIntegrity);
-        }
-      } catch {
-        // Ignore invalid URLs
-      }
+      const eligibleUrl = toEligibleCrossOriginUrl(link.href);
+      if (eligibleUrl === null) continue;
+      const hasIntegrity = link.integrity.trim().length > 0;
+      const prev = externalStylesheetMap.get(eligibleUrl);
+      externalStylesheetMap.set(eligibleUrl, {
+        hasIntegrity,
+        isDynamic: prev !== undefined ? prev.isDynamic : isMutationPass,
+      });
     }
 
     const totalExternalScripts = externalScriptMap.size;
-    let missingScriptIntegrity = 0;
-    for (const hasIntegrity of externalScriptMap.values()) {
-      if (!hasIntegrity) missingScriptIntegrity++;
+    const missingScriptUrls: string[] = [];
+    let dynamicMissingCount = 0;
+    for (const [url, entry] of externalScriptMap.entries()) {
+      if (!entry.hasIntegrity) {
+        if (missingScriptUrls.length < MAX_REPORTED_SRI_URLS) {
+          missingScriptUrls.push(url);
+        }
+        if (entry.isDynamic) dynamicMissingCount++;
+      }
     }
 
     const totalExternalStylesheets = externalStylesheetMap.size;
-    let missingStyleIntegrity = 0;
-    for (const hasIntegrity of externalStylesheetMap.values()) {
-      if (!hasIntegrity) missingStyleIntegrity++;
+    const missingStyleUrls: string[] = [];
+    for (const [url, entry] of externalStylesheetMap.entries()) {
+      if (!entry.hasIntegrity) {
+        if (missingStyleUrls.length < MAX_REPORTED_SRI_URLS) {
+          missingStyleUrls.push(url);
+        }
+        if (entry.isDynamic) dynamicMissingCount++;
+      }
     }
+
+    const missingScriptIntegrity = Array.from(externalScriptMap.values()).filter((e) => !e.hasIntegrity).length;
+    const missingStyleIntegrity = Array.from(externalStylesheetMap.values()).filter((e) => !e.hasIntegrity).length;
 
     void chrome.runtime.sendMessage({
       type: 'SRI_SCAN',
@@ -120,12 +152,15 @@ export function reportPageSignals(generation?: number): void {
       missingIntegrity: missingScriptIntegrity,
       externalStylesheets: totalExternalStylesheets,
       missingStyleIntegrity,
+      missingScriptUrls,
+      missingStyleUrls,
+      dynamicMissingCount,
       generation,
-      eventId: `sri:${generation ?? 0}:${totalExternalScripts}:${missingScriptIntegrity}:${totalExternalStylesheets}:${missingStyleIntegrity}`,
+      eventId: `sri:${generation ?? 0}:${totalExternalScripts}:${missingScriptIntegrity}:${totalExternalStylesheets}:${missingStyleIntegrity}:${dynamicMissingCount}`,
     }).catch(() => undefined);
   }
 
-  doReportSri();
+  doReportSri(false);
 
   let sriRaf: number | null = null;
   const sriObserver = new MutationObserver((mutations) => {
@@ -151,10 +186,10 @@ export function reportPageSignals(generation?: number): void {
       if (typeof requestAnimationFrame === 'function') {
         sriRaf = requestAnimationFrame(() => {
           sriRaf = null;
-          doReportSri();
+          doReportSri(true);
         });
       } else {
-        doReportSri();
+        doReportSri(true);
       }
     }
   });
