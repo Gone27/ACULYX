@@ -44,6 +44,13 @@ import { isModeCaptureAllowed, isRestrictedUrl } from '../shared/gating';
 import { registrableDomain } from '../rules/headers/subdomain-trust';
 import { bootstrapAppearance, applyAppearance } from '../shared/appearance';
 import {
+  MAX_SMOKE_ENTRANCES,
+  MAX_RADAR_PINGS_PER_UPDATE,
+  recordBoundedSeenId,
+  attachOneShotMotionClass,
+  attachSvgPingCleanup,
+} from '../shared/motion';
+import {
   generateNameOnlyWordlist,
   formatLeadsReportMarkdown,
   formatLeadsReportJson,
@@ -776,8 +783,8 @@ document.addEventListener('DOMContentLoaded', () => {
       spCaptureBar.dataset['captureState'] = deniedCaptureOrigins.has(targetOrigin) ? 'denied' : 'permission-needed';
       setShuriken(false);
       spCaptureStatus.textContent = deniedCaptureOrigins.has(targetOrigin)
-        ? 'Permission was denied — click "Capture this site" to try again.'
-        : 'Read response headers and cookie metadata for this site.';
+        ? 'Permission was denied — click "Capture this site" to grant access for this scheme and host (all ports).'
+        : 'Read response headers and cookie metadata for this scheme and host (all ports).';
       spCaptureBtn.disabled = false;
       spCaptureBtn.hidden = false;
       spReloadCaptureBtn.hidden = true;
@@ -1746,6 +1753,7 @@ document.addEventListener('DOMContentLoaded', () => {
       seenRadarLeadIds.clear();
     }
 
+    let pingCountThisPass = 0;
     for (const lead of leadsToPlot) {
       const baseAngleDeg = angleMap[lead.family] ?? 0;
       const baseRadius = radiusMap[lead.potential] ?? 70;
@@ -1791,19 +1799,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       spRadarBlips.appendChild(blip);
 
-      // One-shot radar ping ring for genuinely newly appeared lead IDs
-      if (!seenRadarLeadIds.has(lead.id)) {
-        seenRadarLeadIds.add(lead.id);
+      // One-shot radar ping ring for genuinely newly appeared lead IDs (capped per update)
+      if (recordBoundedSeenId(seenRadarLeadIds, lead.id) && pingCountThisPass < MAX_RADAR_PINGS_PER_UPDATE) {
+        pingCountThisPass++;
         const ping = document.createElementNS(SVG_NS, 'circle');
         ping.setAttribute('cx', bx.toFixed(1));
         ping.setAttribute('cy', by.toFixed(1));
         ping.setAttribute('r', '5');
         ping.setAttribute('class', 'radar-blip-ping');
-        const removePing = () => {
-          ping.remove();
-        };
-        ping.addEventListener('animationend', removePing, { once: true });
-        setTimeout(removePing, 600);
+        attachSvgPingCleanup(ping, 800);
         spRadarBlips.appendChild(ping);
       }
     }
@@ -1912,25 +1916,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let animatedCount = 0;
     filtered.forEach((lead, index) => {
       const card = renderLeadCard(lead, index);
-      if (!seenLeadCardIds.has(lead.id) && animatedCount < 8) {
-        seenLeadCardIds.add(lead.id);
-        card.classList.add('motion-smoke-enter');
+      if (recordBoundedSeenId(seenLeadCardIds, lead.id) && animatedCount < MAX_SMOKE_ENTRANCES) {
         card.style.setProperty('--smoke-delay', `${animatedCount * 24}ms`);
         animatedCount++;
         const expectedAnim = lead.potential === 'critical' ? 'criticalSmokePoof' : 'smokeCardReveal';
-        const onCardAnimEnd = (e: AnimationEvent) => {
-          if (e.target === card && e.animationName === expectedAnim) {
-            cleanupCardMotion();
-          }
-        };
-        const cleanupCardMotion = () => {
-          card.classList.remove('motion-smoke-enter');
-          card.removeEventListener('animationend', onCardAnimEnd);
-        };
-        card.addEventListener('animationend', onCardAnimEnd);
-        setTimeout(cleanupCardMotion, 520);
-      } else {
-        seenLeadCardIds.add(lead.id);
+        attachOneShotMotionClass(card, 'motion-smoke-enter', expectedAnim, 520);
       }
       spLeadsList.appendChild(card);
     });

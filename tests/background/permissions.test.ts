@@ -59,6 +59,16 @@ describe('Permissions Representation and Helpers', () => {
     expect(isOriginPermitted('https://random.org', ['<all_urls>'])).toBe(true);
     expect(isOriginPermitted('https://random.org', ['*://*/*'])).toBe(true);
   });
+
+  it('documents that Chrome match patterns cover all ports on the scheme and host', () => {
+    const requestedPattern = patternFromOrigin('https://example.test:8443');
+    expect(requestedPattern).toBe('https://example.test/*');
+    // Port-unconstrained Chrome match pattern grants across alternate ports on the same host
+    expect(isOriginPermitted('https://example.test:8443', [requestedPattern])).toBe(true);
+    expect(isOriginPermitted('https://example.test:9443', [requestedPattern])).toBe(true);
+    expect(isOriginPermitted('https://example.test', [requestedPattern])).toBe(true);
+    expect(isOriginPermitted('http://example.test:8443', [requestedPattern])).toBe(false);
+  });
 });
 
 describe('clearTabCapture and Revocation Cleanup', () => {

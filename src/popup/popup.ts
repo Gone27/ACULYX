@@ -23,6 +23,12 @@ import { PermissionsService, patternFromOrigin } from '../background/permissions
 import { isModeCaptureAllowed } from '../shared/gating';
 import { selectVisibleFindings } from '../shared/filters';
 import { applyAppearance } from '../shared/appearance';
+import {
+  MAX_SMOKE_ENTRANCES,
+  recordBoundedSeenId,
+  shouldTriggerGradeReveal,
+  attachOneShotMotionClass,
+} from '../shared/motion';
 
 /* ── DOM element references (asserted non-null at init time) ── */
 let tabBtnHygiene:       HTMLButtonElement;
@@ -54,7 +60,7 @@ let settingsLink:        HTMLAnchorElement;
 
 /** Tracks last animated grade key (`origin|grade`) so refresh updates never replay reveal motion. */
 let lastAnimatedGradeKey = '';
-let gradeRevealTimer: ReturnType<typeof setTimeout> | null = null;
+let cancelGradeReveal: (() => void) | null = null;
 let seenFindingOrigin = '';
 const seenFindingKeys = new Set<string>();
 
@@ -321,35 +327,19 @@ function renderState(state: TabState): void {
     popupScanShuriken.toggleAttribute('hidden', true);
     popupScanShuriken.setAttribute('data-scanning', 'false');
 
-    const nextGradeKey = `${state.origin}|${state.grade}`;
-    if (nextGradeKey !== lastAnimatedGradeKey) {
-      lastAnimatedGradeKey = nextGradeKey;
-      if (gradeRevealTimer !== null) {
-        clearTimeout(gradeRevealTimer);
-      }
+    const revealDecision = shouldTriggerGradeReveal(lastAnimatedGradeKey, state.origin, state.grade);
+    if (revealDecision.trigger) {
+      lastAnimatedGradeKey = revealDecision.nextKey;
+      cancelGradeReveal?.();
       gradeBadge.classList.remove('motion-grade-reveal');
       // Force reflow so genuine grade transition triggers once cleanly
       void gradeBadge.offsetWidth;
-      gradeBadge.classList.add('motion-grade-reveal');
-      let onAnimEnd: ((e: AnimationEvent) => void) | null = null;
-      const clearReveal = () => {
-        gradeBadge.classList.remove('motion-grade-reveal');
-        if (onAnimEnd !== null) {
-          gradeBadge.removeEventListener('animationend', onAnimEnd);
-          onAnimEnd = null;
-        }
-        if (gradeRevealTimer !== null) {
-          clearTimeout(gradeRevealTimer);
-          gradeRevealTimer = null;
-        }
-      };
-      onAnimEnd = (e: AnimationEvent) => {
-        if (e.target === gradeBadge && e.animationName === 'katanaSlashSweep') {
-          clearReveal();
-        }
-      };
-      gradeBadge.addEventListener('animationend', onAnimEnd);
-      gradeRevealTimer = setTimeout(clearReveal, 450);
+      cancelGradeReveal = attachOneShotMotionClass(
+        gradeBadge,
+        'motion-grade-reveal',
+        'katanaSlashSweep',
+        450,
+      );
     }
 
     scoreText.textContent = `Score: ${state.score}/100`;
@@ -452,25 +442,11 @@ function renderFindingsTeaser(findings: Finding[]): void {
     li.dataset['severity'] = finding.severity;
 
     const fKey = `${finding.ruleId}:${finding.evidence}`;
-    if (!seenFindingKeys.has(fKey) && animatedCount < 8) {
-      seenFindingKeys.add(fKey);
-      li.classList.add('motion-smoke-enter');
+    if (recordBoundedSeenId(seenFindingKeys, fKey) && animatedCount < MAX_SMOKE_ENTRANCES) {
       li.style.setProperty('--smoke-delay', `${animatedCount * 24}ms`);
       animatedCount++;
       const expectedAnim = finding.severity === 'critical' ? 'criticalSmokePoof' : 'smokeCardReveal';
-      const onSmokeEnd = (e: AnimationEvent) => {
-        if (e.target === li && e.animationName === expectedAnim) {
-          cleanupSmoke();
-        }
-      };
-      const cleanupSmoke = () => {
-        li.classList.remove('motion-smoke-enter');
-        li.removeEventListener('animationend', onSmokeEnd);
-      };
-      li.addEventListener('animationend', onSmokeEnd);
-      setTimeout(cleanupSmoke, 520);
-    } else {
-      seenFindingKeys.add(fKey);
+      attachOneShotMotionClass(li, 'motion-smoke-enter', expectedAnim, 520);
     }
 
     const headerRow = document.createElement('div');
@@ -709,17 +685,25 @@ function wireSettingsLink(): void {
 function wireMonitorButton(): void {
   monitorBtn.addEventListener('click', () => {
     if (!currentOrigin) return;
+    const reqTabId = currentTabId;
+    const reqOrigin = currentOrigin;
 
-    const pattern = patternFromOrigin(currentOrigin);
+    const pattern = patternFromOrigin(reqOrigin);
+    if (!pattern) return;
+
     chrome.permissions.request(
       { origins: [pattern] },
       (granted) => {
-        if (granted) {
+        const apiError = chrome.runtime.lastError;
+        if (currentTabId !== reqTabId || currentOrigin !== reqOrigin) {
+          return;
+        }
+        if (apiError == null && granted === true) {
           monitorSection.hidden = true;
-          showStateMessage('Permission granted. Refreshing this page to begin monitoring…', 'waiting');
+          showStateMessage('Host access granted (all ports). Refreshing this page to begin monitoring…', 'waiting');
           setPopupState('access-granted-reload');
 
-          if (currentTabId !== null) {
+          if (reqTabId !== null) {
             void sendToBackground({
               type: 'PERMISSIONS_CHANGED',
               granted: true,
@@ -727,9 +711,9 @@ function wireMonitorButton(): void {
             }).catch(() => undefined);
 
             openLivePort();
-            chrome.tabs.reload(currentTabId, {}, () => {
+            chrome.tabs.reload(reqTabId, {}, () => {
               if (chrome.runtime.lastError != null) {
-                showStateMessage('Permission was granted, but this page could not be refreshed. Reload it to begin monitoring.', 'error');
+                showStateMessage('Host access was granted, but this page could not be refreshed. Reload it to begin monitoring.', 'error');
               }
             });
           }

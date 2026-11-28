@@ -90,10 +90,13 @@ export function normalizePermissionOrigin(pattern: string): string {
 }
 
 /**
- * Generates a valid Chrome match pattern from an origin or URL string.
- * Chrome match patterns cannot specify ports.
+ * Generates a Chrome host-permission match pattern from an origin or URL string.
+ *
+ * Chrome host match patterns cannot constrain ports and always drop them, so the
+ * resulting grant covers the current scheme and hostname across ALL ports on that
+ * host (narrower than `<all_urls>`, but not strictly port-scoped to a single origin).
  * E.g., "http://127.0.0.1:3464" -> "http://127.0.0.1/*"
- *       "https://example.com" -> "https://example.com/*"
+ *       "https://example.com:8443" -> "https://example.com/*"
  */
 export function patternFromOrigin(originOrUrl: string): string {
   if (!originOrUrl) return '';

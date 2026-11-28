@@ -162,11 +162,102 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
       await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'restricted');
       await expect(sidepanelPage.locator('#sp-capture-btn')).toBeHidden();
 
-      // Check permission-needed (ungranted localhost) state
+      // Check permission-needed (ungranted localhost) state & port-unconstrained disclosure
       await sidepanelPage.goto(`chrome-extension://${extensionId}/src/sidepanel/sidepanel.html?tabId=${ungrantedTabId}`);
       await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'permission-needed');
+      await expect(sidepanelPage.locator('#sp-capture-status')).toContainText('all ports');
       await expect(sidepanelPage.locator('#sp-capture-btn')).toBeVisible();
       await expect(sidepanelPage.locator('#sp-capture-btn')).toHaveText('Capture this site');
+
+      // Exercise actual #sp-capture-btn click: denial -> retry grant -> stale-tab navigation race guard
+      await sidepanelPage.evaluate(() => {
+        const w = window as unknown as {
+          __permRequests: string[][];
+          __permGrantNext: boolean;
+          __permGrantedSet: Set<string>;
+          __permDefer?: (granted: boolean) => void;
+          __permHold: boolean;
+        };
+        w.__permRequests = [];
+        w.__permGrantNext = false;
+        w.__permGrantedSet = new Set<string>();
+        w.__permHold = false;
+
+        const perms = chrome.permissions as unknown as {
+          request: (perms: chrome.permissions.Permissions, cb?: (granted: boolean) => void) => void;
+          contains: (perms: chrome.permissions.Permissions, cb?: (result: boolean) => void) => void;
+        };
+        perms.contains = (query, cb) => {
+          const allHit = (query.origins ?? []).length > 0 && (query.origins ?? []).every((o) => w.__permGrantedSet.has(o));
+          cb?.(allHit);
+        };
+        perms.request = (req, cb) => {
+          const origins = req.origins ?? [];
+          w.__permRequests.push([...origins]);
+          const finish = (granted: boolean) => {
+            if (granted) {
+              for (const o of origins) w.__permGrantedSet.add(o);
+            }
+            cb?.(granted);
+          };
+          if (w.__permHold) {
+            w.__permDefer = finish;
+            return;
+          }
+          finish(w.__permGrantNext);
+        };
+      });
+
+      // 1) User denies -> denied state + retry prompt preserved + port dropped in match pattern
+      await sidepanelPage.locator('#sp-capture-btn').click();
+      await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'denied');
+      await expect(sidepanelPage.locator('#sp-capture-status')).toContainText('all ports');
+      await expect(sidepanelPage.locator('#sp-capture-btn')).toBeEnabled();
+      const firstRequested = await sidepanelPage.evaluate(
+        () => (window as unknown as { __permRequests: string[][] }).__permRequests[0],
+      );
+      expect(firstRequested).toEqual(['http://localhost/*']);
+
+      // 2) User retries and grants -> access-granted-reload with user-controlled reload button
+      await sidepanelPage.evaluate(() => {
+        (window as unknown as { __permGrantNext: boolean }).__permGrantNext = true;
+      });
+      await sidepanelPage.locator('#sp-capture-btn').click();
+      await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'access-granted-reload');
+      await expect(sidepanelPage.locator('#sp-reload-capture-btn')).toBeVisible();
+
+      // 3) Stale-tab navigation race: hold request open, switch tab to restricted, resolve late callback -> stays restricted
+      await sidepanelPage.evaluate(() => {
+        const w = window as unknown as { __permGrantedSet: Set<string>; __permHold: boolean };
+        w.__permGrantedSet.clear();
+        w.__permHold = true;
+      });
+      await sidepanelPage.goto(`chrome-extension://${extensionId}/src/sidepanel/sidepanel.html?tabId=${ungrantedTabId}`);
+      await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'permission-needed');
+      await sidepanelPage.evaluate(() => {
+        const w = window as unknown as {
+          __permRequests: string[][];
+          __permDefer?: (granted: boolean) => void;
+          __permHold: boolean;
+        };
+        w.__permRequests = [];
+        w.__permHold = true;
+        const perms = chrome.permissions as unknown as {
+          request: (perms: chrome.permissions.Permissions, cb?: (granted: boolean) => void) => void;
+        };
+        perms.request = (req, cb) => {
+          w.__permRequests.push([...(req.origins ?? [])]);
+          w.__permDefer = (granted: boolean) => cb?.(granted);
+        };
+      });
+      await sidepanelPage.locator('#sp-capture-btn').click();
+      await pageBlank.bringToFront();
+      await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'restricted');
+      await sidepanelPage.evaluate(() => {
+        (window as unknown as { __permDefer?: (granted: boolean) => void }).__permDefer?.(true);
+      });
+      await sidepanelPage.waitForTimeout(100);
+      await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'restricted');
 
       // Wordmark branding check across 380px and 320px compact viewports
       for (const vp of [{ width: 380, height: 680 }, { width: 320, height: 600 }]) {
@@ -350,22 +441,63 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
       expect(animatedCardCount).toBeGreaterThan(0);
       expect(animatedCardCount).toBeLessThanOrEqual(8);
 
-      // Clean up after ~560ms (accounts for capped 168ms stagger + 240ms/280ms entrance & critical poof)
-      await sidepanelPage.waitForTimeout(560);
+      // Radar pings for 120 new leads must be capped (<= 6), not 120 simultaneous pings
+      const pingCount = await sidepanelPage.locator('#sp-radar-blips .radar-blip-ping').count();
+      expect(pingCount).toBeGreaterThan(0);
+      expect(pingCount).toBeLessThanOrEqual(6);
+
+      // Clean up after ~850ms (smoke <= 520ms + radar ping 700ms)
+      await sidepanelPage.waitForTimeout(850);
       expect(await sidepanelPage.locator('#sp-leads-list .lead-card.motion-smoke-enter').count()).toBe(0);
+      expect(await sidepanelPage.locator('#sp-radar-blips .radar-blip-ping').count()).toBe(0);
       await expect(popupPage.locator('#grade-badge .badge-scan.shuriken-loader')).toBeHidden();
 
-      // Overview radar pings clean up & reduced motion disables animations
+      // Overview radar pings & reduced motion disable ALL effects across popup & sidepanel
       await sidepanelPage.locator('#tab-overview').click();
       await sidepanelPage.evaluate(() => {
         document.documentElement.setAttribute('data-motion', 'reduce');
         const shuriken = document.getElementById('sp-scan-shuriken');
         if (shuriken) shuriken.setAttribute('data-scanning', 'true');
+        const firstCard = document.querySelector('#sp-leads-list .lead-card');
+        if (firstCard) firstCard.classList.add('motion-smoke-enter');
       });
-      const reducedShuriken = await sidepanelPage.locator('#sp-scan-shuriken').evaluate((el) => {
-        return window.getComputedStyle(el).animationName;
+      const reducedSidepanel = await sidepanelPage.evaluate(() => {
+        const shuriken = document.getElementById('sp-scan-shuriken');
+        const card = document.querySelector('#sp-leads-list .lead-card.motion-smoke-enter');
+        const cardAfter = card ? window.getComputedStyle(card, '::after').animationName : 'none';
+        return {
+          shuriken: shuriken ? window.getComputedStyle(shuriken).animationName : 'missing',
+          card: card ? window.getComputedStyle(card).animationName : 'missing',
+          cardAfter,
+        };
       });
-      expect(reducedShuriken).toBe('none');
+      expect(reducedSidepanel.shuriken).toBe('none');
+      expect(reducedSidepanel.card).toBe('none');
+      expect(reducedSidepanel.cardAfter).toBe('none');
+
+      await popupPage.evaluate(() => {
+        document.documentElement.setAttribute('data-motion', 'reduce');
+        const badge = document.getElementById('grade-badge');
+        if (badge) badge.classList.add('motion-grade-reveal');
+        const badgeShuriken = document.getElementById('badge-scan-shuriken');
+        if (badgeShuriken) badgeShuriken.setAttribute('data-scanning', 'true');
+      });
+      const reducedPopup = await popupPage.evaluate(() => {
+        const shield = document.querySelector('#grade-badge .badge-shield');
+        const letter = document.querySelector('#grade-badge .badge-grade');
+        const badge = document.getElementById('grade-badge');
+        const badgeShuriken = document.getElementById('badge-scan-shuriken');
+        return {
+          shield: shield ? window.getComputedStyle(shield).animationName : 'missing',
+          letter: letter ? window.getComputedStyle(letter).animationName : 'missing',
+          glint: badge ? window.getComputedStyle(badge, '::after').animationName : 'missing',
+          shuriken: badgeShuriken ? window.getComputedStyle(badgeShuriken).animationName : 'missing',
+        };
+      });
+      expect(reducedPopup.shield).toBe('none');
+      expect(reducedPopup.letter).toBe('none');
+      expect(reducedPopup.glint).toBe('none');
+      expect(reducedPopup.shuriken).toBe('none');
 
       await sidepanelPage.close();
       await popupPage.close();
