@@ -331,14 +331,24 @@ function renderState(state: TabState): void {
       // Force reflow so genuine grade transition triggers once cleanly
       void gradeBadge.offsetWidth;
       gradeBadge.classList.add('motion-grade-reveal');
+      let onAnimEnd: ((e: AnimationEvent) => void) | null = null;
       const clearReveal = () => {
         gradeBadge.classList.remove('motion-grade-reveal');
+        if (onAnimEnd !== null) {
+          gradeBadge.removeEventListener('animationend', onAnimEnd);
+          onAnimEnd = null;
+        }
         if (gradeRevealTimer !== null) {
           clearTimeout(gradeRevealTimer);
           gradeRevealTimer = null;
         }
       };
-      gradeBadge.addEventListener('animationend', clearReveal, { once: true });
+      onAnimEnd = (e: AnimationEvent) => {
+        if (e.target === gradeBadge && e.animationName === 'katanaSlashSweep') {
+          clearReveal();
+        }
+      };
+      gradeBadge.addEventListener('animationend', onAnimEnd);
       gradeRevealTimer = setTimeout(clearReveal, 450);
     }
 
@@ -447,9 +457,18 @@ function renderFindingsTeaser(findings: Finding[]): void {
       li.classList.add('motion-smoke-enter');
       li.style.setProperty('--smoke-delay', `${animatedCount * 24}ms`);
       animatedCount++;
-      const cleanupSmoke = () => li.classList.remove('motion-smoke-enter');
-      li.addEventListener('animationend', cleanupSmoke, { once: true });
-      setTimeout(cleanupSmoke, 450);
+      const expectedAnim = finding.severity === 'critical' ? 'criticalSmokePoof' : 'smokeCardReveal';
+      const onSmokeEnd = (e: AnimationEvent) => {
+        if (e.target === li && e.animationName === expectedAnim) {
+          cleanupSmoke();
+        }
+      };
+      const cleanupSmoke = () => {
+        li.classList.remove('motion-smoke-enter');
+        li.removeEventListener('animationend', onSmokeEnd);
+      };
+      li.addEventListener('animationend', onSmokeEnd);
+      setTimeout(cleanupSmoke, 520);
     } else {
       seenFindingKeys.add(fKey);
     }
@@ -620,6 +639,12 @@ function setBadgeState(
   label: string,
 ): void {
   gradeBadge.dataset['state'] = state;
+  const badgeScan = document.getElementById('badge-scan-shuriken');
+  if (badgeScan) {
+    const isScanning = state === 'scanning';
+    badgeScan.toggleAttribute('hidden', !isScanning);
+    badgeScan.setAttribute('data-scanning', isScanning ? 'true' : 'false');
+  }
   if (grade === undefined) {
     gradeBadge.removeAttribute('data-grade');
     badgeGrade.textContent = '?';

@@ -350,9 +350,10 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
       expect(animatedCardCount).toBeGreaterThan(0);
       expect(animatedCardCount).toBeLessThanOrEqual(8);
 
-      // Clean up after ~500ms
-      await sidepanelPage.waitForTimeout(500);
+      // Clean up after ~560ms (accounts for capped 168ms stagger + 240ms/280ms entrance & critical poof)
+      await sidepanelPage.waitForTimeout(560);
       expect(await sidepanelPage.locator('#sp-leads-list .lead-card.motion-smoke-enter').count()).toBe(0);
+      await expect(popupPage.locator('#grade-badge .badge-scan.shuriken-loader')).toBeHidden();
 
       // Overview radar pings clean up & reduced motion disables animations
       await sidepanelPage.locator('#tab-overview').click();

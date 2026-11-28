@@ -523,7 +523,7 @@ body {
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  transition: all var(--sc-duration-fast, 140ms) ease;
+  transition: background-color var(--sc-duration-fast, 140ms) ease, color var(--sc-duration-fast, 140ms) ease;
 }
 
 .action-callout-cta:hover {
@@ -830,7 +830,7 @@ body {
   font-weight: 700;
   padding: 2px 6px;
   cursor: pointer;
-  transition: all var(--sc-duration-fast, 140ms) ease;
+  transition: border-color var(--sc-duration-fast, 140ms) ease, color var(--sc-duration-fast, 140ms) ease, background-color var(--sc-duration-fast, 140ms) ease;
 }
 
 .panel-action-btn:hover {
@@ -895,9 +895,10 @@ body {
   border-radius: 6px;
   padding: 10px 12px;
   cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
   transition: transform var(--sc-duration-fast, 140ms) ease,
-              border-color var(--sc-duration-fast, 140ms) ease,
-              box-shadow var(--sc-duration-fast, 140ms) ease;
+              border-color var(--sc-duration-fast, 140ms) ease;
 }
 
 .lead-card:hover {
@@ -1030,7 +1031,7 @@ body {
   font-weight: 600;
   padding: 3px 8px;
   cursor: pointer;
-  transition: all var(--sc-duration-fast, 140ms) ease;
+  transition: border-color var(--sc-duration-fast, 140ms) ease, color var(--sc-duration-fast, 140ms) ease, background-color var(--sc-duration-fast, 140ms) ease;
 }
 
 .lead-btn:hover:not(:disabled) {
@@ -1108,7 +1109,7 @@ body {
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all var(--sc-duration-fast, 140ms) ease;
+  transition: background-color var(--sc-duration-fast, 140ms) ease, color var(--sc-duration-fast, 140ms) ease, border-color var(--sc-duration-fast, 140ms) ease;
 }
 
 .surface-subtab:hover {
@@ -1320,9 +1321,8 @@ body {
 }
 
 .node-group:hover circle {
-  stroke: var(--sc-accent);
-  stroke-width: 2.5px;
-  filter: drop-shadow(0 0 6px var(--sc-accent));
+  stroke: var(--sc-magenta, #D56BFF);
+  stroke-width: 3px;
 }
 
 .node-circle {
@@ -1845,7 +1845,7 @@ body {
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all var(--sc-duration-fast, 140ms) ease;
+  transition: background-color var(--sc-duration-fast, 140ms) ease, color var(--sc-duration-fast, 140ms) ease, border-color var(--sc-duration-fast, 140ms) ease;
 }
 
 .activity-subtab:hover {
@@ -2270,7 +2270,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: all var(--sc-duration-fast, 140ms) ease;
+  transition: background-color var(--sc-duration-fast, 140ms) ease, color var(--sc-duration-fast, 140ms) ease;
 }
 
 .cmd-palette-item:hover,
@@ -2497,7 +2497,7 @@ html.reduced-motion *,
   padding: 5px 4px;
   border-radius: 4px;
   color: var(--text-muted, #8b949e);
-  transition: all 160ms ease;
+  transition: color 160ms ease, background-color 160ms ease;
 }
 
 .stepper-step .step-num {
@@ -2570,7 +2570,7 @@ html.reduced-motion *,
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 160ms ease;
+  transition: background-color 160ms ease, opacity 160ms ease, transform 160ms ease;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -2593,7 +2593,7 @@ html.reduced-motion *,
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 160ms ease;
+  transition: background-color 160ms ease, opacity 160ms ease, transform 160ms ease;
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -2614,7 +2614,7 @@ html.reduced-motion *,
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 160ms ease;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
 .btn-secondary:hover {

@@ -149,7 +149,7 @@ body {
   color: var(--text-muted);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
   text-align: center;
 }
 
@@ -207,9 +207,24 @@ body {
 }
 
 .badge-scan {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  display: none;
+}
+
+.grade-badge[data-state='scanning'] .badge-scan {
+  display: block;
+}
+
+.grade-badge:not([data-state='scanning']) .badge-scan {
+  display: none !important;
+  animation: none !important;
+  will-change: auto;
+}
+
+.grade-badge[data-state='scanning'] .badge-grade {
   display: none;
 }
 
@@ -435,6 +450,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
 }
 
 .finding-item.severity-critical { border-left-color: var(--sc-critical, #ef4444); }
@@ -634,7 +651,7 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
-  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  transition: transform 120ms ease, opacity 120ms ease;
   display: flex;
   align-items: center;
   justify-content: center;

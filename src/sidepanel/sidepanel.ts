@@ -1917,9 +1917,18 @@ document.addEventListener('DOMContentLoaded', () => {
         card.classList.add('motion-smoke-enter');
         card.style.setProperty('--smoke-delay', `${animatedCount * 24}ms`);
         animatedCount++;
-        const cleanupCardMotion = () => card.classList.remove('motion-smoke-enter');
-        card.addEventListener('animationend', cleanupCardMotion, { once: true });
-        setTimeout(cleanupCardMotion, 450);
+        const expectedAnim = lead.potential === 'critical' ? 'criticalSmokePoof' : 'smokeCardReveal';
+        const onCardAnimEnd = (e: AnimationEvent) => {
+          if (e.target === card && e.animationName === expectedAnim) {
+            cleanupCardMotion();
+          }
+        };
+        const cleanupCardMotion = () => {
+          card.classList.remove('motion-smoke-enter');
+          card.removeEventListener('animationend', onCardAnimEnd);
+        };
+        card.addEventListener('animationend', onCardAnimEnd);
+        setTimeout(cleanupCardMotion, 520);
       } else {
         seenLeadCardIds.add(lead.id);
       }
