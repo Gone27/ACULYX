@@ -689,9 +689,9 @@ body {
 
 /* ── Reduced Motion ─────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion='no-reduce']) *,
+  :root:not([data-motion='no-reduce']) *::before,
+  :root:not([data-motion='no-reduce']) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

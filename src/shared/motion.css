@@ -180,23 +180,23 @@
 
 /* ── Reduced Motion Overrides (OS + ACULYX Settings) ────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .grade-badge.motion-grade-reveal,
-  .grade-badge.motion-grade-reveal::after,
-  .grade-badge.motion-grade-reveal .badge-shield,
-  .grade-badge.motion-grade-reveal .badge-grade,
-  .motion-smoke-enter,
-  .finding-item.severity-critical.motion-smoke-enter::after,
-  .lead-card.lead-card-critical.motion-smoke-enter::after,
-  .shuriken-loader[data-scanning='true'],
-  .badge-scan.shuriken-loader,
-  .radar-blip-ping {
+  :root:not([data-motion='no-reduce']) .grade-badge.motion-grade-reveal,
+  :root:not([data-motion='no-reduce']) .grade-badge.motion-grade-reveal::after,
+  :root:not([data-motion='no-reduce']) .grade-badge.motion-grade-reveal .badge-shield,
+  :root:not([data-motion='no-reduce']) .grade-badge.motion-grade-reveal .badge-grade,
+  :root:not([data-motion='no-reduce']) .motion-smoke-enter,
+  :root:not([data-motion='no-reduce']) .finding-item.severity-critical.motion-smoke-enter::after,
+  :root:not([data-motion='no-reduce']) .lead-card.lead-card-critical.motion-smoke-enter::after,
+  :root:not([data-motion='no-reduce']) .shuriken-loader[data-scanning='true'],
+  :root:not([data-motion='no-reduce']) .badge-scan.shuriken-loader,
+  :root:not([data-motion='no-reduce']) .radar-blip-ping {
     animation: none !important;
     transition: none !important;
     will-change: auto !important;
   }
-  .grade-badge.motion-grade-reveal::after,
-  .finding-item.severity-critical.motion-smoke-enter::after,
-  .lead-card.lead-card-critical.motion-smoke-enter::after {
+  :root:not([data-motion='no-reduce']) .grade-badge.motion-grade-reveal::after,
+  :root:not([data-motion='no-reduce']) .finding-item.severity-critical.motion-smoke-enter::after,
+  :root:not([data-motion='no-reduce']) .lead-card.lead-card-critical.motion-smoke-enter::after {
     display: none !important;
   }
 }

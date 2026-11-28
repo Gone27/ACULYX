@@ -362,12 +362,14 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
         document.addEventListener('DOMContentLoaded', () => {
           const badge = document.getElementById('grade-badge');
           if (badge) {
-            const obs = new MutationObserver(() => {
-              if (badge.classList.contains('motion-grade-reveal')) {
+            const obs = new MutationObserver((muts) => {
+              const last = muts[muts.length - 1];
+              const prevTokens = (last?.oldValue ?? '').split(/\s+/);
+              if (!prevTokens.includes('motion-grade-reveal') && badge.classList.contains('motion-grade-reveal')) {
                 (window as unknown as { __gradeRevealAdds: number }).__gradeRevealAdds += 1;
               }
             });
-            obs.observe(badge, { attributes: true, attributeFilter: ['class'] });
+            obs.observe(badge, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
           }
           const list = document.getElementById('findings-list');
           if (list) {
@@ -542,6 +544,23 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
       expect(reducedPopup.letter).toBe('none');
       expect(reducedPopup.glint).toBe('none');
       expect(reducedPopup.shuriken).toBe('none');
+
+      // OS prefers-reduced-motion: reduce + data-motion="no-reduce" ("Never reduce") keeps animations enabled
+      await popupPage.emulateMedia({ reducedMotion: 'reduce' });
+      await popupPage.evaluate(() => {
+        document.documentElement.setAttribute('data-motion', 'no-reduce');
+      });
+      const overriddenAnim = await popupPage.evaluate(() => {
+        const shield = document.querySelector('#grade-badge .badge-shield');
+        return shield ? window.getComputedStyle(shield).animationName : 'missing';
+      });
+      expect(overriddenAnim).toBe('shieldGradeSnap');
+      await popupPage.emulateMedia({ reducedMotion: null });
+
+      // Verify corrected sidepanel motion labels in Settings
+      await sidepanelPage.locator('#options-link').click();
+      await expect(sidepanelPage.locator('#sp-setting-motion option[value="always"]')).toHaveText('Always reduce (animations off)');
+      await expect(sidepanelPage.locator('#sp-setting-motion option[value="never"]')).toHaveText('Never reduce (animations on)');
 
       await sidepanelPage.close();
       await popupPage.close();

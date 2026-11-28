@@ -116,3 +116,60 @@ export function attachSvgPingCleanup(svgEl: SVGElement, fallbackMs: number = 800
 
   return remove;
 }
+
+/**
+ * Swaps only the `grade-<x>` class, leaving every other class (notably `motion-grade-reveal`) intact.
+ * Assigning `el.className = ...` on every render wiped the running reveal animation.
+ */
+export function setGradeClass(el: Element, grade: string): void {
+  const target = `grade-${grade}`;
+  for (const c of Array.from(el.classList)) {
+    if (c.startsWith('grade-') && c !== 'grade-badge' && c !== target) {
+      el.classList.remove(c);
+    }
+  }
+  if (!el.classList.contains('grade-badge')) el.classList.add('grade-badge');
+  if (!el.classList.contains(target)) el.classList.add(target);
+}
+
+/**
+ * Stable signature of what the findings teaser will render. Re-rendering an identical list
+ * rebuilds the DOM and kills in-flight entrance animations, so callers skip when it is unchanged.
+ */
+export function findingsSignature(
+  items: ReadonlyArray<{
+    ruleId: string;
+    severity: string;
+    outcome?: string | undefined;
+    evidence?: string | undefined;
+  }>,
+): string {
+  return items.map((f) => `${f.ruleId}:${f.severity}:${f.outcome ?? ''}:${f.evidence ?? ''}`).join('|');
+}
+
+/**
+ * Stable signature of what the sidepanel leads list will render so identical back-to-back updates
+ * do not tear down in-flight card entrance animations.
+ */
+export function leadsSignature(
+  items: ReadonlyArray<{
+    id: string;
+    potential: string;
+    pinned?: boolean | undefined;
+    triageState?: string | undefined;
+    verdict?:
+      | {
+          status?: string | undefined;
+          evidenceStatus?: string | undefined;
+          securityAssessment?: string | undefined;
+        }
+      | undefined;
+  }>,
+): string {
+  return items
+    .map(
+      (l) =>
+        `${l.id}:${l.potential}:${l.pinned === true ? '1' : '0'}:${l.triageState ?? ''}:${l.verdict?.status ?? ''}:${l.verdict?.evidenceStatus ?? ''}:${l.verdict?.securityAssessment ?? ''}`,
+    )
+    .join('|');
+}

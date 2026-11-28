@@ -28,6 +28,8 @@ import {
   recordBoundedSeenId,
   shouldTriggerGradeReveal,
   attachOneShotMotionClass,
+  setGradeClass,
+  findingsSignature,
 } from '../shared/motion';
 
 /* ── DOM element references (asserted non-null at init time) ── */
@@ -60,6 +62,7 @@ let settingsLink:        HTMLAnchorElement;
 
 /** Tracks last animated grade key (`origin|grade`) so refresh updates never replay reveal motion. */
 let lastAnimatedGradeKey = '';
+let lastFindingsSig = '';
 let cancelGradeReveal: (() => void) | null = null;
 let seenFindingOrigin = '';
 const seenFindingKeys = new Set<string>();
@@ -314,7 +317,7 @@ function renderState(state: TabState): void {
   if (state.hops.length === 0 || state.grade === '?') {
     setPopupState('capturing');
     setBadgeState('scanning', '?', 'No security data captured yet');
-    gradeBadge.className = 'grade-badge grade-unknown';
+    setGradeClass(gradeBadge, 'unknown');
     scoreText.textContent = 'Score: No data';
     qualityScoreText.textContent = '';
     gradeBadge.classList.remove('motion-grade-reveal');
@@ -323,7 +326,7 @@ function renderState(state: TabState): void {
   } else {
     setPopupState('results');
     setBadgeState('graded', state.grade, `Security grade ${state.grade}, score ${state.score} of 100`);
-    gradeBadge.className = 'grade-badge grade-' + (state.grade?.toLowerCase() ?? 'unknown');
+    setGradeClass(gradeBadge, state.grade?.toLowerCase() ?? 'unknown');
     popupScanShuriken.toggleAttribute('hidden', true);
     popupScanShuriken.setAttribute('data-scanning', 'false');
 
@@ -399,10 +402,6 @@ function renderCoverage(
 /* ── Top 3 Findings Teaser (Safe text DOM APIs, zero innerHTML) ─── */
 
 function renderFindingsTeaser(findings: Finding[]): void {
-  while (findingsList.firstChild) {
-    findingsList.removeChild(findingsList.firstChild);
-  }
-
   const severityFilter = currentSettings?.severityFilter ?? SEVERITY_ORDER;
   const { visibleFindings } = selectVisibleFindings(
     findings,
@@ -422,6 +421,15 @@ function renderFindingsTeaser(findings: Finding[]): void {
   findingsCountBadge.textContent = infoHardeningCount > 0
     ? `${actionableCount} issues · ${infoHardeningCount} hardening`
     : `${actionableCount} issues`;
+
+  // Skip identical re-renders (popup open triggers two): rebuilding the list cancels entrance animations.
+  const sig = findingsSignature(top3);
+  if (sig === lastFindingsSig && findingsList.childElementCount > 0) return;
+  lastFindingsSig = sig;
+
+  while (findingsList.firstChild) {
+    findingsList.removeChild(findingsList.firstChild);
+  }
 
   if (top3.length === 0) {
     findingsSection.hidden = true;

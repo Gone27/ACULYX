@@ -49,6 +49,7 @@ import {
   recordBoundedSeenId,
   attachOneShotMotionClass,
   attachSvgPingCleanup,
+  leadsSignature,
 } from '../shared/motion';
 import {
   generateNameOnlyWordlist,
@@ -321,6 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const seenLeadCardIds = new Set<string>();
   const seenRadarLeadIds = new Set<string>();
   let seenMotionOrigin = '';
+  let lastLeadsSig = '';
 
   let currentLeads: Lead[] = [];
   let activeChains: Array<{ chain: ChainRule; matchedLeads: Lead[] }> = [];
@@ -1901,11 +1903,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderLeadsList(): void {
+    const filtered = getFilteredLeads();
+    const sig = leadsSignature(filtered);
+    if (sig === lastLeadsSig && (spLeadsList.childElementCount > 0 || (filtered.length === 0 && !spLeadsEmpty.hidden))) {
+      return;
+    }
+    lastLeadsSig = sig;
+
     while (spLeadsList.firstChild) {
       spLeadsList.removeChild(spLeadsList.firstChild);
     }
-
-    const filtered = getFilteredLeads();
 
     if (filtered.length === 0) {
       spLeadsEmpty.hidden = false;

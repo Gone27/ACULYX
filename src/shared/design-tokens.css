@@ -154,13 +154,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-motion='no-reduce']) {
     --sc-duration-fast: 0ms;
     --sc-duration-std:  0ms;
   }
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion='no-reduce']) *,
+  :root:not([data-motion='no-reduce']) *::before,
+  :root:not([data-motion='no-reduce']) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
