@@ -78,20 +78,37 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       // ─── 1. Header Wordmark Verification ───────────────────────────
       const wordmark = sidepanelPage.locator('.header-wordmark');
       await expect(wordmark).toBeVisible();
-      await expect(wordmark).toHaveAttribute('alt', 'ACULYX');
-      const wordmarkBox = await wordmark.boundingBox();
-      expect(wordmarkBox).not.toBeNull();
-      if (wordmarkBox) {
-        expect(wordmarkBox.width).toBeGreaterThanOrEqual(110);
-        expect(wordmarkBox.width).toBeLessThanOrEqual(160);
-      }
+      await expect(wordmark).toHaveAttribute('alt', 'ACULYX — Header & Cookie Security Checker');
+      const wordmarkStats = await wordmark.evaluate((el) => {
+        const img = el as HTMLImageElement;
+        const rect = img.getBoundingClientRect();
+        return {
+          complete: img.complete,
+          currentSrc: img.currentSrc,
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        };
+      });
+      expect(wordmarkStats.complete).toBe(true);
+      expect(wordmarkStats.currentSrc).toContain('aculyx-wordmark');
+      expect(wordmarkStats.currentSrc).toMatch(/\.png($|\?)/);
+      expect(wordmarkStats.naturalWidth).toBe(1024);
+      expect(wordmarkStats.naturalHeight).toBe(395);
+      expect(wordmarkStats.width).toBeGreaterThanOrEqual(160);
+      expect(Math.abs(wordmarkStats.width / wordmarkStats.height - 1024 / 395)).toBeLessThan(0.15);
 
-      // Check collision with right-side header controls
+      // Check collision with right-side / stacked header controls
       const headerActions = sidepanelPage.locator('.header-actions');
       await expect(headerActions).toBeVisible();
       const actionsBox = await headerActions.boundingBox();
-      if (wordmarkBox && actionsBox) {
-        expect(wordmarkBox.x + wordmarkBox.width).toBeLessThanOrEqual(actionsBox.x + 5);
+      if (actionsBox) {
+        const sideBySide = wordmarkStats.x + wordmarkStats.width <= actionsBox.x + 5;
+        const stackedCleanly = wordmarkStats.y + wordmarkStats.height <= actionsBox.y + 5;
+        expect(sideBySide || stackedCleanly).toBe(true);
       }
 
       // ─── 2. Font Hierarchy & Bundled OFL Font Loading ───────────────
@@ -578,16 +595,27 @@ test.describe('Sidepanel UI Redesign E2E Suite', () => {
       const checkWordmarkAndCapture = async () => {
         const wm = sidepanelPage.locator('.header-wordmark');
         await expect(wm).toBeVisible();
-        await expect(wm).toHaveAttribute('alt', 'ACULYX');
+        await expect(wm).toHaveAttribute('alt', 'ACULYX — Header & Cookie Security Checker');
         const wmStats = await wm.evaluate((el) => {
           const img = el as HTMLImageElement;
           const rect = img.getBoundingClientRect();
-          return { complete: img.complete, naturalWidth: img.naturalWidth, width: rect.width, height: rect.height };
+          return {
+            complete: img.complete,
+            currentSrc: img.currentSrc,
+            naturalWidth: img.naturalWidth,
+            naturalHeight: img.naturalHeight,
+            width: rect.width,
+            height: rect.height,
+          };
         });
         expect(wmStats.complete).toBe(true);
-        expect(wmStats.naturalWidth).toBeGreaterThan(0);
+        expect(wmStats.currentSrc).toContain('aculyx-wordmark');
+        expect(wmStats.currentSrc).toMatch(/\.png($|\?)/);
+        expect(wmStats.naturalWidth).toBe(1024);
+        expect(wmStats.naturalHeight).toBe(395);
         expect(wmStats.width).toBeGreaterThan(0);
         expect(wmStats.height).toBeGreaterThan(0);
+        expect(Math.abs(wmStats.width / wmStats.height - 1024 / 395)).toBeLessThan(0.15);
         await expect(sidepanelPage.locator('#sp-capture-bar')).toBeVisible();
       };
       await checkWordmarkAndCapture();

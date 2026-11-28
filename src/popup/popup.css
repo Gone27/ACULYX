@@ -82,9 +82,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-card);
+  background: #01010a;
   flex-shrink: 0;
 }
 
@@ -92,11 +93,15 @@ body {
   display: flex;
   align-items: center;
   min-width: 0;
+  background: #01010a;
+  border-radius: 6px;
 }
 
 .popup-header .header-wordmark {
-  width: 160px;
-  height: 36px;
+  width: 210px;
+  height: auto;
+  max-height: 88px;
+  aspect-ratio: 1024 / 395;
   max-width: 100%;
   object-fit: contain;
   display: block;
@@ -105,13 +110,13 @@ body {
 
 @media (max-width: 340px) {
   .popup-header .header-wordmark {
-    width: 132px;
+    width: 180px;
     height: auto;
   }
 }
 
 .settings-icon {
-  color: var(--text-muted);
+  color: #b4aed0;
   text-decoration: none;
   font-size: 16px;
   padding: 4px;
@@ -123,8 +128,8 @@ body {
 }
 
 .settings-icon:hover {
-  color: var(--text);
-  background: var(--bg-hover);
+  color: #ffffff;
+  background: #181528;
 }
 
 /* ── Segmented Control Nav ──────────────────────────────────── */
@@ -159,10 +164,10 @@ body {
 }
 
 .nav-segment.active {
-  color: #ffffff;
+  color: var(--text);
   background: var(--bg-raised);
   border-color: var(--border);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 /* ── Status Card (Grade, Score, Origin) ─────────────────────── */
@@ -303,6 +308,7 @@ body {
   border-radius: var(--radius);
   font-size: 10px;
   color: var(--text-muted);
+  flex-shrink: 0;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;

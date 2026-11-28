@@ -42,19 +42,24 @@ body {
 
 /* ── Header ── */
 .sidepanel-header {
-  padding: 10px 14px;
-  background: linear-gradient(180deg, #100E1C 0%, #070611 100%);
+  padding: 8px 14px;
+  background: #01010a;
   border-bottom: 1px solid var(--border);
   border-image: var(--sc-border-glint) 1;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 8px 12px;
 }
 
 .header-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+  background: #01010a;
+  border-radius: 6px;
 }
 
 .brand-katana-icon {
@@ -63,20 +68,40 @@ body {
 }
 
 .header-wordmark {
-  width: 156px;
-  height: 35px;
-  max-height: 36px;
-  max-width: 160px;
+  width: 224px;
+  height: auto;
+  max-height: 96px;
+  aspect-ratio: 1024 / 395;
+  max-width: 100%;
   object-fit: contain;
   display: block;
+  flex-shrink: 0;
+}
+
+@media (max-width: 460px) {
+  .sidepanel-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px 12px;
+  }
+  .header-main {
+    justify-content: space-between;
+    width: 100%;
+  }
+  .header-wordmark {
+    width: 204px;
+    height: auto;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 @media (max-width: 340px) {
-  .tier-badge {
-    display: none;
-  }
   .header-wordmark {
-    width: 128px;
+    width: 176px;
     height: auto;
   }
 }
@@ -113,6 +138,21 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.sidepanel-header .icon-btn {
+  color: #cbd5e1;
+}
+
+.sidepanel-header .icon-btn:hover {
+  background: #1a162d;
+  color: #ffffff;
+}
+
+.sidepanel-header .kbd-badge {
+  background: #141122;
+  border-color: #2f294a;
+  color: #cbd5e1;
 }
 
 .icon-btn {

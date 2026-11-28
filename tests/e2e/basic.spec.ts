@@ -303,16 +303,26 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       await popupPage.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
       const popupWordmark = popupPage.locator('.header-wordmark');
       await expect(popupWordmark).toBeVisible();
-      await expect(popupWordmark).toHaveAttribute('alt', 'ACULYX');
+      await expect(popupWordmark).toHaveAttribute('alt', 'ACULYX — Header & Cookie Security Checker');
       const wordmarkMetrics = await popupWordmark.evaluate((el) => {
         const img = el as HTMLImageElement;
         const rect = img.getBoundingClientRect();
-        return { complete: img.complete, naturalWidth: img.naturalWidth, width: rect.width, height: rect.height };
+        return {
+          complete: img.complete,
+          currentSrc: img.currentSrc,
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          width: rect.width,
+          height: rect.height,
+        };
       });
       expect(wordmarkMetrics.complete).toBe(true);
-      expect(wordmarkMetrics.naturalWidth).toBeGreaterThan(0);
-      expect(wordmarkMetrics.width).toBeGreaterThan(0);
-      expect(wordmarkMetrics.height).toBeGreaterThan(0);
+      expect(wordmarkMetrics.currentSrc).toContain('aculyx-wordmark');
+      expect(wordmarkMetrics.currentSrc).toMatch(/\.png($|\?)/);
+      expect(wordmarkMetrics.naturalWidth).toBe(1024);
+      expect(wordmarkMetrics.naturalHeight).toBe(395);
+      expect(wordmarkMetrics.width).toBeGreaterThanOrEqual(160);
+      expect(Math.abs(wordmarkMetrics.width / wordmarkMetrics.height - 1024 / 395)).toBeLessThan(0.15);
       await expect(popupPage.locator('#settings-link')).toBeVisible();
       await expect(popupPage.locator('#open-graph-btn')).toBeAttached();
       await popupPage.close();
@@ -488,13 +498,26 @@ test.describe('Extension Loading & Storage Redaction E2E', () => {
       // Verify header and logotype
       const wordmark = popupPage.locator('.header-wordmark');
       await expect(wordmark).toBeVisible();
-      await expect(wordmark).toHaveAttribute('alt', 'ACULYX');
-      const wordmarkBox = await wordmark.boundingBox();
-      expect(wordmarkBox).not.toBeNull();
-      expect(wordmarkBox?.width ?? 0).toBeGreaterThan(0);
-      expect(wordmarkBox?.height ?? 0).toBeGreaterThan(0);
-      const naturalWidth = await wordmark.evaluate((el) => (el as HTMLImageElement).naturalWidth);
-      expect(naturalWidth).toBeGreaterThan(0);
+      await expect(wordmark).toHaveAttribute('alt', 'ACULYX — Header & Cookie Security Checker');
+      const wordmarkStats = await wordmark.evaluate((el) => {
+        const img = el as HTMLImageElement;
+        const rect = img.getBoundingClientRect();
+        return {
+          complete: img.complete,
+          currentSrc: img.currentSrc,
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          width: rect.width,
+          height: rect.height,
+        };
+      });
+      expect(wordmarkStats.complete).toBe(true);
+      expect(wordmarkStats.currentSrc).toContain('aculyx-wordmark');
+      expect(wordmarkStats.currentSrc).toMatch(/\.png($|\?)/);
+      expect(wordmarkStats.naturalWidth).toBe(1024);
+      expect(wordmarkStats.naturalHeight).toBe(395);
+      expect(wordmarkStats.width).toBeGreaterThanOrEqual(160);
+      expect(Math.abs(wordmarkStats.width / wordmarkStats.height - 1024 / 395)).toBeLessThan(0.15);
 
       // Verify initial tab roles and aria-selected state
       const hygieneTab = popupPage.locator('#tab-btn-hygiene');

@@ -110,8 +110,8 @@ describe('ACULYX UI Fix Plan — Sidepanel Verification', () => {
   });
 
   describe('3. Header Branding & Typography', () => {
-    it('embeds brand wordmark in the sidepanel header', () => {
-      expect(html).toMatch(/<img class="header-wordmark"\s+src="\.\.\/assets\/aculyx-(header-)?wordmark\.(svg|png)"\s+alt="ACULYX"/);
+    it('embeds original brand wordmark PNG in the sidepanel header', () => {
+      expect(html).toMatch(/<img class="header-wordmark"\s+src="\.\.\/assets\/aculyx-wordmark\.png"\s+alt="ACULYX — Header &amp; Cookie Security Checker"/);
     });
 
     it('defines .header-wordmark styles in sidepanel.css', () => {

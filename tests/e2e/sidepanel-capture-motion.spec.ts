@@ -259,18 +259,55 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
       await sidepanelPage.waitForTimeout(100);
       await expect(sidepanelPage.locator('#sp-capture-bar')).toHaveAttribute('data-capture-state', 'restricted');
 
-      // Wordmark branding check across 380px and 320px compact viewports
-      for (const vp of [{ width: 380, height: 680 }, { width: 320, height: 600 }]) {
-        await sidepanelPage.setViewportSize(vp);
-        const wmStats = await sidepanelPage.locator('.header-wordmark').evaluate((el) => {
-          const img = el as HTMLImageElement;
-          const rect = img.getBoundingClientRect();
-          return { complete: img.complete, naturalWidth: img.naturalWidth, width: rect.width, height: rect.height };
+      // Wordmark branding check across 740px, 380px, and 320px viewports (asserting original 1024x395 PNG)
+      const screenshotOutDir = path.resolve(__dirname, '../../test-results/wordmark-layout');
+      fs.mkdirSync(screenshotOutDir, { recursive: true });
+      for (const vp of [
+        { width: 740, height: 720, expectStacked: false, snap: 'sidepanel-740px.png' },
+        { width: 380, height: 680, expectStacked: true, snap: 'sidepanel-380px.png' },
+        { width: 320, height: 600, expectStacked: true, snap: 'sidepanel-320px.png' },
+      ]) {
+        await sidepanelPage.setViewportSize({ width: vp.width, height: vp.height });
+        const wmStats = await sidepanelPage.evaluate(() => {
+          const img = document.querySelector<HTMLImageElement>('.header-wordmark');
+          const actions = document.querySelector<HTMLElement>('.header-actions');
+          const imgRect = img?.getBoundingClientRect();
+          const actRect = actions?.getBoundingClientRect();
+          return {
+            complete: img?.complete ?? false,
+            currentSrc: img?.currentSrc ?? '',
+            alt: img?.getAttribute('alt') ?? '',
+            naturalWidth: img?.naturalWidth ?? 0,
+            naturalHeight: img?.naturalHeight ?? 0,
+            width: imgRect?.width ?? 0,
+            height: imgRect?.height ?? 0,
+            imgRight: imgRect?.right ?? 0,
+            imgBottom: imgRect?.bottom ?? 0,
+            actLeft: actRect?.left ?? 0,
+            actTop: actRect?.top ?? 0,
+            noHScroll: document.documentElement.scrollWidth <= window.innerWidth + 1,
+          };
         });
         expect(wmStats.complete).toBe(true);
-        expect(wmStats.naturalWidth).toBeGreaterThan(0);
-        expect(wmStats.width).toBeGreaterThan(0);
-        expect(wmStats.height).toBeGreaterThan(0);
+        expect(wmStats.alt).toBe('ACULYX — Header & Cookie Security Checker');
+        expect(wmStats.currentSrc).toContain('aculyx-wordmark');
+        expect(wmStats.currentSrc).toMatch(/\.png($|\?)/);
+        expect(wmStats.naturalWidth).toBe(1024);
+        expect(wmStats.naturalHeight).toBe(395);
+        expect(wmStats.width).toBeGreaterThanOrEqual(160);
+        expect(Math.abs(wmStats.width / wmStats.height - 1024 / 395)).toBeLessThan(0.15);
+        expect(wmStats.noHScroll).toBe(true);
+        if (vp.expectStacked) {
+          expect(wmStats.imgBottom).toBeLessThanOrEqual(wmStats.actTop + 2);
+        } else {
+          expect(wmStats.imgRight).toBeLessThanOrEqual(wmStats.actLeft + 2);
+        }
+        await expect(sidepanelPage.locator('#sp-capture-bar')).toBeVisible();
+        await sidepanelPage.evaluate(() => {
+          const ov = document.getElementById('view-overview');
+          if (ov) ov.scrollTop = 0;
+        });
+        await sidepanelPage.screenshot({ path: path.join(screenshotOutDir, vp.snap) });
       }
 
       await sidepanelPage.close();
@@ -365,13 +402,20 @@ test.describe('Appendix E: Branding, Sidepanel Capture CTA, and Ninja Motion', (
       const initialMetrics = await popupPage.evaluate(() => {
         const w = window as unknown as { __gradeRevealAdds: number; __smokeAdds: number };
         const img = document.querySelector<HTMLImageElement>('.header-wordmark');
+        const rect = img?.getBoundingClientRect();
         return {
           gradeReveals: w.__gradeRevealAdds,
           smokeAdds: w.__smokeAdds,
-          wordmarkLoaded: img ? img.complete && img.naturalWidth > 0 : false,
+          wordmarkLoaded: img ? img.complete && img.naturalWidth === 1024 && img.naturalHeight === 395 : false,
+          currentSrc: img?.currentSrc ?? '',
+          ratio: rect && rect.height > 0 ? rect.width / rect.height : 0,
         };
       });
       expect(initialMetrics.wordmarkLoaded).toBe(true);
+      expect(initialMetrics.currentSrc).toContain('aculyx-wordmark');
+      expect(initialMetrics.currentSrc).toMatch(/\.png($|\?)/);
+      expect(Math.abs(initialMetrics.ratio - 1024 / 395)).toBeLessThan(0.15);
+      await popupPage.screenshot({ path: path.resolve(__dirname, '../../test-results/wordmark-layout/popup-380px.png') });
       expect(initialMetrics.gradeReveals).toBe(1);
       expect(initialMetrics.smokeAdds).toBeGreaterThan(0);
       expect(initialMetrics.smokeAdds).toBeLessThanOrEqual(8);
